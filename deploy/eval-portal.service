@@ -1,0 +1,22 @@
+[Unit]
+Description=HarmonyGames Eval Portal
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+User=evalportal
+Group=evalportal
+SupplementaryGroups=docker
+WorkingDirectory=/opt/eval-portal
+Environment=PORTAL_ENV_FILE=/opt/eval-portal/.env
+ExecStart=/opt/eval-portal/.venv/bin/python -m server.main
+Restart=always
+RestartSec=5
+# Reviews on boat boxes are re-attached after a restart; shutdown itself takes ~3 s.
+TimeoutStopSec=20
+# 50 reviews, their proxied model calls and 50 open chat pages need well over the default 1024 files.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

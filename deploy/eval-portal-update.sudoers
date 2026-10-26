@@ -1,0 +1,2 @@
+# The portal (user evalportal) may start the eval-file update job and nothing else as root.
+evalportal ALL=(root) NOPASSWD: /usr/bin/systemctl start --no-block eval-portal-update.service

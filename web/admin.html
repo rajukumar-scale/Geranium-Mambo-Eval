@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Original Conference Eval Portal · Admin</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("evp_theme") === "dark" ? "dark" : "light";</script>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+<body>
+  <div id="login" class="center hidden">
+    <button class="ghost theme-float" data-theme-toggle></button>
+    <form class="card" id="login-form">
+      <h1>Admin sign-in</h1>
+      <p class="muted">Original Conference Eval Portal</p>
+      <div id="login-error" class="error hidden"></div>
+      <div class="field"><label>Username</label><input id="email" autocomplete="username" autocapitalize="off" required></div>
+      <div class="field"><label>Password</label><input id="password" type="password" required></div>
+      <button class="primary" style="width:100%">Sign in</button>
+    </form>
+  </div>
+
+  <div id="invite" class="center hidden">
+    <form class="card" id="invite-form">
+      <h1>Set your admin password</h1>
+      <p class="muted">Original Conference Eval Portal</p>
+      <div id="invite-error" class="error hidden"></div>
+      <div class="field"><label>New password (10+ characters)</label><input id="pw1" type="password" minlength="10" required></div>
+      <div class="field"><label>Repeat it</label><input id="pw2" type="password" minlength="10" required></div>
+      <button class="primary" style="width:100%">Save and sign in</button>
+    </form>
+  </div>
+
+  <div id="app" class="app admin-app hidden">
+    <div class="topbar admin-top">
+      <div class="title">Original Conference Eval Portal</div>
+      <div class="view-switch" id="view-switch" role="group" aria-label="Switch page">
+        <button type="button" class="" data-view="chat">Chat view</button><button type="button" class="on" data-view="admin">Admin</button><button type="button" class="" data-view="cost">Cost</button></div>
+      <nav class="admin-nav" aria-label="Admin tools">
+        <button class="navbtn" id="spend-btn">Spend</button>
+        <button class="navbtn" id="blocks-btn">Blocked</button>
+        <button class="navbtn" id="broadcast-btn">Broadcast</button>
+        <button class="navbtn" id="status-btn">Status</button>
+        <button class="navbtn" id="evalfiles-btn">Eval files</button>
+        <button class="navbtn hidden" id="admins-btn">Admins</button>
+      </nav>
+      <div class="spacer"></div>
+      <button class="ghost" data-theme-toggle></button>
+      <span id="whoami" class="whoami"></span>
+      <button class="ghost" id="logout">Sign out</button>
+    </div>
+    <div class="statusbar">
+      <span id="stats" class="sb-stats"></span>
+      <div class="sb-right">
+        <span id="slack" class="slack-status"></span>
+        <button id="budget-btn" class="budget-chip hidden" title="The LiteLLM key's budget"></button>
+      </div>
+    </div>
+    <div class="body" style="grid-template-columns: 330px 1fr">
+      <aside class="side admin-list">
+        <section class="funnel" id="funnel" data-sec="funnel">
+          <h3><button type="button" class="sec-toggle" aria-expanded="true"><span id="funnel-title">Where they are now</span><span class="chev" aria-hidden="true">▾</span></button></h3>
+          <div class="sec-body"><div id="funnel-rows"></div>
+            <div class="funnel-note" id="funnel-note">Each person counted once, at where they are now: their latest review or edit. Hover a row for names.</div></div>
+        </section>
+        <div id="list-tools" class="list-tools"></div>
+        <div id="funnel-pick" class="funnel-pick hidden"></div>
+        <div id="chats"></div>
+      </aside>
+      <main class="main" id="detail" style="grid-template-rows: auto 1fr auto">
+        <div id="detail-head" class="runbar" style="border-top:0;border-bottom:1px solid var(--line)">
+          <span class="muted">Select a chat. Chats waiting for an admin have a red ● /admin badge; tap the red "/admin open" filter to see only those.</span>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="composer hidden" id="composer">
+          <div class="inner">
+            <textarea id="reply" rows="2" placeholder="Reply to the user as Admin (Markdown). Enter to send, Shift+Enter for a new line."></textarea>
+            <div class="actions">
+              <div class="hint" id="detail-hint"></div>
+              <button id="resolve">Mark resolved</button>
+              <button class="primary" id="send">Send as Admin</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="/static/common.js"></script>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

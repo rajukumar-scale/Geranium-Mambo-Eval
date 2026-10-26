@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Original Conference Eval Portal</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("evp_theme") === "dark" ? "dark" : "light";</script>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+</head>
+<body>
+  <div id="login" class="center hidden">
+    <button class="ghost theme-float" data-theme-toggle></button>
+    <form class="card" id="login-form" autocomplete="on">
+      <h1>Original Conference Eval Portal</h1>
+      <p class="muted">Run the evals on your task before you submit.</p>
+      <div id="login-error" class="error hidden"></div>
+      <div class="field">
+        <label for="identifier">Email or Outlier ID</label>
+        <input id="identifier" name="identifier" placeholder="you@outlier.ai or 24-character ID" required>
+      </div>
+      <div class="field">
+        <label for="attempt">Attempt ID</label>
+        <input id="attempt" name="attempt" class="mono" placeholder="e.g. 6acc9e7489e26d6522c1978c" required>
+      </div>
+      <div class="field hidden" id="pw-field">
+        <label for="admin-pw">Admin password</label>
+        <input id="admin-pw" name="admin-pw" type="password" autocomplete="current-password">
+      </div>
+      <button class="primary" id="login-btn" style="width:100%">Continue</button>
+      <div class="note">Use the attempt ID from your task page. It works for a task you're still working on, too.
+        We check that it belongs to your account.</div>
+      <div class="note hidden" id="login-back"><a href="#">← Back to your chat</a></div>
+    </form>
+  </div>
+
+  <div id="disabled" class="center hidden">
+    <button class="ghost theme-float" data-theme-toggle></button>
+    <div class="card">
+      <h1>Access disabled</h1>
+      <p class="muted" id="disabled-text">An admin has disabled your access to the Original Conference Eval Portal.</p>
+      <p class="muted" style="font-size:14px">Your chats and pass screens are kept. If you think this is a mistake, contact your project team.</p>
+      <button id="disabled-out" style="width:100%">Sign out</button>
+    </div>
+  </div>
+
+  <div id="app" class="app hidden">
+    <div class="topbar">
+      <button class="ghost" id="menu" title="Menu">☰</button>
+      <div class="title">Original Conference Eval Portal</div>
+      <div class="view-switch hidden" id="view-switch" role="group" aria-label="Switch page">
+        <button type="button" class="on" data-view="chat">Chat view</button><button type="button" class="" data-view="admin">Admin</button><button type="button" class="" data-view="cost">Cost</button></div>
+      <span class="chip" id="chip-attempt"></span>
+      <span class="chip" id="chip-task"></span>
+      <button type="button" class="chip date-chip hidden" id="chip-date" title="The task's date: which universe every review reads"></button>
+      <span class="chip hidden" id="chip-broadcast"></span>
+      <div class="spacer"></div>
+      <span class="muted" id="limits" style="font-size:13px"></span>
+      <button class="ghost" data-theme-toggle></button>
+      <button id="guide-btn">Guide</button>
+      <button class="ghost" id="logout">Sign out</button>
+    </div>
+    <div class="spendbar hidden" id="spendbar" title="Click for details">
+      <span class="spend-who" id="spend-who">Your spend</span>
+      <span class="spend-meter"><span id="spend-fill"></span></span>
+      <b id="spend-amount">$0.00</b><span class="spend-of" id="spend-of">of $500</span>
+      <span class="spend-rule" id="spend-rule"></span>
+    </div>
+    <div class="body">
+      <aside class="side" id="side">
+        <section class="side-sec" data-sec="chats">
+          <h3><button type="button" class="sec-toggle" aria-expanded="true"><span id="history-title">Your chats</span><span class="chev" aria-hidden="true">▾</span></button></h3>
+          <div class="sec-body">
+            <div id="history-tools" class="list-tools hidden"></div>
+            <div id="history" class="history-list muted" style="font-size:14px">Loading…</div>
+            <button class="cmd" id="open-other" style="margin-top:6px"><b>+ Open another attempt</b><span>Each attempt has its own chat</span></button>
+          </div>
+        </section>
+        <section class="side-sec" data-sec="reports">
+          <h3><button type="button" class="sec-toggle" aria-expanded="true">Reports<span class="chev" aria-hidden="true">▾</span></button></h3>
+          <div class="sec-body"><div id="reports" class="muted" style="font-size:14px">None yet</div></div>
+        </section>
+        <section class="side-sec" data-sec="passes">
+          <h3><button type="button" class="sec-toggle" aria-expanded="true">Passes<span class="chev" aria-hidden="true">▾</span></button></h3>
+          <div class="sec-body"><div id="proofs" class="muted" style="font-size:14px">None yet</div></div>
+        </section>
+        <section class="side-sec" data-sec="inputs">
+          <h3><button type="button" class="sec-toggle" aria-expanded="true">Saved inputs<span class="chev" aria-hidden="true">▾</span></button></h3>
+          <div class="sec-body"><div id="inputs" class="muted" style="font-size:14px">None yet</div></div>
+        </section>
+      </aside>
+      <main class="main">
+        <div class="messages" id="messages"></div>
+        <div class="runbar hidden" id="runbar">
+          <div class="row"><div class="spinner"></div><b id="run-title"></b><span class="muted" id="run-elapsed"></span>
+            <span class="latest" id="run-latest"></span>
+            <button class="ghost" id="run-toggle">Activity</button><button class="danger" id="run-cancel">Cancel</button></div>
+          <div class="run-progress hidden" id="run-progress" role="progressbar" aria-label="Estimated progress" aria-valuemin="0" aria-valuemax="100"><span id="run-progress-fill"></span></div>
+          <div class="activity hidden" id="activity"></div>
+        </div>
+        <div class="blocked-note hidden" id="blocked-note"></div>
+        <div class="composer">
+          <div class="inner">
+            <div id="attachments"></div>
+            <div class="slash hidden" id="slash" role="listbox"></div>
+            <textarea id="input" rows="2" placeholder="Paste inputs, ask a question, or type / for commands"></textarea>
+            <div class="actions">
+              <input type="file" id="file" multiple class="hidden">
+              <button id="attach" title="Attach files">📎 Attach</button>
+              <div class="hint">Enter to send · Shift+Enter for a new line · reviews take about 20–40 minutes</div>
+              <button class="primary" id="send">Send</button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="/static/common.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

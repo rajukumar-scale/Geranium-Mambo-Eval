@@ -1,0 +1,72 @@
+"""Review progress: which step a running review has reached, and how far through a run each step
+usually starts, so the chat page can show an estimated % and time left.
+
+A review doesn't report its own progress, but every eval runs its checker tools in a fixed order
+(save the inputs, the main review, the deep recheck passes, the fix-check passes for /rubric, the
+report contract check), so the step a run has reached is a much better guide than the clock alone.
+"""
+
+import json
+import statistics
+import time
+
+from . import db
+
+# Measured on the live runs (2026-10-15): the median length of a finished review and the median
+# fraction of the run at which each step starts. Replaced by the recorded step times once enough
+# runs have them.
+DEFAULTS = {
+    "injection": {"minutes": 12.7, "marks": {"inputs": 0.026, "gate": 0.768}},
+    "prompt": {"minutes": 32.7, "marks": {"inputs": 0.009, "gate": 0.018, "recheck": 0.479, "final": 0.941}},
+    "hardness": {"minutes": 6.4, "marks": {"inputs": 0.048, "final": 0.633}},
+    "oe": {"minutes": 22.1, "marks": {"inputs": 0.019, "recheck": 0.603, "final": 0.634}},
+    "rubric": {"minutes": 22.1, "marks": {"inputs": 0.013, "recheck": 0.162, "fixcheck": 0.558, "final": 0.886}},
+}
+MIN_RUNS = 5  # recorded runs needed before they replace the defaults
+_cache = {}  # command -> (expires, calibration)
+
+
+def step_of(block):
+    """The step a top-level tool call starts, or None."""
+    if block.get("type") != "tool_use":
+        return None
+    args = block.get("input") or {}
+    if block.get("name") == "Bash":
+        command = args.get("command") or ""
+        if "hg_report_contract" in command:
+            return "final"
+        if "hg_injection_gate" in command:
+            return "gate"
+        if "hg_store_input" in command:
+            return "inputs"
+    elif block.get("name") in ("Agent", "Task"):
+        description = (args.get("description") or "").lower()
+        if description.startswith("fix-check"):
+            return "fixcheck"
+        if "recheck" in description:
+            return "recheck"
+    return None
+
+
+def calibration(command):
+    """{minutes, marks} for a review command: from the last finished runs with recorded step times,
+    or the measured defaults."""
+    if command not in DEFAULTS:
+        return None
+    hit = _cache.get(command)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    runs = db.q("select started_at, finished_at, milestones from runs where kind='review' and command=? and status='done' "
+                "and report_stage is not null and coalesce(continuation,0)=0 and coalesce(loadtest,0)=0 "
+                "and milestones is not null and finished_at>started_at order by finished_at desc limit 25", (command,))
+    result = DEFAULTS[command]
+    if len(runs) >= MIN_RUNS:
+        fractions = {}
+        for run in runs:
+            length = run["finished_at"] - run["started_at"]
+            for step, at in json.loads(run["milestones"]).items():
+                fractions.setdefault(step, []).append(min(1.0, max(0.0, (at - run["started_at"]) / length)))
+        result = {"minutes": round(statistics.median((r["finished_at"] - r["started_at"]) / 60 for r in runs), 1),
+                  "marks": {s: round(statistics.median(v), 3) for s, v in fractions.items() if len(v) * 3 >= len(runs)}}
+    _cache[command] = (time.time() + 600, result)
+    return result

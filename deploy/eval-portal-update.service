@@ -1,0 +1,9 @@
+[Unit]
+Description=Eval portal: update the eval files chosen on the admin page
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/eval-portal/deploy/update_job.sh
+# A universe download plus the box-image rebuild can take most of an hour.
+TimeoutStartSec=4h

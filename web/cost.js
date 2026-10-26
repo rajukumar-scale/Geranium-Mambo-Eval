@@ -1,0 +1,355 @@
+// Admin Cost page: what Atlas Commercial spends on models (every key) per day, per submitted task and per contributor.
+// Charts follow the dataviz rules: columns <= 24px with a 4px rounded top and a 2px gap between stacked parts,
+// hairline grid, one axis, a legend for two series (none for one), values only on the peak and today,
+// a tooltip on hover and keyboard focus (textContent only), and a table view. Colours are validated per mode.
+
+const C = { days: +(localStorage.getItem("evp_cost_days") || 14), view: localStorage.getItem("evp_cost_view") || "both", data: null, sort: {} };
+// What the page counts: evals (portal reviews + the old in-task sandbox, where the evals ran before the portal), the platform's
+// task runs (Agent Runner / pre-check / verifier runs + the hint pipeline), or both. Every tile, chart and table follows it.
+const VIEWS = { evals: { label: "Evals", parts: ["sandbox", "portal"] }, runs: { label: "Task runs", parts: ["runs", "hint"] },
+                both: { label: "Evals + task runs", parts: ["runs", "sandbox", "hint", "portal"] } };
+const SERIES = [{ key: "runs", label: "Task runs", cls: "s-runs" }, { key: "hint", label: "Hint pipeline", cls: "s-hint" },
+                { key: "sandbox", label: "In-task sandbox (evals)", cls: "s-sandbox" }, { key: "portal", label: "Portal reviews (evals)", cls: "s-untagged" }];
+const inView = k => VIEWS[C.view].parts.includes(k);
+const median = v => { const s = v.slice().sort((a, b) => a - b), m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null; };
+// The report re-totalled for the chosen view.
+function viewOf(c) {
+  const rowTotal = r => (inView("runs") ? r.agent_runs || 0 : 0) + (inView("sandbox") ? r.sandbox || 0 : 0) + (inView("portal") ? r.portal || 0 : 0);
+  const daily = c.daily.map(d => ({ ...d, total: SERIES.reduce((t, x) => t + (inView(x.key) ? d[x.key] || 0 : 0), 0) }));
+  const tasks = c.tasks.map(t => ({ ...t, total: rowTotal(t) }));
+  const people = c.people.map(p => ({ ...p, total: rowTotal(p), per_task: p.tasks_submitted ? rowTotal(p) / p.tasks_submitted : null }));
+  const totals = tasks.map(t => t.total), cbDays = daily.reduce((n, d) => n + d.active_cbs, 0), total = daily.reduce((n, d) => n + d.total, 0);
+  return { ...c, daily, tasks, people, summary: { ...c.summary, total, per_task_median: median(totals),
+    per_task_mean: totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : null, per_cb_day: cbDays ? total / cbDays : null } };
+}
+const usd = (v, d = 0) => "$" + Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const kUsd = v => (v >= 1000 ? `$${+(v / 1000).toFixed(1)}K` : `$${Math.round(v)}`);
+const utcDay = (t, opts) => new Date(t * 1000).toLocaleDateString("en-US", { timeZone: "UTC", ...opts });
+const longDay = t => utcDay(t, { weekday: "short", month: "short", day: "numeric" });
+const when = t => new Date(t * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+async function load(refresh = false) {
+  document.querySelectorAll("#range [data-days]").forEach(b => b.classList.toggle("on", +b.dataset.days === C.days));
+  $("#app").classList.add("refetching");  // keep the last render, dimmed, while reloading
+  $("#asof").textContent = "Loading…";
+  try {
+    C.data = await api(`/api/admin/cost?days=${C.days}${refresh ? "&refresh=1" : ""}`);
+  } catch (err) {
+    if (err.status === 401 || err.status === 403) { location.href = "/admin"; return; }
+    $("#asof").textContent = "";
+    $("#notes").innerHTML = `<div class="error">Couldn't load the cost data: ${esc(err.message)}</div>`;
+    return;
+  } finally {
+    $("#app").classList.remove("refetching");
+  }
+  render();
+}
+
+function render() {
+  const { budget: b = {} } = C.data;
+  let c = C.data.cost || {};
+  $("#asof").textContent = c.fetched_at ? `Data as of ${when(c.fetched_at)} (${fmtAgo(c.fetched_at)}) · refreshes every 10 min` : "";
+  const notes = [];
+  if (c.error) notes.push(c.error);
+  if (c.stale) notes.push(`Couldn't refresh just now (${c.stale}); showing the last figures.`);
+  const cv = c.coverage || {}, runsShown = C.view !== "evals";  // the task-run logging gap doesn't affect eval figures
+  if (runsShown && cv.runs && cv.pct != null && cv.pct < 80) notes.push(`Task-run figures may be too low: of the ${fmtInt(cv.runs)} task runs in the last ${cv.days} days' submissions, only ${fmtInt(cv.logged)} (${cv.pct}%) have any spend in LiteLLM's log or SMIG's usage records. The runs happened (their IDs are in the submissions), so the rest of their spend is missing from both.`);
+  if (runsShown && b.log_gap) notes.push(`Neither LiteLLM nor SMIG has recorded this portal's key since ${when(b.log_gap.since)}, although the portal has made ${fmtInt(b.log_gap.portal_calls)} calls since (about ${usd(b.log_gap.portal_usd)} by its own records). Portal reviews on this page come from the portal's own records, so they're unaffected; the key's budget figure may be under-counting.`);
+  // Portal runs before the proxy tagged its calls (2026-10-26 20:00 UTC) are priced at list, not at SMIG's billed cost.
+  const est = (c.summary || {}).portal_estimated;
+  const info = est > 0 && C.view !== "runs" ? `Portal reviews before Oct 26, 20:00 UTC (${usd(est)} in this range) are the portal's list-price estimate, about 40% above what's billed; later reviews are SMIG's billed cost.` : "";
+  $("#notes").innerHTML = notes.map(n => `<div class="error">${esc(n)}</div>`).join("") + (info ? `<p class="muted">${esc(info)}</p>` : "");
+  if (c.error) return;
+  document.querySelectorAll("#view [data-view-pick]").forEach(x => x.classList.toggle("on", x.dataset.viewPick === C.view));
+  C.shown = viewOf(c);
+  c = C.shown;
+  renderTiles(c, b);
+  $("#daily-card").innerHTML = dailyCard(c, b);
+  $("#pertask-card").innerHTML = perTaskCard(c);
+  $("#percb-card").innerHTML = perCbCard(c);
+  renderTable("tasks");
+  renderTable("people");
+  wireCharts();
+  const q = c.queries || {};
+  $("#foot").innerHTML = `<b>How it's counted.</b> UTC days. <b>Task runs</b> are the platform's Agent Runner, pre-check and verifier runs on
+    the HG4 env, from LiteLLM's request log and SMIG's usage records (most calls go through SMIG since Oct 16) on every key tagged with the Atlas Commercial project (mostly <span class="mono">pub-mcp-commercial</span>);
+    a run counts for a task and contributor when its run ID is in one of their submitted attempts, or when it was launched from the task itself
+    (run named after the task's pipeline node); earlier sandbox-viewer runs can't be tied to a task and only show in the daily totals. <b>In-task sandbox</b> is the old in-task chat
+    (<span class="mono">${esc(b.key_alias || "")}</span>), <b>hint pipeline</b> the autohint runs. Other teams' work that carries the project tag
+    (CoopBench, checkpoint evals) is left out. <b>Portal reviews</b> come from this portal's own records: SMIG's billed cost per run from Oct 26, 20:00 UTC, the list-price estimate before that. A <b>submitted task</b> is a contributor's
+    submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is its task runs since it started plus the portal reviews run on it. Sources:
+    <a href="${esc(q.daily || "#")}" target="_blank" rel="noopener">per day</a> ·
+    <a href="${esc(q.tasks || "#")}" target="_blank" rel="noopener">per task</a> ·
+    <a href="${esc(q.people || "#")}" target="_blank" rel="noopener">per contributor</a>.`;
+}
+
+function tile(label, value, sub) {
+  return `<div class="tile"><div class="tile-label">${esc(label)}</div><div class="tile-value">${value}</div><div class="tile-sub">${sub}</div></div>`;
+}
+function renderTiles(c, b) {
+  const s = c.summary;
+  $("#tiles").innerHTML = [
+    tile(`${VIEWS[C.view].label}, last ${c.days} days`, esc(usd(s.total)),
+      SERIES.filter(x => inView(x.key) && s[x.key]).map(x => `${esc(usd(s[x.key]))} ${esc(x.label.toLowerCase())}`).join(" · ") || "nothing"),
+    inView("runs") && tile("Task runs tied to a submission", s.runs ? `${Math.round(100 * s.runs_linked / s.runs)}%` : "–",
+      `${esc(usd(s.runs_linked))} of ${esc(usd(s.runs))} · the rest are re-runs or unsubmitted work`),
+    tile("Per submitted task", s.per_task_median == null ? "–" : esc(usd(s.per_task_median)),
+      s.per_task_median == null ? "no submissions yet" : `median · average ${esc(usd(s.per_task_mean))} · ${esc(VIEWS[C.view].label.toLowerCase())}`),
+    tile("Per active contributor, per day", s.per_cb_day == null ? "–" : esc(usd(s.per_cb_day)), `${esc(VIEWS[C.view].label.toLowerCase())} ÷ contributor-days`),
+    tile("Tasks submitted", esc(fmtInt(s.tasks_submitted)), `by ${fmtInt(s.submitters)} contributors · L-1/L0`),
+    tile("Key budget this cycle", b.pct == null ? "–" : `${esc(b.pct)}%`,
+      b.max_budget ? `${esc(usd(b.spend))} of ${esc(usd(b.max_budget))}${b.resets_at ? ` · resets ${esc(when(b.resets_at))}` : ""}` : esc(b.error || "")),
+  ].filter(Boolean).join("");
+}
+
+// ---- column charts ----
+// series: [{key, label, cls}] stacked bottom-up; value(d, key) gives each part.
+function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleStart, tip, fmt = kUsd }) {
+  const W = 1100, H = 250, L = 56, R = 12, T = 26, B = 42, pw = W - L - R, ph = H - T - B, GAP = 2;
+  const totals = days.map(d => series.reduce((t, s) => t + (value(d, s.key) || 0), 0));
+  const top = Math.max(pace || 0, ...totals, 1) * 1.12;
+  const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000, 100000];
+  const step = steps.find(s => top / s <= 5) || 200000;
+  const yMax = Math.ceil(top / step) * step, y = v => T + ph - (v / yMax) * ph;
+  const slot = pw / days.length, bw = Math.min(24, slot * 0.6);
+  const peak = totals.reduce((m, v, i) => (v > totals[m] ? i : m), 0);
+  let svg = "";
+  for (let v = 0; v <= yMax + 1e-9; v += step) {
+    svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${esc(fmt(v))}</text>`;
+  }
+  const resetAt = cycleStart ? days.findIndex(d => d.day === cycleStart) : -1;
+  if (resetAt > 0) {
+    const x = L + resetAt * slot;
+    svg += `<line class="ref" x1="${x}" x2="${x}" y1="${T - 14}" y2="${T + ph}"/><text class="note" x="${x + 4}" y="${T - 6}">cycle reset</text>`;
+  }
+  const every = days.length > 16 ? 2 : 1;
+  days.forEach((d, i) => {
+    const cx = L + (i + 0.5) * slot, x = cx - bw / 2, base = T + ph;
+    let cum = 0, parts = "";
+    const drawn = series.map(s => ({ s, v: value(d, s.key) || 0 })).filter(p => p.v > 0);
+    drawn.forEach((p, j) => {
+      let y1 = y(cum + p.v), y0 = y(cum);
+      if (j > 0) y0 -= GAP;  // the surface gap between stacked parts
+      cum += p.v;
+      const h = y0 - y1;
+      if (h <= 0.5) return;
+      const r = j === drawn.length - 1 ? Math.min(4, h) : 0;  // only the top part gets the rounded end
+      parts += r ? `<path class="bar ${p.s.cls}" d="M${x},${y0} V${y1 + r} Q${x},${y1} ${x + r},${y1} H${x + bw - r} Q${x + bw},${y1} ${x + bw},${y1 + r} V${y0} Z"/>`
+        : `<rect class="bar ${p.s.cls}" x="${x}" y="${y1}" width="${bw}" height="${h}"/>`;
+    });
+    const label = (i === peak || d.today) && totals[i] > 0 ? `<text class="val" x="${cx}" y="${y(totals[i]) - 6}" text-anchor="middle">${esc(fmt(totals[i]))}</text>` : "";
+    const first = i === 0 || utcDay(d.day, { day: "numeric" }) === "1";
+    const name = i % every && !first && !d.today ? "" : first ? utcDay(d.day, { month: "short", day: "numeric" }) : utcDay(d.day, { day: "numeric" });
+    svg += `<g class="sbar" data-chart="${id}" data-i="${i}" tabindex="0" role="img" aria-label="${esc(longDay(d.day))}: ${esc(fmt(totals[i]))}">
+      <rect class="hit" x="${L + i * slot}" y="${T}" width="${slot}" height="${ph}"/>${parts}${label}
+      <text class="tick" x="${cx}" y="${base + 16}" text-anchor="middle">${esc(name)}</text>${d.today ? `<text class="note" x="${cx}" y="${base + 30}" text-anchor="middle">today</text>` : ""}</g>`;
+  });
+  if (pace) svg += `<line class="pace" x1="${L}" x2="${W - R}" y1="${y(pace)}" y2="${y(pace)}"/>`;
+  svg += `<line class="axis" x1="${L}" x2="${W - R}" y1="${T + ph}" y2="${T + ph}"/>`;
+  const legend = (series.length > 1 ? series.map(s => `<span class="lg"><span class="sw ${s.cls}"></span>${esc(s.label)}</span>`).join("") : "")
+    + (pace ? `<span class="lg"><span class="ln"></span>${esc(paceLabel)}</span>` : "");
+  CHARTS[id] = { days, tip };
+  return `<div class="cc-head"><div><div class="cc-title">${esc(title)}</div><div class="cc-sub">${sub}</div></div><div class="legend">${legend}</div></div>
+    <div class="sc-plot"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${svg}</svg><div class="sc-tip hidden" role="tooltip"></div></div>`;
+}
+const CHARTS = {};
+function wireCharts() {
+  document.querySelectorAll(".sc-plot").forEach(plot => {
+    const tip = plot.querySelector(".sc-tip");
+    const show = g => {
+      const chart = CHARTS[g.dataset.chart], d = chart.days[+g.dataset.i];
+      tip.replaceChildren();
+      const head = document.createElement("div");
+      head.className = "muted";
+      head.textContent = longDay(d.day) + (d.today ? " · today so far" : "") + " (UTC)";
+      tip.append(head);
+      chart.tip(d).forEach(([strong, rest, cls]) => {
+        const row = document.createElement("div"), b = document.createElement("b");
+        if (cls) { const k = document.createElement("span"); k.className = `tk ${cls}`; row.append(k); }
+        b.textContent = strong;
+        row.append(b, document.createTextNode(rest));
+        tip.append(row);
+      });
+      tip.classList.remove("hidden");
+      const box = plot.getBoundingClientRect(), hit = g.querySelector(".hit").getBoundingClientRect();
+      const topMark = [...g.querySelectorAll(".bar")].reduce((m, e) => Math.min(m, e.getBoundingClientRect().top), hit.bottom - 20);
+      tip.style.left = Math.min(Math.max(hit.left - box.left + hit.width / 2 - tip.offsetWidth / 2, 0), box.width - tip.offsetWidth) + "px";
+      tip.style.top = Math.max(0, topMark - box.top - tip.offsetHeight - 8) + "px";
+    };
+    plot.querySelectorAll(".sbar").forEach(g => {
+      g.addEventListener("pointerenter", () => show(g));
+      g.addEventListener("focus", () => show(g));
+      g.addEventListener("pointerleave", () => tip.classList.add("hidden"));
+      g.addEventListener("blur", () => tip.classList.add("hidden"));
+    });
+  });
+}
+
+function dailyCard(c, b) {
+  const chart = columns({
+    id: "daily", title: "Spend per day", sub: "UTC days · task runs from LiteLLM + SMIG (all keys), portal reviews from the portal's own records", days: c.daily,
+    series: SERIES.filter(x => inView(x.key)),
+    value: (d, k) => d[k],
+    tip: d => [[usd(d.total), ` ${VIEWS[C.view].label.toLowerCase()}`],
+      ...(inView("runs") ? [[usd(d.runs), ` task runs (${usd(d.runs_linked)} tied to a submission)`, "s-runs"]] : []),
+      ...(inView("hint") && d.hint ? [[usd(d.hint), " hint pipeline", "s-hint"]] : []),
+      ...(inView("sandbox") && d.sandbox ? [[usd(d.sandbox), " in-task sandbox", "s-sandbox"]] : []),
+      ...(inView("portal") ? [[usd(d.portal), " portal reviews", "s-untagged"]] : []),
+      [fmtInt(d.active_cbs), ` active contributors · ${fmtInt(d.tasks_submitted)} tasks submitted`],
+      ...(inView("runs") && d.sub_runs ? [[`${fmtInt(d.sub_runs_logged)} of ${fmtInt(d.sub_runs)}`, " runs in that day's submissions have logged spend"]] : [])],
+  });
+  const rows = c.daily.slice().reverse().map(d => `<tr><td>${esc(longDay(d.day))}${d.today ? " (so far)" : ""}</td><td>${esc(usd(d.total))}</td>
+    <td>${esc(usd(d.runs))}</td><td>${esc(usd(d.runs_linked))}</td><td>${esc(usd(d.sandbox))}</td><td>${esc(usd(d.hint))}</td><td>${esc(usd(d.portal))}</td>
+    <td>${fmtInt(d.active_cbs)}</td><td>${fmtInt(d.tasks_submitted)}</td><td>${d.sub_runs ? `${fmtInt(d.sub_runs_logged)} / ${fmtInt(d.sub_runs)}` : "–"}</td></tr>`).join("");
+  return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>Day (UTC)</th><th>Total</th>
+    <th>Task runs</th><th>…tied to a submission</th><th>In-task sandbox</th><th>Hint pipeline</th><th>Portal reviews</th><th>Active contributors</th>
+    <th>Tasks submitted</th><th>Runs logged / in submissions</th></tr>${rows}</table></details>`;
+}
+
+// Each task's full cost (task runs since it started + portal reviews), grouped by the UTC day it was submitted:
+// the column is that day's median, so one expensive task doesn't swing it; the line is the range's median.
+// In the "both" view it's split into an evals chart and a task-runs chart, so each part reads on its own.
+// Task runs tie to a task when their ID is in its submission, or when they were launched from the task (aect-<node> runs).
+// Earlier sandbox-viewer runs can't be tied to any task, so the task-run charts also show all run spend ÷ tasks submitted.
+const RUNS_TIED = { title: "Task runs tied to each task, by day submitted",
+                    what: "runs in the task's submission + runs launched from the task", runAvg: true };
+
+function perTaskCard(c) {
+  if (C.view === "runs") return perTaskChart(c, { id: "pertask", cls: "s-runs", totalOf: t => t.total, ...RUNS_TIED });
+  if (C.view !== "both") return perTaskChart(c, { id: "pertask", title: "Cost per submitted task, by day submitted",
+    what: VIEWS[C.view].label.toLowerCase(), cls: "s-runs", totalOf: t => t.total });
+  return perTaskChart(c, { id: "pertask-evals", title: "Eval cost per submitted task, by day submitted",
+      what: "evals: in-task sandbox + portal reviews", cls: "s-untagged", totalOf: t => (t.sandbox || 0) + (t.portal || 0) })
+    + perTaskChart(c, { id: "pertask-runs", cls: "s-runs", totalOf: t => t.agent_runs || 0, ...RUNS_TIED });
+}
+
+function perTaskChart(c, { id, title, what, cls, totalOf, runAvg = false }) {
+  const byDay = {}, all = [];
+  c.tasks.forEach(t => {
+    if (!t.last_submitted) return;
+    const d = Math.floor(t.last_submitted / 86400) * 86400;
+    (byDay[d] = byDay[d] || []).push(totalOf(t));
+    all.push(totalOf(t));
+  });
+  const days = c.daily.map(d => {
+    const v = byDay[d.day] || [];
+    return { ...d, n: v.length, median: v.length ? median(v) : 0, mean: v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0,
+             min: v.length ? Math.min(...v) : 0, max: v.length ? Math.max(...v) : 0 };
+  });
+  const overall = median(all);
+  const subs = c.daily.reduce((n, d) => n + (d.tasks_submitted || 0), 0), allRuns = c.daily.reduce((n, d) => n + (d.runs || 0), 0);
+  const avgNote = runAvg && subs ? ` · all task-run spend ÷ tasks submitted over the ${c.days} days: ${esc(usd(allRuns / subs))}` : "";
+  const chart = columns({
+    id, title,
+    sub: `median cost of the tasks submitted that day (${esc(what)}), since each task started${avgNote}`,
+    days, series: [{ key: "median", label: "Median per task", cls }], value: (d, k) => d[k],
+    pace: overall || 0, paceLabel: overall ? `${kUsd(overall)} median over the ${c.days} days` : "",
+    tip: d => [...(d.n ? [[usd(d.median), " median per task"], [fmtInt(d.n), ` task${d.n === 1 ? "" : "s"} submitted · average ${usd(d.mean)}`],
+                          [`${usd(d.min)} – ${usd(d.max)}`, " cheapest – most expensive"]]
+                       : [["No tasks", " submitted this day"]]),
+               ...(runAvg && d.tasks_submitted ? [[usd(d.runs / d.tasks_submitted), " all task-run spend that day ÷ tasks submitted"]] : [])],
+  });
+  const rows = days.slice().reverse().filter(d => d.n).map(d => `<tr><td>${esc(longDay(d.day))}${d.today ? " (so far)" : ""}</td><td>${fmtInt(d.n)}</td>
+    <td>${esc(usd(d.median))}</td><td>${esc(usd(d.mean))}</td><td>${esc(usd(d.min))}</td><td>${esc(usd(d.max))}</td></tr>`).join("");
+  return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>Day submitted (UTC)</th><th>Tasks</th>
+    <th>Median</th><th>Average</th><th>Cheapest</th><th>Most expensive</th></tr>${rows}</table></details>`;
+}
+
+function perCbCard(c) {
+  const days = c.daily.map(d => ({ ...d, per_cb: d.active_cbs ? d.total / d.active_cbs : 0 }));
+  return columns({
+    id: "percb", title: "Spend per active contributor, per day", sub: `${VIEWS[C.view].label.toLowerCase()} ÷ contributors active that day · steady means each person costs about the same`,
+    days, series: [{ key: "per_cb", label: "Per active contributor", cls: "s-runs" }], value: (d, k) => d[k],
+    tip: d => [[d.active_cbs ? usd(d.per_cb) : "–", " per active contributor"], [fmtInt(d.active_cbs), ` active · ${fmtInt(d.tasks_touched)} tasks touched`]],
+  });
+}
+
+// ---- tables (click a header to sort; the first 25 rows, then "show all") ----
+const TABLES = {
+  tasks: {
+    title: "Cost per submitted task",
+    sub: "Tasks a contributor submitted in the range, cost since each started. Task runs = runs whose IDs are in the task's submissions plus runs launched from the task itself (earlier sandbox-viewer runs can't be tied to a task); in-task sandbox and portal reviews are the evals.",
+    rows: () => C.shown.tasks, key: "total",
+    cols: [
+      ["Task", "task_id", r => `<span class="mono" title="${esc(r.task_id)}">${esc(r.task_id.slice(-6))}</span>`],
+      ["Submitted", "last_submitted", r => r.last_submitted ? esc(longDay(r.last_submitted)) : "–"],
+      ["Submitted by", "submitters", r => esc(r.submitters)],
+      ["Task runs", "agent_runs", r => esc(usd(r.agent_runs)), true, "runs"],
+      ["In-task sandbox", "sandbox", r => esc(usd(r.sandbox)), true, "sandbox"],
+      ["Portal reviews", "portal", r => esc(usd(r.portal)), true, "portal"],
+      ["Total", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+    ],
+  },
+  people: {
+    title: "Cost per contributor",
+    sub: "In the range: task runs whose IDs are in each contributor's submissions or that were launched from their task, and the evals they ran (in-task sandbox + portal reviews). Per submitted task divides by their submissions in the range.",
+    rows: () => C.shown.people, key: "total",
+    cols: [
+      ["Contributor", "email", r => esc(r.email)],
+      ["Active days", "active_days", r => fmtInt(r.active_days), true],
+      ["Tasks touched", "tasks_touched", r => fmtInt(r.tasks_touched), true],
+      ["Submitted", "tasks_submitted", r => fmtInt(r.tasks_submitted), true],
+      ["Task runs", "agent_runs", r => esc(usd(r.agent_runs)), true, "runs"],
+      ["In-task sandbox", "sandbox", r => esc(usd(r.sandbox)), true, "sandbox"],
+      ["Portal reviews", "portal", r => esc(usd(r.portal)), true, "portal"],
+      ["Total", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+      ["Per submitted task", "per_task", r => (r.per_task == null ? "–" : esc(usd(r.per_task))), true],
+    ],
+  },
+};
+function renderTable(name, all = false) {
+  const t = TABLES[name], sort = C.sort[name] || { key: t.key, dir: -1 };
+  const rows = t.rows().slice().sort((a, b) => {
+    const x = a[sort.key], y = b[sort.key];
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return (typeof x === "number" ? x - y : String(x).localeCompare(String(y))) * sort.dir;
+  });
+  const shown = all ? rows : rows.slice(0, 25);
+  const cols = t.cols.filter(col => !col[4] || inView(col[4]));  // only the columns the chosen view counts
+  const head = cols.map(([label, key, , num]) => `<th class="${num ? "num" : ""}"><button type="button" class="th-sort" data-sort="${key}">${esc(label)}${
+    sort.key === key ? (sort.dir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("");
+  const body = shown.map(r => `<tr>${cols.map(([, , cell, num]) => `<td class="${num ? "num" : ""}">${cell(r)}</td>`).join("")}</tr>`).join("");
+  $(`#${name}-card`).innerHTML = `<div class="cc-head"><div><div class="cc-title">${esc(t.title)} <span class="muted">· ${fmtInt(rows.length)}</span></div>
+    <div class="cc-sub">${esc(t.sub)}</div></div></div>
+    <div class="table-wrap"><table class="runs cost-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${cols.length}" class="muted">Nothing in this range.</td></tr>`}</tbody></table></div>
+    ${rows.length > shown.length ? `<button class="ghost" data-all="${name}">Show all ${fmtInt(rows.length)}</button>` : ""}`;
+  const card = $(`#${name}-card`);
+  card.querySelectorAll("[data-sort]").forEach(btn => btn.onclick = () => {
+    const key = btn.dataset.sort;
+    C.sort[name] = { key, dir: sort.key === key ? -sort.dir : (typeof (rows[0] || {})[key] === "number" ? -1 : 1) };
+    renderTable(name, all);
+  });
+  const more = card.querySelector("[data-all]");
+  if (more) more.onclick = () => renderTable(name, true);
+}
+
+// ---- controls ----
+$("#range").addEventListener("click", e => {
+  const b = e.target.closest("[data-days]");
+  if (!b || +b.dataset.days === C.days) return;
+  C.days = +b.dataset.days;
+  localStorage.setItem("evp_cost_days", String(C.days));
+  load();
+});
+$("#view").addEventListener("click", e => {
+  const b = e.target.closest("[data-view-pick]");
+  if (!b || b.dataset.viewPick === C.view) return;
+  C.view = b.dataset.viewPick;
+  localStorage.setItem("evp_cost_view", C.view);
+  C.sort = {};
+  render();
+});
+$("#refresh").onclick = async () => { $("#refresh").disabled = true; await load(true); $("#refresh").disabled = false; };
+$("#logout").onclick = async () => { await api("/api/admin/logout", { method: "POST" }); location.href = "/admin"; };
+$("#view-switch").addEventListener("click", async e => {
+  const view = e.target.closest("[data-view]")?.dataset.view;
+  if (view === "admin") location.href = "/admin";
+  if (view === "chat") {
+    try { await api("/api/admin/open-chat", { json: {} }); location.href = "/"; }
+    catch (err) { uiAlert("Couldn't open the chat view", err.message); }
+  }
+});
+setInterval(() => { if (!document.hidden) load(); }, 600000);
+load();

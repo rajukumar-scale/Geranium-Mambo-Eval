@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Original Conference Eval Portal · Cost</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("evp_theme") === "dark" ? "dark" : "light";</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app" class="cost-app">
+    <div class="topbar admin-top">
+      <div class="title">Original Conference Eval Portal</div>
+      <div class="view-switch" id="view-switch" role="group" aria-label="Switch page">
+        <button type="button" class="" data-view="chat">Chat view</button><button type="button" class="" data-view="admin">Admin</button><button type="button" class="on" data-view="cost">Cost</button></div>
+      <div class="spacer"></div>
+      <button class="ghost" data-theme-toggle></button>
+      <button class="ghost" id="logout">Sign out</button>
+    </div>
+
+    <main class="cost-main">
+      <div class="cost-filters">
+        <div class="seg" id="range" role="group" aria-label="Date range">
+          <button type="button" data-days="7">Last 7 days</button><button type="button" data-days="14">Last 14 days</button><button type="button" data-days="30">Last 30 days</button>
+        </div>
+        <div class="seg" id="view" role="group" aria-label="What to count">
+          <button type="button" data-view-pick="evals">Evals</button><button type="button" data-view-pick="runs">Task runs</button><button type="button" data-view-pick="both">Both</button>
+        </div>
+        <button id="refresh">Refresh now</button>
+        <span class="muted" id="asof"></span>
+      </div>
+      <div id="notes"></div>
+      <div class="tiles" id="tiles"></div>
+
+      <section class="cost-card" id="daily-card"></section>
+      <section class="cost-card" id="pertask-card"></section>
+      <section class="cost-card" id="percb-card"></section>
+      <section class="cost-card" id="tasks-card"></section>
+      <section class="cost-card" id="people-card"></section>
+
+      <p class="cost-foot muted" id="foot"></p>
+    </main>
+  </div>
+  <script src="/static/common.js"></script>
+  <script src="/static/cost.js"></script>
+</body>
+</html>

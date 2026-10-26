@@ -1,0 +1,8 @@
+[Unit]
+Description=Eval portal run-network firewall rules
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/eval-portal/deploy/firewall.sh

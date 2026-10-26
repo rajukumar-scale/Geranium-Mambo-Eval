@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Original Conference Eval Portal Status</title>
+  <link rel="alternate" type="application/rss+xml" title="Incidents" href="/status/feed.rss">
+  <style>
+    :root { --ink: #1f2328; --muted: #6e7781; --line: #e5e7eb; --bg: #fafaf9; --panel: #fff;
+            --ok: #3fb950; --deg: #f2cc60; --part: #f0883e; --maj: #e5534b; --none: #d0d7de; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--ink); background: var(--bg); }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 28px 20px 60px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+    header .brand { font-size: 20px; font-weight: 600; color: var(--ink); text-decoration: none; }
+    header .brand small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); }
+    .btn { border: 1px solid var(--line); background: var(--panel); padding: 7px 14px; border-radius: 6px; font: inherit; font-size: 14px; cursor: pointer; color: var(--ink); text-decoration: none; }
+    .sub { position: relative; }
+    .sub .menu { display: none; position: absolute; right: 0; top: 38px; width: 300px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.08); z-index: 5; font-size: 14px; }
+    .sub.open .menu { display: block; }
+    .sub .menu a { color: #0969da; }
+    .banner { border-radius: 8px; padding: 18px 22px; font-size: 18px; font-weight: 600; color: #fff; margin-bottom: 28px; background: var(--ok); }
+    .banner.l1 { background: #c69026; } .banner.l2 { background: var(--part); } .banner.l3 { background: var(--maj); }
+    .note { display: flex; justify-content: space-between; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .comps { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+    .comp { padding: 18px 20px; border-top: 1px solid var(--line); }
+    .comp:first-child { border-top: 0; }
+    .comp .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+    .comp .name { font-weight: 600; }
+    .comp .desc { color: var(--muted); font-size: 13px; }
+    .st { font-size: 14px; color: var(--ok); white-space: nowrap; }
+    .st.l1 { color: #b08800; } .st.l2 { color: var(--part); } .st.l3 { color: var(--maj); }
+    .bars { display: flex; gap: 2px; margin: 12px 0 6px; height: 34px; }
+    .bars i { flex: 1; border-radius: 2px; background: var(--ok); position: relative; cursor: default; }
+    .bars i.l1 { background: var(--deg); } .bars i.l2 { background: var(--part); } .bars i.l3 { background: var(--maj); }
+    .bars i.nd { background: var(--none); }
+    .bars i:hover { opacity: .75; }
+    .scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+    .scale span:nth-child(2) { flex: 1; text-align: center; position: relative; }
+    .tip { position: fixed; z-index: 10; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; width: 280px; box-shadow: 0 8px 24px rgba(0,0,0,.1); pointer-events: none; display: none; }
+    .tip b { display: block; margin-bottom: 4px; }
+    .tip .ev { margin-top: 4px; }
+    .tip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--deg); }
+    .tip .dot.l3 { background: var(--maj); } .tip .dot.l2 { background: var(--part); }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin: 10px 0 34px; }
+    .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+    h2 { font-size: 20px; margin: 0 0 14px; }
+    .day { border-bottom: 1px solid var(--line); padding: 14px 0; }
+    .day h3 { font-size: 15px; margin: 0 0 6px; }
+    .day .none { color: var(--muted); font-size: 14px; }
+    .inc { margin: 10px 0 4px; }
+    .inc .t { font-weight: 600; color: #b08800; }
+    .inc.l3 .t { color: var(--maj); } .inc.l2 .t { color: var(--part); } .inc.done .t { color: var(--ink); }
+    .inc .comps-tag { color: var(--muted); font-size: 13px; }
+    .up { margin: 6px 0 0 0; font-size: 14px; }
+    .up b { font-weight: 600; }
+    .up .when { color: var(--muted); font-size: 12px; }
+    footer { display: flex; justify-content: space-between; margin-top: 26px; color: var(--muted); font-size: 13px; }
+    footer a { color: #0969da; text-decoration: none; }
+    .err { color: var(--maj); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="/status">Original Conference Eval Portal<small>System status</small></a>
+    <div class="sub" id="sub"><button class="btn" id="sub-btn">Subscribe to updates</button>
+      <div class="menu">Get incident updates with a feed reader:<br><a href="/status/feed.rss">RSS feed</a> (new, updated and resolved incidents).<br><br>
+        Problems with your own task? Type <b>/admin</b> in your chat on the <a href="/">portal</a>.</div></div>
+  </header>
+  <div id="main"><p class="note">Loading…</p></div>
+  <footer><a id="hist-link" href="/status/history">← Incident History</a><span id="updated"></span></footer>
+</div>
+<div class="tip" id="tip"></div>
+<script>
+const LEVEL = { 0: "Operational", 1: "Degraded Performance", 2: "Partial Outage", 3: "Major Outage" };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const utc = t => new Date(t * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" }) + " UTC";
+const dayName = iso => new Date(iso + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const history = location.pathname.endsWith("/history");
+let DATA = null;
+
+function bars(c) {
+  return c.bars.map((b, i) => `<i class="${b.level == null ? "nd" : b.level ? "l" + b.level : ""}" data-c="${esc(c.key)}" data-i="${i}"></i>`).join("");
+}
+
+function render(d) {
+  const comps = d.components.map(c => `<div class="comp">
+      <div class="row"><div><span class="name">${esc(c.name)}</span> <span class="desc">· ${esc(c.description)}</span></div>
+        <span class="st l${c.level}">${esc(LEVEL[c.level])}</span></div>
+      <div class="bars">${bars(c)}</div>
+      <div class="scale"><span>90 days ago</span><span>${c.uptime == null ? "No data yet" : c.uptime.toFixed(2) + " % uptime"}</span><span>Today</span></div></div>`).join("");
+  const days = history ? null : 15;
+  const byDay = {};
+  for (const inc of d.incidents) {
+    const key = new Date(inc.start * 1000).toISOString().slice(0, 10);
+    (byDay[key] = byDay[key] || []).push(inc);
+  }
+  let list = "";
+  const today = new Date(d.generated_at * 1000);
+  const keys = history ? Object.keys(byDay).sort().reverse()
+    : Array.from({ length: days }, (_, n) => new Date(today.getTime() - n * 86400000).toISOString().slice(0, 10));
+  for (const k of keys) {
+    const incs = byDay[k] || [];
+    list += `<div class="day"><h3>${esc(dayName(k))}</h3>${incs.length ? incs.map(inc => `
+      <div class="inc l${inc.level}${inc.end ? " done" : ""}" id="${esc(inc.key)}"><div class="t">${esc(inc.title)}</div>
+        <div class="comps-tag">${esc(inc.components.join(", "))} · ${esc(utc(inc.start))} – ${inc.end ? esc(utc(inc.end)) : "ongoing"}</div>
+        ${inc.updates.map(u => `<div class="up"><b>${esc(u.status)}</b> – ${esc(u.body)} <span class="when">${esc(utc(u.created_at))}</span></div>`).join("")}</div>`).join("")
+      : `<div class="none">No incidents reported${k === keys[0] && !history ? " today" : ""}.</div>`}</div>`;
+  }
+  if (history && !keys.length) list = `<div class="day"><div class="none">No incidents in the last 90 days.</div></div>`;
+  document.getElementById("main").innerHTML = history
+    ? `<h2>Incident History</h2>${list}`
+    : `<div class="banner l${d.overall_level}">${esc(d.overall)}</div>
+       <div class="note"><span>Uptime over the past 90 days.</span></div>
+       <div class="comps">${comps}</div>
+       <div class="legend"><span style="--c:var(--ok)">No downtime</span><span style="--c:var(--deg)">Degraded performance</span>
+         <span style="--c:var(--part)">Partial outage</span><span style="--c:var(--maj)">Major outage</span><span style="--c:var(--none)">No data</span></div>
+       <h2>Past Incidents</h2>${list}`;
+  document.getElementById("hist-link").textContent = history ? "← Current status" : "← Incident History";
+  document.getElementById("hist-link").href = history ? "/status" : "/status/history";
+  document.getElementById("updated").textContent = "Updated " + utc(d.generated_at);
+}
+
+const tip = document.getElementById("tip");
+document.addEventListener("mouseover", e => {
+  const bar = e.target.closest(".bars i");
+  if (!bar || !DATA) return (tip.style.display = "none");
+  const c = DATA.components.find(x => x.key === bar.dataset.c), b = c.bars[+bar.dataset.i];
+  tip.innerHTML = `<b>${esc(dayName(b.date))}</b>` + (b.level == null ? "No data exists for this day."
+    : b.notes.length ? b.notes.map(n => `<div class="ev"><span class="dot l${n.level}"></span>${esc(n.title)} · ${esc(n.span)}</div>`).join("")
+    : "No downtime recorded on this day.");
+  const r = bar.getBoundingClientRect();
+  tip.style.display = "block";
+  tip.style.left = Math.min(Math.max(8, r.left - 130), innerWidth - 296) + "px";
+  tip.style.top = (r.bottom + 8) + "px";
+});
+document.getElementById("sub-btn").onclick = () => document.getElementById("sub").classList.toggle("open");
+
+async function load() {
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    DATA = await res.json();
+    render(DATA);
+  } catch (e) {
+    document.getElementById("main").innerHTML = `<div class="banner l3">Status unavailable</div><p class="err">Couldn't reach the portal (${esc(e.message)}). If this persists, the portal itself is down.</p>`;
+  }
+}
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

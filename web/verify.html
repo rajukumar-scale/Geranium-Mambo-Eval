@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify an eval pass · Original Conference Eval Portal</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("evp_theme") === "dark" ? "dark" : "light";</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <button class="ghost theme-float" data-theme-toggle></button>
+  <div class="center">
+    <div style="width:min(640px,100%)">
+      <form class="card" id="form" style="width:100%;margin-bottom:16px">
+        <h1>Verify an eval pass</h1>
+        <p class="muted">Enter the verification code shown on a pass screen to see the record we stored for it.</p>
+        <div style="display:flex;gap:8px"><input id="code" class="mono" placeholder="EVP-XXXX-XXXX-XXXX"><button class="primary">Check</button></div>
+        <div id="err" class="error hidden" style="margin-top:12px"></div>
+        <div class="note">Machine-readable: <span class="mono">GET /api/verify/&lt;code&gt;</span></div>
+      </form>
+      <div id="result"></div>
+    </div>
+  </div>
+  <script src="/static/common.js"></script>
+  <script>
+    async function check(code) {
+      $("#err").classList.add("hidden");
+      $("#result").innerHTML = "";
+      if (!code) return;
+      history.replaceState(null, "", "/verify/" + encodeURIComponent(code));
+      try {
+        const p = await api("/api/verify/" + encodeURIComponent(code));
+        const validity = p.valid ? " · ✔ record verified" : " · ✖ record signature mismatch";
+        $("#result").innerHTML = proofHtml(p, { foot: false, validity });
+      } catch (e) {
+        $("#err").textContent = e.status === 404 ? "No pass with that code exists." : e.message;
+        $("#err").classList.remove("hidden");
+      }
+    }
+    $("#form").addEventListener("submit", e => { e.preventDefault(); check($("#code").value.trim().toUpperCase()); });
+    const fromPath = decodeURIComponent(location.pathname.split("/verify/")[1] || "");
+    if (fromPath) { $("#code").value = fromPath; check(fromPath); }
+  </script>
+</body>
+</html>
