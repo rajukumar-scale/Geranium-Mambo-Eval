@@ -534,6 +534,8 @@ class Runner:
             async def start_review():
                 rc, out = await boatrun.ssh(box, "sudo mkdir -p /tmp/payload && sudo tar xzf /tmp/payload.tgz -C /tmp/payload "
                                                  "&& sudo bash /tmp/payload/run.sh")
+                if "CLAUDE_NOT_READY" in out:
+                    raise boatrun.MachineNotReady(f"review machine setup failed: {out[-300:]}")
                 if "STARTED" not in out:
                     raise RuntimeError(f"review machine setup failed: {out[-300:]}")
 
@@ -559,7 +561,9 @@ class Runner:
                     if machine == MACHINE_TRIES:
                         raise
                     log.warning("review box %s is unreachable, replacing it: %s", box, str(error)[-200:])
-                    self._push_activity(run_id, attempt, "↺ That machine didn't respond; starting another one")
+                    self._push_activity(run_id, attempt, "↺ That machine wasn't ready; starting another one"
+                                        if isinstance(error, boatrun.MachineNotReady)
+                                        else "↺ That machine didn't respond; starting another one")
                     asyncio.create_task(boatrun.delete_box(box))
                     box = None
             payload.unlink(missing_ok=True)

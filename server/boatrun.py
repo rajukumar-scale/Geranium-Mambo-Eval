@@ -79,6 +79,19 @@ if [ -s $P/proxy_host ]; then  # the runner user may reach only the metering pro
   done
 fi
 
+# Boat installs and updates Claude Code itself, in the background after the machine boots (seen rewriting it 7
+# minutes in); a review started meanwhile dies with "claude native binary not installed". Wait until it runs;
+# if it never does, say so (no STARTED) and the server replaces the machine.
+if [ -e $P/check.sh ]; then
+  chown runner:runner $P/check.sh
+  ready=0
+  for i in $(seq 1 24); do
+    if timeout 30 sudo -u runner -H bash $P/check.sh > /dev/null 2>&1; then ready=1; break; fi
+    sleep 5
+  done
+  if [ $ready = 0 ]; then echo "CLAUDE_NOT_READY: Claude Code didn't run on this machine within 2 minutes"; exit 0; fi
+fi
+
 rm -f /tmp/out.jsonl /tmp/err.txt /tmp/claude.exit
 touch /tmp/out.jsonl /tmp/err.txt; chmod 644 /tmp/out.jsonl /tmp/err.txt
 setsid nohup bash /tmp/payload/review.sh > /dev/null 2>&1 < /dev/null &
@@ -212,6 +225,8 @@ def build_payload(run_id, attempt_id, prompt, args, env, extra=None):
             (work / "resume.sh").write_text("#!/bin/bash\nset -a; . /tmp/payload/run.env; set +a\ncd /work\n"
                                             f"exec {shlex.join(again)} < /tmp/payload/resume_prompt.txt\n")
             (work / "resume_prompt.txt").write_text(RESUME_PROMPT)
+            (work / "check.sh").write_text("#!/bin/bash\nset -a; . /tmp/payload/run.env; set +a\n"
+                                           f"exec {shlex.quote(args[0])} --version\n")
             break
     (work / "review.sh").write_text(REVIEW_SH)
     (work / "run.sh").write_text(RUN_SH)
@@ -311,13 +326,17 @@ async def ssh(box, command, timeout=300):
     return rc, out
 
 
+class MachineNotReady(RuntimeError):
+    """The machine answered but can't run the review (Claude Code never became runnable): replace it, don't retry."""
+
+
 async def retrying(what, step, tries=4):
     """A freshly started box can drop the first SSH connections; retry setup steps with a short backoff."""
     for attempt in range(1, tries + 1):
         try:
             return await step()
         except RuntimeError as error:
-            if attempt == tries:
+            if attempt == tries or isinstance(error, MachineNotReady):
                 raise
             log.info("%s failed (try %d/%d), retrying: %s", what, attempt, tries, str(error)[-200:])
             await asyncio.sleep(5 * attempt)
