@@ -1,0 +1,19 @@
+# Run the portal's tests on every push and pull request, so a failure shows on the PR before it's merged.
+# No secrets: this only checks the code. Deploying is done by the server itself (deploy/pull_deploy.sh).
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements.txt
+      - run: bash deploy/run_tests.sh -v
