@@ -174,7 +174,22 @@ In that case set `COOKIE_SECURE=0` if it's plain HTTP.
 - Set `LOADTEST_ALLOWED=0` again afterwards.
 - `BOAT_STARTS_PER_MIN` (12 on the $20 plan, 30 on $100) spaces box requests, so a burst of reviews queues in order.
 
-**Deploying code changes without cutting anyone off:** run `deploy/deploy.sh` from your Mac. It:
+**Deploying goes through GitHub** (private repo `evanedreo/eval-portal`). Whatever lands on `main`, from a push or a
+merged pull request, goes live within about a minute:
+
+- GitHub runs the tests (`deploy/run_tests.sh`) on every push and pull request, so a failure shows before merging.
+- On the server, `eval-portal-pull.timer` runs `deploy/pull_deploy.sh` every minute. When `main` has moved, it pulls
+  it (read with the deploy key at `/root/.ssh/eval_portal_deploy`), runs the tests and deploys with
+  `deploy/remote_deploy.sh` (below).
+- It posts once per commit to Slack: ✅ updated, ❌ not updated (tests failed), ⚠️ rolled back.
+- Logs: `/srv/eval-data/pull_tests.log`, `pull_deploy.log`, `deployed_commit`.
+- Switched on with `deploy/setup_pull.sh`; switch off with `systemctl disable --now eval-portal-pull.timer`.
+
+`deploy/deploy.sh` from your Mac = commit first, then it runs the tests, pushes `main` and asks the server to deploy at
+once. Code copied to the server any other way is overwritten by the next merge.
+`DIRECT=1 deploy/deploy.sh` is the old direct copy, for emergencies only (then push the same change).
+
+**What a deploy does, without cutting anyone off** (`deploy/remote_deploy.sh`):
 
 1. checks the Python and JS syntax locally, then uploads the code;
 2. holds new runs (they stay queued and keep their place);

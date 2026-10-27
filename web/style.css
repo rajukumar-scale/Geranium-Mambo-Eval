@@ -229,6 +229,9 @@ button.danger-solid:hover { border-color: var(--ink); }
 .proof .fpband .k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 5px; }
 .proof .fpband .fp { white-space: pre-wrap; font-family: var(--mono); font-size: 18px; line-height: 1.45; color: #000; overflow-wrap: anywhere; }
 .guide-sample .fpband { padding: 10px 14px; }
+.proof .wband { padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.proof .wband .k { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 3px; }
+.proof .wband .w { font-family: var(--mono); font-size: 11px; line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; }
 .rfp { margin-top: 6px; font-family: var(--mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fp-inline { display: inline-block; max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .proof .head .codebox .k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; opacity: .8; margin-bottom: 3px; }

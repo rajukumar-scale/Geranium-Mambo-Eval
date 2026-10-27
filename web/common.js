@@ -186,7 +186,12 @@ function download(name, text, type = "text/markdown") {
 // first 4 and last 4 characters), made from the stored full fingerprint (v316 format, first/last 40), which holds
 // everything needed. FP_SHOW is the taxonomy's number; change both together.
 //   "528 chars — leonard dumped … on these numbers" -> "528 chars — leon … bers"
+// The rubric's weights list (one number per row) is left out of the code: the taxonomy's screenshot check skips it
+// anyway, and with 100+ rows it wrapped over many lines and the reader couldn't get through it (2026-10-27).
+// rubricWeights() gives it back for its own line, outside the verification code band.
 const FP_SHOW = 4;
+// rubric titles count letters and digits only since 2026-10-17 ("letters"); older passes say "chars"
+const RUBRIC_FP = /^(\d+ criteria, Σweight [^,]+), weights (\[[^\]]*\]) · Titles (\d+) (chars|letters) — ?(.*)$/s;
 function shortFp(fp) {
   if (!fp || fp.startsWith("(empty")) return fp || "";
   const cut = (len, body) => {  // body = the whole text (<= 40 chars) or first 40 + " … " + last 40
@@ -194,11 +199,14 @@ function shortFp(fp) {
     return (len > FP_SHOW ? chars.slice(0, FP_SHOW).join("") : body)
       + (len > 2 * FP_SHOW ? " … " + chars.slice(-FP_SHOW).join("") : "");
   };
-  // rubric titles count letters and digits only since 2026-10-17 ("letters"); older passes say "chars"
-  const rubric = fp.match(/^(\d+ criteria, Σweight [^,]+, weights \[[^\]]*\] · Titles )(\d+) (chars|letters) — ?(.*)$/s);
-  if (rubric) return `${rubric[1]}${rubric[2]} ${rubric[3]} — ${cut(+rubric[2], rubric[4])}`;
+  const rubric = fp.match(RUBRIC_FP);
+  if (rubric) return `${rubric[1]} · Titles ${rubric[3]} ${rubric[4]} — ${cut(+rubric[3], rubric[5])}`;
   const text = fp.match(/^(\d+) chars — (.*)$/s);
   return text ? `${text[1]} chars — ${cut(+text[1], text[2])}` : fp;
+}
+function rubricWeights(fp) {
+  const rubric = (fp || "").match(RUBRIC_FP);
+  return rubric ? rubric[2] : "";
 }
 
 function proofHtml(p, opts = {}) {
@@ -223,6 +231,8 @@ function proofHtml(p, opts = {}) {
     </div>
     ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as the taxonomy shows it</div>
       <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div></div>` : ""}
+    ${rubricWeights(p.fingerprint) ? `<div class="wband"><div class="k">Rubric weights, one per row · not part of the verification code</div>
+      <div class="w">${esc(rubricWeights(p.fingerprint))}</div></div>` : ""}
     <div class="grid">
       <div><div class="k">Attempt ID</div><div class="v">${esc(p.attempt_id)}</div></div>
       ${p.task_id ? `<div><div class="k">Task ID</div><div class="v">${esc(p.task_id)}</div></div>` : ""}
