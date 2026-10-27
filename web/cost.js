@@ -224,21 +224,43 @@ function dailyCard(c, b) {
 // Each task's full cost (task runs since it started + portal reviews), grouped by the UTC day it was submitted:
 // the column is that day's median, so one expensive task doesn't swing it; the line is the range's median.
 // In the "both" view it's split into an evals chart and a task-runs chart, so each part reads on its own.
-// Task runs tie to a task when their ID is in its submission, or when they were launched from the task (aect-<node> runs).
-// Earlier sandbox-viewer runs can't be tied to any task, so the task-run charts also show all run spend ÷ tasks submitted.
-const RUNS_TIED = { title: "Task runs tied to each task, by day submitted",
-                    what: "runs in the task's submission + runs launched from the task", runAvg: true };
-
 function perTaskCard(c) {
-  if (C.view === "runs") return perTaskChart(c, { id: "pertask", cls: "s-runs", totalOf: t => t.total, ...RUNS_TIED });
+  if (C.view === "runs") return runsPerTaskChart(c, "pertask");
   if (C.view !== "both") return perTaskChart(c, { id: "pertask", title: "Cost per submitted task, by day submitted",
     what: VIEWS[C.view].label.toLowerCase(), cls: "s-runs", totalOf: t => t.total });
   return perTaskChart(c, { id: "pertask-evals", title: "Eval cost per submitted task, by day submitted",
       what: "evals: in-task sandbox + portal reviews", cls: "s-untagged", totalOf: t => (t.sandbox || 0) + (t.portal || 0) })
-    + perTaskChart(c, { id: "pertask-runs", cls: "s-runs", totalOf: t => t.agent_runs || 0, ...RUNS_TIED });
+    + runsPerTaskChart(c, "pertask-runs");
 }
 
-function perTaskChart(c, { id, title, what, cls, totalOf, runAvg = false }) {
+// Task-run cost per submitted task. Test runs (before the final batch) can't be tied to a task, so each day's column is
+// all task-run spend that day ÷ tasks submitted that day, test runs included; the line is the same over the range (the
+// tile's figure). The median of the runs that do tie to each task (final batch) is in the tooltip and the table.
+function runsPerTaskChart(c, id) {
+  const tied = {};
+  c.tasks.forEach(t => {
+    if (t.last_submitted) (tied[Math.floor(t.last_submitted / 86400) * 86400] ||= []).push(t.agent_runs || 0);
+  });
+  const days = c.daily.map(d => ({ ...d, avg: d.tasks_submitted ? (d.runs || 0) / d.tasks_submitted : 0,
+                                    tied: tied[d.day] ? median(tied[d.day]) : null }));
+  const subs = c.summary.tasks_submitted || 0, overall = subs ? (c.summary.runs || 0) / subs : 0;
+  const chart = columns({
+    id, title: "Task-run cost per submitted task, by day",
+    sub: "all task-run spend that day ÷ tasks submitted that day, test runs included (test runs can't be tied to a task, so this is an average)",
+    days, series: [{ key: "avg", label: "Per submitted task", cls: "s-runs" }], value: (d, k) => d[k],
+    pace: overall, paceLabel: overall ? `${kUsd(overall)} average over the ${c.days} days` : "",
+    tip: d => d.tasks_submitted
+      ? [[usd(d.avg), " per submitted task (average)"], [usd(d.runs), ` task-run spend · ${fmtInt(d.tasks_submitted)} task${d.tasks_submitted === 1 ? "" : "s"} submitted`],
+         ...(d.tied != null ? [[usd(d.tied), " median of the runs tied to each task (final batch)"]] : [])]
+      : [[usd(d.runs), " task-run spend"], ["No tasks", " submitted this day"]],
+  });
+  const rows = days.slice().reverse().map(d => `<tr><td>${esc(longDay(d.day))}${d.today ? " (so far)" : ""}</td><td>${esc(usd(d.runs))}</td>
+    <td>${fmtInt(d.tasks_submitted)}</td><td>${d.tasks_submitted ? esc(usd(d.avg)) : "–"}</td><td>${d.tied != null ? esc(usd(d.tied)) : "–"}</td></tr>`).join("");
+  return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>Day (UTC)</th><th>Task-run spend</th>
+    <th>Tasks submitted</th><th>Per submitted task</th><th>Median tied to each task</th></tr>${rows}</table></details>`;
+}
+
+function perTaskChart(c, { id, title, what, cls, totalOf }) {
   const byDay = {}, all = [];
   c.tasks.forEach(t => {
     if (!t.last_submitted) return;
@@ -252,17 +274,14 @@ function perTaskChart(c, { id, title, what, cls, totalOf, runAvg = false }) {
              min: v.length ? Math.min(...v) : 0, max: v.length ? Math.max(...v) : 0 };
   });
   const overall = median(all);
-  const subs = c.summary.tasks_submitted || 0, allRuns = c.summary.runs || 0;  // same figure as the per-task tile
-  const avgNote = runAvg && subs ? ` · all task-run spend ÷ tasks submitted over the ${c.days} days: ${esc(usd(allRuns / subs))}` : "";
   const chart = columns({
     id, title,
-    sub: `median cost of the tasks submitted that day (${esc(what)}), since each task started${avgNote}`,
+    sub: `median cost of the tasks submitted that day (${esc(what)}), since each task started`,
     days, series: [{ key: "median", label: "Median per task", cls }], value: (d, k) => d[k],
     pace: overall || 0, paceLabel: overall ? `${kUsd(overall)} median over the ${c.days} days` : "",
-    tip: d => [...(d.n ? [[usd(d.median), " median per task"], [fmtInt(d.n), ` task${d.n === 1 ? "" : "s"} submitted · average ${usd(d.mean)}`],
-                          [`${usd(d.min)} – ${usd(d.max)}`, " cheapest – most expensive"]]
-                       : [["No tasks", " submitted this day"]]),
-               ...(runAvg && d.tasks_submitted ? [[usd(d.runs / d.tasks_submitted), " all task-run spend that day ÷ tasks submitted"]] : [])],
+    tip: d => d.n ? [[usd(d.median), " median per task"], [fmtInt(d.n), ` task${d.n === 1 ? "" : "s"} submitted · average ${usd(d.mean)}`],
+                     [`${usd(d.min)} – ${usd(d.max)}`, " cheapest – most expensive"]]
+                  : [["No tasks", " submitted this day"]],
   });
   const rows = days.slice().reverse().filter(d => d.n).map(d => `<tr><td>${esc(longDay(d.day))}${d.today ? " (so far)" : ""}</td><td>${fmtInt(d.n)}</td>
     <td>${esc(usd(d.median))}</td><td>${esc(usd(d.mean))}</td><td>${esc(usd(d.min))}</td><td>${esc(usd(d.max))}</td></tr>`).join("");
