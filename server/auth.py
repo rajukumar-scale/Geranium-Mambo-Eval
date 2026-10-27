@@ -60,8 +60,9 @@ class GateError(Exception):
     pass
 
 
-async def redash_rows(query_id, parameters=None, max_age=0):
-    """Run a saved Redash query and return its rows (max_age: reuse a result up to that many seconds old)."""
+async def redash_rows(query_id, parameters=None, max_age=0, timeout=90):
+    """Run a saved Redash query and return its rows (max_age: reuse a result up to that many seconds old;
+    timeout: how long to wait for a fresh result)."""
     # Redash's WAF rejects Python's default user agent with a 403.
     headers = {"Authorization": f"Key {config.REDASH_API_KEY}", "User-Agent": "eval-portal/1.0"}
     async with httpx.AsyncClient(base_url=config.REDASH_URL, headers=headers, timeout=60) as client:
@@ -69,7 +70,7 @@ async def redash_rows(query_id, parameters=None, max_age=0):
                                  json={"parameters": parameters or {}, "max_age": max_age})
         resp.raise_for_status()
         data = resp.json()
-        deadline = time.time() + 90
+        deadline = time.time() + timeout
         while "job" in data:
             job = data["job"]
             if job["status"] == 3:

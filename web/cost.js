@@ -48,7 +48,8 @@ async function load(refresh = false) {
 function render() {
   const { budget: b = {} } = C.data;
   let c = C.data.cost || {};
-  $("#asof").textContent = c.fetched_at ? `Data as of ${when(c.fetched_at)} (${fmtAgo(c.fetched_at)}) · refreshes every 10 min` : "";
+  $("#asof").textContent = c.fetched_at ? `Data as of ${when(c.fetched_at)} (${fmtAgo(c.fetched_at)}) · `
+    + (c.refreshing ? "updating in the background" : "refreshes every 10 min") : "";
   const notes = [];
   if (c.error) notes.push(c.error);
   if (c.stale) notes.push(`Couldn't refresh just now (${c.stale}); showing the last figures.`);
@@ -86,6 +87,21 @@ function render() {
 function tile(label, value, sub) {
   return `<div class="tile"><div class="tile-label">${esc(label)}</div><div class="tile-value">${value}</div><div class="tile-sub">${sub}</div></div>`;
 }
+// Per submitted task. Test runs can't be tied to a task, so task runs use all run spend ÷ tasks submitted (an average,
+// test runs included); the median of the runs tied to each task is the smaller, final-batch-only figure.
+function perTaskTile(c) {
+  const s = c.summary, n = s.tasks_submitted || 0;
+  if (C.view === "evals" || !n) return tile("Per submitted task", s.per_task_median == null ? "–" : esc(usd(s.per_task_median)),
+    s.per_task_median == null ? "no submissions yet" : `median · average ${esc(usd(s.per_task_mean))} · ${esc(VIEWS[C.view].label.toLowerCase())}`);
+  const runsAvg = (s.runs || 0) / n, tied = median(c.tasks.map(t => t.agent_runs || 0));
+  const tiedNote = `${esc(usd(tied))} median of the runs tied to each task (final batch)`;
+  if (C.view === "runs") return tile("Task runs per submitted task", esc(usd(runsAvg)),
+    `average: all run spend ÷ ${fmtInt(n)} tasks, test runs included · ${tiedNote}`);
+  const evalsAvg = c.tasks.reduce((t, x) => t + (x.sandbox || 0) + (x.portal || 0), 0) / n;
+  return tile("Per submitted task", esc(usd(runsAvg + evalsAvg)),
+    `average: ${esc(usd(runsAvg))} task runs (test runs included) + ${esc(usd(evalsAvg))} evals · ${tiedNote}`);
+}
+
 function renderTiles(c, b) {
   const s = c.summary;
   $("#tiles").innerHTML = [
@@ -93,8 +109,7 @@ function renderTiles(c, b) {
       SERIES.filter(x => inView(x.key) && s[x.key]).map(x => `${esc(usd(s[x.key]))} ${esc(x.label.toLowerCase())}`).join(" · ") || "nothing"),
     inView("runs") && tile("Task runs tied to a submission", s.runs ? `${Math.round(100 * s.runs_linked / s.runs)}%` : "–",
       `${esc(usd(s.runs_linked))} of ${esc(usd(s.runs))} · the rest are re-runs or unsubmitted work`),
-    tile("Per submitted task", s.per_task_median == null ? "–" : esc(usd(s.per_task_median)),
-      s.per_task_median == null ? "no submissions yet" : `median · average ${esc(usd(s.per_task_mean))} · ${esc(VIEWS[C.view].label.toLowerCase())}`),
+    perTaskTile(c),
     tile("Per active contributor, per day", s.per_cb_day == null ? "–" : esc(usd(s.per_cb_day)), `${esc(VIEWS[C.view].label.toLowerCase())} ÷ contributor-days`),
     tile("Tasks submitted", esc(fmtInt(s.tasks_submitted)), `by ${fmtInt(s.submitters)} contributors · L-1/L0`),
     tile("Key budget this cycle", b.pct == null ? "–" : `${esc(b.pct)}%`,
@@ -237,7 +252,7 @@ function perTaskChart(c, { id, title, what, cls, totalOf, runAvg = false }) {
              min: v.length ? Math.min(...v) : 0, max: v.length ? Math.max(...v) : 0 };
   });
   const overall = median(all);
-  const subs = c.daily.reduce((n, d) => n + (d.tasks_submitted || 0), 0), allRuns = c.daily.reduce((n, d) => n + (d.runs || 0), 0);
+  const subs = c.summary.tasks_submitted || 0, allRuns = c.summary.runs || 0;  // same figure as the per-task tile
   const avgNote = runAvg && subs ? ` · all task-run spend ÷ tasks submitted over the ${c.days} days: ${esc(usd(allRuns / subs))}` : "";
   const chart = columns({
     id, title,

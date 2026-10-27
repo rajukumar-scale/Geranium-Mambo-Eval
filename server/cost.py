@@ -24,6 +24,7 @@ log = logging.getLogger("portal.cost")
 DAY = 86400
 RANGES = (7, 14, 30)
 CACHE_SEC = 600
+LOOKUP_TIMEOUT = 300  # the cost queries scan LiteLLM + SMIG; Redash can also queue them behind other work
 COVERAGE_DAYS = 5  # how far back the "task runs not logged" check looks
 _cache = {}  # days -> (fetched at, report)
 
@@ -125,17 +126,35 @@ def build(days, day_rows, task_rows, person_rows, billed_rows=()):
 
 
 async def report(days, force=False):
-    """The cost report for the last `days` (7, 14 or 30), cached 10 minutes; keeps the last good one if Redash fails."""
+    """The cost report for the last `days` (7, 14 or 30), cached 10 minutes; keeps the last good one if Redash fails.
+    Once cached figures are older than that, they're returned at once and refreshed in the background: the queries
+    read LiteLLM and SMIG and take 30-45 s each, so the page shouldn't wait on them."""
     days = days if days in RANGES else 14
     hit = _cache.get(days)
-    if hit and not force and time.time() - hit[0] < CACHE_SEC:
-        return hit[1]
+    if hit and not force:
+        if time.time() - hit[0] >= CACHE_SEC and days not in _refreshing:
+            _refreshing[days] = asyncio.create_task(_refresh(days))
+        return {**hit[1], "refreshing": True} if days in _refreshing else hit[1]
+    return await _load(days, force, hit)
+
+
+_refreshing = {}  # days -> running background refresh (kept so the task isn't garbage-collected)
+
+
+async def _refresh(days):
+    try:
+        await _load(days, False, _cache.get(days))
+    finally:
+        _refreshing.pop(days, None)
+
+
+async def _load(days, force, hit):
     params, age = {"days": days}, 0 if force else CACHE_SEC
-    billed_lookup = (auth.redash_rows(config.COST_PORTAL_SMIG_QUERY_ID, max_age=age) if config.COST_PORTAL_SMIG_QUERY_ID
-                     else asyncio.sleep(0, result=[]))
+    billed_lookup = (auth.redash_rows(config.COST_PORTAL_SMIG_QUERY_ID, max_age=age, timeout=LOOKUP_TIMEOUT)
+                     if config.COST_PORTAL_SMIG_QUERY_ID else asyncio.sleep(0, result=[]))
     try:
         day_rows, task_rows, person_rows, billed_rows = await asyncio.gather(
-            *(auth.redash_rows(q, params, max_age=age)
+            *(auth.redash_rows(q, params, max_age=age, timeout=LOOKUP_TIMEOUT)
               for q in (config.COST_DAY_QUERY_ID, config.COST_TASK_QUERY_ID, config.COST_PERSON_QUERY_ID)),
             billed_lookup, return_exceptions=True)
         for rows in (day_rows, task_rows, person_rows):
