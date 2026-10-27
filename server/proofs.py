@@ -31,15 +31,18 @@ def mask_email(email):
     return (local[:2] + "***" + local[-1:] if len(local) > 3 else local[:1] + "***") + "@" + domain
 
 
-def create(run, chat, report, override=None):
+def create(run, chat, report, override=None, inputs=None):
     """override: {by, reason} for a pass an admin issues over a review that didn't pass. The record keeps the
-    review's own verdict and score under admin_override, and every pass screen and /verify shows it."""
+    review's own verdict and score under admin_override, and every pass screen and /verify shows it.
+    inputs: staleness.snapshot() of the saved inputs when the review finished, so the pass can later be shown as
+    outdated if an input it read changes (staleness.check)."""
     code = make_code(run["id"], report["stage"] if report["stage"] != run.get("command") else None)
     models = run["models"] or {}
     totals = {k: sum(m.get(k, 0) for m in models.values()) for k in ("calls", "input", "output", "cache_read", "cache_creation")}
     payload = {
         "code": code,
-        "verdict": "PASS" if override else report["verdict"],
+        # An override over a PARTIAL NON-FAIL stays NON-FAIL; over a failing review it's a PASS.
+        "verdict": report["verdict"] if not override or report["verdict"] in config.PASSING_VERDICTS else "PASS",
         "score": None if override else report["score"],
         "stage": report["stage"],
         # Set when the stage was checked inside another command's run; tokens and cost are that whole run's.
@@ -64,6 +67,8 @@ def create(run, chat, report, override=None):
         "report_fields": report.get("fields", {}),
         "issued_at": time.time(),
     }
+    if inputs is not None:
+        payload["inputs"] = inputs
     if override:
         payload["admin_override"] = {"by": override["by"], "reason": override["reason"], "at": time.time(),
                                      "original_verdict": report.get("verdict"), "original_score": report.get("score")}

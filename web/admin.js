@@ -742,7 +742,7 @@ function renderDetail(fresh = true) {
         + d.broadcasts_waiting.map(b => `• ${b.title} (${fmtTime(b.created_at)})`).join("\n"))}">📣 ${d.broadcasts_waiting.length} broadcast${d.broadcasts_waiting.length === 1 ? "" : "s"} not yet acknowledged</span>` : ""}
       ${d.blocked ? `<span class="chip flag" title="${esc(blockTitle(d.blocked))}">⛔ chat blocked</span>` : ""}
       <span class="spacer"></span>
-      ${(d.override_options || []).length ? `<button data-override title="Issue a pass card over a review that didn't pass. It's marked as an admin override, with your name and reason, on the pass screen and on /verify.">Issue pass (override)…</button>` : ""}
+      ${(d.override_options || []).length ? `<button data-override title="Issue a pass card for a review that got none (it didn't pass, or passed but PARTIAL). It's marked as an admin override, with your name and reason, on the pass screen and on /verify.">Issue pass (override)…</button>` : ""}
       ${d.blocked ? `<button data-unblock="attempt" data-key="${esc(d.attempt_id)}">Unblock chat</button>`
         : `<button class="danger" data-block="attempt">Block chat</button>`}
       ${d.disabled ? `<button data-unblock="person" data-key="${esc(d.disabled.key)}">Re-enable contributor</button>`

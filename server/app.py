@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, progress, proofs, spend, submissions, taskids, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, progress, proofs, spend, staleness, submissions, taskids, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -228,8 +228,9 @@ def chat_state(attempt_id):
             "followups_left": (max(0, config.DAILY_FOLLOWUP_LIMIT - db.runs_today(attempt_id, "followup"))
                                if config.DAILY_FOLLOWUP_LIMIT else None),
         },
-        "proofs": [json.loads(r["payload"]) for r in
-                   db.q("select payload from proofs where attempt_id=? order by created_at", (attempt_id,))],
+        # each with "outdated": set when an input its review read has changed since (staleness.check)
+        "proofs": staleness.annotate(attempt_id, [json.loads(r["payload"]) for r in
+                   db.q("select payload from proofs where attempt_id=? order by created_at", (attempt_id,))]),
         "blocked": blocks.view(blocks.chat_blocked(attempt_id)),
         "disabled": blocks.view(blocks.disabled(chat["user_id"], chat["email"])),  # seen by admins only
     }
@@ -618,7 +619,8 @@ def get_input_file(key: str, request: Request, i: int = 0):
 @app.get("/api/messages")
 def get_messages(request: Request, after: int = 0):
     session = current_user(request)
-    return for_viewer(session, db.messages(session["attempt_id"], after))
+    attempt_id = session["attempt_id"]
+    return for_viewer(session, staleness.annotate_messages(attempt_id, db.messages(attempt_id, after)))
 
 
 @app.get("/api/events")
@@ -793,6 +795,7 @@ def verify(code: str, request: Request):
     payload = proofs.lookup(code)
     if not payload:
         raise HTTPException(404, "Unknown verification code.")
+    payload["outdated"] = staleness.check(payload)  # after the signature check: computed now, not part of the record
     return payload if viewer_is_admin(request) else taskids.hide(payload)
 
 
@@ -1106,7 +1109,7 @@ def admin_chat(attempt_id: str, request: Request):
     if not db.get_chat(attempt_id):
         raise HTTPException(404, "No such chat.")
     state = chat_state(attempt_id)
-    state["messages"] = db.messages(attempt_id)
+    state["messages"] = staleness.annotate_messages(attempt_id, db.messages(attempt_id))
     state["runs"] = [run_view(r) | {"models": json.loads(r["models"] or "{}")} for r in
                      db.q("select * from runs where attempt_id=? order by created_at desc limit 100", (attempt_id,))]
     state["admin_requests"] = db.q("select * from admin_requests where attempt_id=? order by id desc", (attempt_id,))
@@ -1129,12 +1132,15 @@ def _latest_reports(attempt_id):
 
 
 def override_options(attempt_id):
-    """Stages whose newest review didn't pass and has no pass card: what an admin can issue a pass for.
-    same_input = the saved input still matches what that review graded (a pass needs that)."""
+    """Stages whose newest review got no pass card: it didn't pass, or it passed but PARTIAL (no automatic card).
+    That's what an admin can issue a pass for. same_input = the saved input still matches what that review graded
+    (a pass needs that)."""
     out = []
     for stage, meta in _latest_reports(attempt_id).items():
         run = db.get_run(meta["run_id"])
-        if not run or run["status"] != "done" or meta.get("verdict") in config.PASSING_VERDICTS:
+        if not run or run["status"] != "done":
+            continue
+        if meta.get("verdict") in config.PASSING_VERDICTS and meta.get("exec_status") == "COMPLETE":
             continue
         if db.one("select 1 from proofs where run_id=? and payload like ?", (run["id"], f'%"stage": "{stage}"%')):
             continue

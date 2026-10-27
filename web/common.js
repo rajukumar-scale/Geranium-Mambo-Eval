@@ -209,6 +209,13 @@ function rubricWeights(fp) {
   return rubric ? rubric[2] : "";
 }
 
+// A pass whose review read an input that has changed since (server: staleness.check). Shown on the pass screen,
+// so a screenshot of an outdated pass says so, and on /verify.
+function staleBand(p) {
+  if (!p.outdated) return "";
+  return `<div class="staleband"><div class="k">⚠ Outdated pass</div><div class="m">${esc(p.outdated.message)}</div></div>`;
+}
+
 function proofHtml(p, opts = {}) {
   const t = p.totals || {};
   const total = (t.input || 0) + (t.output || 0) + (t.cache_read || 0) + (t.cache_creation || 0);
@@ -229,6 +236,7 @@ function proofHtml(p, opts = {}) {
       </div>
       ${p.fingerprint ? "" : `<div class="codebox"><div class="k">Verification code</div><div class="c">${esc(p.code)}</div></div>`}
     </div>
+    ${staleBand(p)}
     ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as the taxonomy shows it</div>
       <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div></div>` : ""}
     ${rubricWeights(p.fingerprint) ? `<div class="wband"><div class="k">Rubric weights, one per row · not part of the verification code</div>
@@ -275,6 +283,7 @@ function showProof(p) {
     wrap.innerHTML = `<div class="taxo-step" role="alertdialog" aria-labelledby="taxo-title">
       <div class="taxo-head"><span class="taxo-icon" aria-hidden="true">⚠</span><span id="taxo-title">Before you screenshot</span></div>
       <div class="taxo-body">
+        ${p.outdated ? `<p class="taxo-warn">⚠ This pass is outdated. ${esc(p.outdated.message)}</p>` : ""}
         <p>This pass is for the exact <b class="mono">${cmd}</b> you sent in this review.</p>
         <p>If you fixed it here to pass, put that <b>latest fixed version into the taxonomy</b>. Don't forget to update it.</p>
         <p class="taxo-warn">If the taxonomy doesn't match the version that passed here, we will know, and your task will be flagged.</p>
@@ -324,8 +333,9 @@ function messageHtml(m, opts = {}) {
       ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}</div></div>`;
   }
   if (m.role === "proof") {
-    return `<div class="msg system"><div class="bubble proofcard"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? " (admin override)" : ""}</b>
-      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}<button class="primary" data-proof="${m.id}">Show pass screen</button></div></div></div>`;
+    const stale = meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "";
+    return `<div class="msg system"><div class="bubble proofcard${meta.outdated ? " stale" : ""}"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? " (admin override)" : ""}</b>${meta.outdated ? ` <span class="pill OUTDATED">OUTDATED</span>` : ""}
+      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
   }
   const warn = m.meta && (m.meta.spend_flag || m.meta.warn) ? " warnnote" : "";
   return `<div class="msg system"><div class="bubble${warn}">${md(m.content)}<div class="ts-row">${ts}</div></div></div>`;

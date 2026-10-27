@@ -210,6 +210,9 @@ def migrate():
         ex("update runs set task_id=(select task_id from chats c where c.attempt_id=runs.attempt_id),"
            " actor_user_id=(select user_id from chats c where c.attempt_id=runs.attempt_id),"
            " actor_email=(select email from chats c where c.attempt_id=runs.attempt_id)")
+    proof_cols = {r["name"] for r in q("pragma table_info(proofs)")}
+    if "stale_notified" not in proof_cols:  # which changed inputs the chat was last told made this pass outdated
+        ex("alter table proofs add column stale_notified text")
     ex("create index if not exists runs_created on runs(created_at)")
     ex("create index if not exists llm_calls_created on llm_calls(created_at)")  # status page hourly error counts
     # last_activity = the chat's latest message. Opening a chat or signing in used to bump it, which made the

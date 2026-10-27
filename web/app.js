@@ -203,7 +203,7 @@ function addMessage(m) {
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 200;
   box.insertAdjacentHTML("beforeend", messageHtml(m));
   if (nearBottom || m.role === "user") box.scrollTop = box.scrollHeight;
-  if (["report", "proof", "assistant"].includes(m.role)) refreshSide();
+  if (["report", "proof", "assistant"].includes(m.role) || (m.meta && m.meta.stale_notice)) refreshSide();
 }
 
 function renderMessages() {
@@ -404,6 +404,20 @@ function pickDate(why = "") {
 }
 $("#chip-date").onclick = () => { if (state.run) return uiAlert("A run is in progress", "Change the date after it finishes."); pickDate(); };
 
+// Pass cards already in the chat were drawn with the outdated state of that moment; redraw any whose state changed
+// (an input saved since makes an earlier pass outdated; a newer input can make it current again).
+function syncProofCards(proofs) {
+  const byCode = Object.fromEntries((proofs || []).map(p => [p.code, p.outdated || null]));
+  for (const m of state.messages) {
+    if (m.role !== "proof" || !m.meta || !(m.meta.code in byCode)) continue;
+    const now = byCode[m.meta.code];
+    if (JSON.stringify(m.meta.outdated || null) === JSON.stringify(now)) continue;
+    m.meta.outdated = now;
+    const el = document.querySelector(`#messages [data-proof="${m.id}"]`)?.closest(".msg");
+    if (el) el.outerHTML = messageHtml(m);
+  }
+}
+
 function renderSide() {
   const me = state.me;
   renderDate();
@@ -417,7 +431,8 @@ function renderSide() {
   $("#reports").innerHTML = me.reports.length ? me.reports.map(r =>
     `<div class="list-item" data-rep="${esc(r.file)}"><span class="grow">${esc(labels[r.stage] || r.stage)}</span>${pill(r.verdict)}</div>`).join("") : "None yet";
   $("#proofs").innerHTML = me.proofs.length ? me.proofs.map((p, i) =>
-    `<div class="list-item" data-pr="${i}" title="${esc(p.fingerprint || p.code)}"><span class="grow">/${esc(p.stage)} · <span class="mono">${p.fingerprint ? "🔏 " + esc(shortFp(p.fingerprint)) : esc(p.code)}</span></span>${pill(p.verdict)}</div>`).join("") : "None yet";
+    `<div class="list-item" data-pr="${i}" title="${esc(p.outdated ? p.outdated.message : p.fingerprint || p.code)}"><span class="grow">/${esc(p.stage)} · <span class="mono">${p.fingerprint ? "🔏 " + esc(shortFp(p.fingerprint)) : esc(p.code)}</span></span>${pill(p.outdated ? "OUTDATED" : p.verdict)}</div>`).join("") : "None yet";
+  syncProofCards(me.proofs);
   const size = n => (n == null ? "" : n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`);
   $("#inputs").innerHTML = me.inputs.length ? me.inputs.map(i => {
     const bytes = i.files.reduce((t, f) => t + (f.bytes || 0), 0);
