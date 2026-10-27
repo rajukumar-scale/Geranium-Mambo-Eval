@@ -284,3 +284,5 @@ run, so it runs one run at a time.
 - `web/`: the chat, admin and verify pages (plain HTML/JS, marked + DOMPurify from a CDN).
 - `runner/Dockerfile`: the sandbox image (Ubuntu, Python 3, Claude Code 2.1.296).
 - `deploy/`: the VM setup and update scripts, systemd unit and Caddyfile.
+
+Auto-deploy has been on since 2026-10-27: merges to `main` go live within about a minute.
