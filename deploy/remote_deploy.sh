@@ -46,7 +46,8 @@ done
 LIVE=$(q "$LIVE_SQL")
 QUEUED=$(q "select count(*) from runs where status='queued'")
 RELOAD=0
-for unit in eval-portal.service eval-portal-update.service; do
+for unit in eval-portal.service eval-portal-update.service eval-portal-pull.service eval-portal-pull.timer; do
+  [ -e "$APP/deploy/$unit" ] || continue
   if ! cmp -s "$APP/deploy/$unit" "/etc/systemd/system/$unit"; then
     install -m 644 "$APP/deploy/$unit" "/etc/systemd/system/$unit"; RELOAD=1; echo "$unit updated"
   fi
