@@ -219,15 +219,15 @@ button.danger-solid:hover { border-color: var(--ink); }
 .taxo-foot button:not(.primary) { background: #FFF; color: #000; border-color: #C7C7C7; }
 .proof .head { padding: 18px 22px 18px; color: #fff; background: var(--evergreen); display: flex; gap: 16px; align-items: flex-end; }
 .proof .head .left { flex: 1; min-width: 0; }
-.proof .head .brandline { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; opacity: .8; margin-bottom: 12px; }
-.proof .head .verdict { display: flex; align-items: center; gap: 10px; font-size: 32px; line-height: 36px; font-weight: 400; letter-spacing: -0.02em; }
-.proof .head .vbadge { font-size: 26px; line-height: 30px; font-weight: 500; color: #000; border-radius: 9999px; padding: 3px 16px 4px; background: var(--positive); }
+.proof .head .brandline { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; opacity: .8; margin-bottom: 12px; }
+.proof .head .verdict { display: flex; align-items: center; gap: 12px; font-size: 36px; line-height: 40px; font-weight: 400; letter-spacing: -0.02em; }
+.proof .head .vbadge { font-size: 30px; line-height: 34px; font-weight: 500; color: #000; border-radius: 9999px; padding: 3px 16px 4px; background: var(--positive); }
 .proof .head .vbadge.NON-FAIL { background: var(--neutral); }
-.proof .head .sub { opacity: .88; margin-top: 6px; font-size: 14px; }
+.proof .head .sub { opacity: .92; margin-top: 8px; font-size: 17px; }
 .proof .head .codebox { text-align: right; }
-.proof .fpband { padding: 12px 16px; border-bottom: 1px solid var(--line); background: #F6FAF7; }
-.proof .fpband .k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 5px; }
-.proof .fpband .fp { white-space: pre-wrap; font-family: var(--mono); font-size: 24px; line-height: 1.4; color: #000; overflow-wrap: anywhere; }
+.proof .fpband { padding: 16px 22px 18px; border-bottom: 1px solid var(--line); background: #F6FAF7; }
+.proof .fpband .k { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 5px; }
+.proof .fpband .fp { white-space: pre-wrap; font-family: var(--mono); font-size: 34px; line-height: 1.3; color: #000; overflow-wrap: break-word; letter-spacing: .01em; }
 .guide-sample .fpband { padding: 10px 14px; }
 .proof .wband { padding: 8px 16px; border-bottom: 1px solid var(--line); }
 .proof .wband .k { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 3px; }
@@ -494,3 +494,13 @@ button.danger-solid:hover { border-color: var(--ink); }
 .proof .dlnote { padding: 0 22px 16px; font-size: 13px; }
 .proof .dlnote.ok { color: #1E6B34; }
 .proof .dlnote.bad { color: #8A1C22; }
+
+/* screenshot-safe pass card: the four IDs stay visible, everything else folds under "More details" */
+.proof .grid.ids .v { font-size: 13.5px; }
+.proof details.more { border-top: 1px solid var(--line); }
+.proof details.more > summary { cursor: pointer; padding: 8px 16px; font-size: 12px; color: var(--muted); font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: .07em; list-style: none; }
+.proof details.more > summary::-webkit-details-marker { display: none; }
+.proof details.more > summary::before { content: "▸ "; }
+.proof details.more[open] > summary::before { content: "▾ "; }
+.proof details.more > .wband { border-top: 1px solid var(--line); }

@@ -636,11 +636,10 @@ function openGuide() {
       draft, how to fix what a report raised, or ideas for scenarios, traps and edge cases. The one thing it won't do is write the
       whole task for you in one go (a full prompt, rubric, OE set or all the SQL); build it together piece by piece instead.
       Type <b class="mono">/admin</b> and a message to reach a person.</p>
-    <h4>4 · What to upload</h4>
+    <h4>4 · What to screenshot</h4>
     <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run), a <b>pass screen</b> pops up with a verification
-      code. Click <b>⬇ Download pass image</b> and upload that image in the taxonomy: one for each passing review. The portal
-      checks the image with the same reader the taxonomy uses before you get it, so the code reads correctly. (A screenshot of
-      the whole pass screen still works, but small or cropped screenshots can be misread.)</p>
+      code. Screenshot that card and upload it in the taxonomy: one for each passing review. Keep the whole card in the shot and
+      don't zoom far out. You can also click <b>⬇ Download image</b>: that image is checked with the taxonomy's reader before you get it.</p>
     <p>For the injection, prompt and oracle events, <b>Copy what passed</b> copies the exact text that review graded, so what you
       paste into the taxonomy matches the pass.</p>
     <p>⚠ Before the pass screen opens, you'll be asked to confirm you've put the <b>latest version you fixed</b> into the taxonomy.
@@ -841,7 +840,7 @@ function confirmReview(command, text) {
           <span class="muted">· most reviews cost about $2–25</span></div></div>` : ""}
       <p class="muted" style="margin-bottom:0">${minutes ? `Usually takes about ${Math.round(minutes)} minutes` : "Takes a while"} and uses this attempt's
         saved inputs. While it runs you'll see an estimated % and time left. You can close the page; the result appears in this chat,
-        and if it passes you'll get the pass screen and its pass image to upload.</p>
+        and if it passes you'll get the pass screen to screenshot.</p>
       ${notifyLine ? `<p class="muted" style="margin:8px 0 0">${notifyLine}</p>` : ""}</div>`, "Start review");
 }
 $("#send").onclick = send;
