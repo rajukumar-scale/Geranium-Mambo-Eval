@@ -1,6 +1,7 @@
 """Original Conference Eval Portal: login gate, chat API, admin API and pages."""
 
 import asyncio
+import base64
 import csv
 import datetime
 import hashlib
@@ -22,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, progress, proofs, spend, staleness, submissions, taskids, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -797,6 +798,74 @@ def verify(code: str, request: Request):
         raise HTTPException(404, "Unknown verification code.")
     payload["outdated"] = staleness.check(payload)  # after the signature check: computed now, not part of the record
     return payload if viewer_is_admin(request) else taskids.hide(payload)
+
+
+# ---- pass image: read back like the taxonomy, copy what passed ------------------------
+
+def proof_for_viewer(code, request):
+    """A pass the caller may act on: their own chat's (or any, for an admin)."""
+    payload = proofs.lookup(code)
+    if not payload or not payload.get("valid"):
+        raise HTTPException(404, "Unknown pass.")
+    try:
+        session = current_user(request)
+        if session.get("admin") or session["attempt_id"] == payload["attempt_id"]:
+            return payload
+    except (HTTPException, Disabled):
+        pass
+    try:
+        current_admin(request)
+        return payload
+    except HTTPException:
+        raise HTTPException(404, "Unknown pass.")
+
+
+class PassImageBody(BaseModel):
+    image: str  # data:image/png;base64,...
+
+
+READER_CALLS = {}  # attempt id -> recent reader-check times (in memory; a restart just resets the hourly cap)
+
+
+@app.post("/api/proofs/{code}/reader-check")
+async def proof_reader_check(code: str, body: PassImageBody, request: Request):
+    """Read the portal's own pass image with the taxonomy's reader (same model, same prompt) before the
+    contributor downloads it, so the image they upload is one the taxonomy reads correctly."""
+    payload = proof_for_viewer(code, request)
+    now = time.time()
+    recent = [t for t in READER_CALLS.get(payload["attempt_id"], []) if now - t < 3600]
+    if len(recent) >= config.READER_CHECKS_PER_HOUR:
+        raise HTTPException(429, "Too many pass image checks this hour. Try again later.")
+    READER_CALLS[payload["attempt_id"]] = recent + [now]
+    head, _, data = body.image.partition(",")
+    try:
+        png = base64.b64decode(data, validate=True)
+    except ValueError:
+        raise HTTPException(400, "That isn't an image.")
+    if head != "data:image/png;base64" or not png.startswith(b"\x89PNG") or len(png) > 6_000_000:
+        raise HTTPException(400, "That isn't a pass image.")
+    try:
+        result = await taxo_reader.check(payload, png)
+    except Exception as exc:  # the reader is down or unreachable: the image is still the portal's own
+        log.warning("reader check failed for %s: %s", code, exc)
+        return {"ok": None, "error": "The check couldn't run right now."}
+    log.info("reader check %s %s: ok=%s read=%r", payload["attempt_id"], payload["stage"], result["ok"], result["read"])
+    return result
+
+
+@app.get("/api/proofs/{code}/input")
+def proof_input(code: str, request: Request):
+    """The exact text this pass graded, to paste into the taxonomy, while the saved input is still that version."""
+    payload = proof_for_viewer(code, request)
+    stage = payload["stage"]
+    if stage not in ("injection", "prompt", "oe"):
+        raise HTTPException(404, "Only the injection, prompt and oracle events can be copied.")
+    if fingerprint.for_attempt(payload["attempt_id"], stage) != payload.get("fingerprint"):
+        raise HTTPException(409, f"Your saved {stage} has changed since this pass, so this pass no longer matches it. "
+                                 f"Run /{stage} again on the version you want to submit.")
+    entry = workspace.read_input(payload["attempt_id"], stage, limit=200_000_000)
+    text = "\n".join(f["text"] for f in (entry or {}).get("files", []) if f.get("text") is not None)
+    return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
 
 
 # ---- admin -------------------------------------------------------------------
