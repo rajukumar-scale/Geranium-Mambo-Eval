@@ -1209,7 +1209,7 @@ def override_options(attempt_id):
         run = db.get_run(meta["run_id"])
         if not run or run["status"] != "done":
             continue
-        if meta.get("verdict") in config.PASSING_VERDICTS and meta.get("exec_status") == "COMPLETE":
+        if config.passing(stage, meta.get("verdict")) and meta.get("exec_status") == "COMPLETE":
             continue
         if db.one("select 1 from proofs where run_id=? and payload like ?", (run["id"], f'%"stage": "{stage}"%')):
             continue
