@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -29,6 +31,7 @@ from .runner import RUNNER
 log = logging.getLogger("portal")
 WEB = config.ROOT / "web"
 app = FastAPI(title="Original Conference Eval Portal", docs_url=None, redoc_url=None, openapi_url=None)
+app.add_middleware(GZipMiddleware, minimum_size=1000)  # boat's link is slow; event streams are left alone
 # Changes whenever the web files do: an open chat tab compares it on every reconnect and reloads after a deploy.
 WEB_BUILD = hashlib.sha256(b"".join(p.read_bytes() for p in sorted(WEB.glob("*")) if p.is_file())).hexdigest()[:12]
 NO_CACHE = {"Cache-Control": "no-cache"}  # browsers revalidate (cheap 304s), so a deploy shows up on the next load
@@ -514,6 +517,11 @@ def history_chats(session):
 
 @app.get("/api/history")
 def history(request: Request):
+    with db.reading():
+        return _history(request)
+
+
+def _history(request):
     session = current_user(request)
     god = bool(session.get("admin"))
     totals = spend.attempt_totals() if god else {}
@@ -1070,38 +1078,101 @@ async def admin_rubric_done(request: Request, refresh: int = 0):
     return await donedebug.diagnose(rubric.get("passed_attempts", []), force=bool(refresh))
 
 
+ADMIN_CHATS_TTL = 5  # seconds one build of the /admin chat list is shared by every admin tab
+_admin_chats_cache = {"at": 0.0, "data": None}
+_admin_chats_lock = threading.Lock()
+
+
+def bust_admin_chats():
+    """An admin changed something the list shows: the next load rebuilds it instead of reusing the last one."""
+    _admin_chats_cache["at"] = 0.0
+
+
+def _chat_list_rows():
+    """The newest 500 chats with what the list shows about each: last contributor/admin message, last run status,
+    run count, cost, active runs, passes and last review verdict."""
+    rows = db.q("select * from chats order by admin_open desc, last_activity desc limit 500")
+    last_msg = {r["attempt_id"]: r["id"] for r in db.q(
+        "select attempt_id, max(id) id from messages where role in ('user','admin') group by attempt_id")}
+    texts = {}
+    ids = [last_msg[r["attempt_id"]] for r in rows if r["attempt_id"] in last_msg]
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        texts.update((m["id"], m["text"]) for m in db.q(
+            f"select id, substr(content, 1, 160) text from messages where id in ({','.join('?' * len(chunk))})", chunk))
+    agg = {}
+    for r in db.q("select attempt_id, status, kind, command, verdict, cost_estimate, created_at, finished_at from runs"):
+        a = agg.setdefault(r["attempt_id"], {"run_count": 0, "cost": 0.0, "active_runs": 0, "last": None, "review": None})
+        a["run_count"] += 1
+        a["cost"] += r["cost_estimate"] or 0
+        a["active_runs"] += r["status"] in ("queued", "running")
+        if a["last"] is None or (r["created_at"] or 0) > (a["last"]["created_at"] or 0):
+            a["last"] = r
+        if r["kind"] == "review" and r["verdict"] is not None and (
+                a["review"] is None or (r["finished_at"] or 0) > (a["review"]["finished_at"] or 0)):
+            a["review"] = r
+    passes = {r["attempt_id"]: r["n"] for r in db.q("select attempt_id, count(*) n from proofs group by attempt_id")}
+    for r in rows:
+        a = agg.get(r["attempt_id"]) or {"run_count": 0, "cost": 0, "active_runs": 0, "last": None, "review": None}
+        review = a["review"]
+        r.update(last_text=texts.get(last_msg.get(r["attempt_id"])), last_run_status=(a["last"] or {}).get("status"),
+                 run_count=a["run_count"], cost=a["cost"], active_runs=a["active_runs"],
+                 passes=passes.get(r["attempt_id"], 0),
+                 last_review=f"{review['command']} {review['verdict']}" if review and review["command"] is not None else None)
+    return rows
+
+
+def _build_admin_chats():
+    with db.reading():
+        rows = _chat_list_rows()
+        flagged = spend.flagged_attempts()
+        totals = spend.attempt_totals()
+        all_blocks = blocks.everything()
+        states = _chat_states()
+        for r in rows:
+            st = states.get(r["attempt_id"]) or {}
+            r["archived"], r["idle_days"] = st.get("archived"), st.get("idle_days")
+            r["spend_usd"] = (totals.get(r["attempt_id"]) or {}).get("usd", 0.0)  # what the per-attempt limit counts
+            r["last_text"] = (r["last_text"] or "")[:160]
+            r["blocked"] = (blocks.ATTEMPT, r["attempt_id"]) in all_blocks
+            r["disabled"] = any((blocks.PERSON, k) in all_blocks for k in blocks.person_keys(r["user_id"], r["email"]))
+            hit = flagged.get(r["attempt_id"])
+            r["spend_flag"] = {"spend_usd": hit["spend_usd"], "flagged_at": hit["flagged_at"]} if hit else None
+        since = time.time() - 86400
+        stats = db.one("select count(*) runs, coalesce(sum(cost_estimate),0) cost, coalesce(sum(calls),0) calls "
+                       "from runs where created_at>?", (since,))
+        running = db.one("select count(*) n from runs where status='running'")["n"]
+        steps = step_funnel(states)
+    return {"chats": rows, "stats_24h": stats, "running": running, "slack": notify.configured(),
+            "spend_limit": config.CB_SPEND_LIMIT_USD, "flagged": len(flagged), "steps": steps}
+
+
+class BustAdminChats:
+    """After any admin change (POST/DELETE under /api/admin/), the next chat-list load is built fresh."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if scope["type"] == "http" and scope["method"] in ("POST", "DELETE") and scope["path"].startswith("/api/admin/"):
+                bust_admin_chats()
+
+
+app.add_middleware(BustAdminChats)
+
+
 @app.get("/api/admin/chats")
 def admin_chats(request: Request):
     me_admin = current_admin(request)
-    rows = db.q("""select c.*, (select content from messages m where m.attempt_id=c.attempt_id and m.role in ('user','admin')
-                   order by id desc limit 1) as last_text,
-                   (select status from runs r where r.attempt_id=c.attempt_id order by created_at desc limit 1) as last_run_status,
-                   (select count(*) from runs r where r.attempt_id=c.attempt_id) as run_count,
-                   (select coalesce(sum(cost_estimate),0) from runs r where r.attempt_id=c.attempt_id) as cost,
-                   (select count(*) from runs r where r.attempt_id=c.attempt_id and r.status in ('queued','running')) as active_runs,
-                   (select count(*) from proofs p where p.attempt_id=c.attempt_id) as passes,
-                   (select r.command || ' ' || r.verdict from runs r where r.attempt_id=c.attempt_id and r.kind='review'
-                    and r.verdict is not null order by r.finished_at desc limit 1) as last_review
-                   from chats c order by c.admin_open desc, c.last_activity desc limit 500""")
-    flagged = spend.flagged_attempts()
-    totals = spend.attempt_totals()
-    all_blocks = blocks.everything()
-    states = _chat_states()
-    for r in rows:
-        st = states.get(r["attempt_id"]) or {}
-        r["archived"], r["idle_days"] = st.get("archived"), st.get("idle_days")
-        r["spend_usd"] = (totals.get(r["attempt_id"]) or {}).get("usd", 0.0)  # what the per-attempt limit counts
-        r["last_text"] = (r["last_text"] or "")[:160]
-        r["blocked"] = (blocks.ATTEMPT, r["attempt_id"]) in all_blocks
-        r["disabled"] = any((blocks.PERSON, k) in all_blocks for k in blocks.person_keys(r["user_id"], r["email"]))
-        hit = flagged.get(r["attempt_id"])
-        r["spend_flag"] = {"spend_usd": hit["spend_usd"], "flagged_at": hit["flagged_at"]} if hit else None
-    since = time.time() - 86400
-    stats = db.one("select count(*) runs, coalesce(sum(cost_estimate),0) cost, coalesce(sum(calls),0) calls "
-                   "from runs where created_at>?", (since,))
-    return {"chats": rows, "stats_24h": stats, "queued": RUNNER.queued(), "running": db.one("select count(*) n from runs where status='running'")["n"],
-            "slack": notify.configured(), "me": {"email": me_admin["email"], "role": me_admin["role"]},
-            "spend_limit": config.CB_SPEND_LIMIT_USD, "flagged": len(flagged), "steps": step_funnel(states)}
+    with _admin_chats_lock:  # tabs asking at once wait for one build and share it
+        if _admin_chats_cache["data"] is None or time.time() - _admin_chats_cache["at"] > ADMIN_CHATS_TTL:
+            _admin_chats_cache["data"] = _build_admin_chats()
+            _admin_chats_cache["at"] = time.time()
+        data = _admin_chats_cache["data"]
+    return data | {"queued": RUNNER.queued(), "me": {"email": me_admin["email"], "role": me_admin["role"]}}
 
 
 SPEND_COLUMNS = ("key", "users", "emails", "tasks", "attempts", "runs", "reviews", "followups", "admin_runs", "calls",

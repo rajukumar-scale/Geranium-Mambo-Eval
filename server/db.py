@@ -1,5 +1,6 @@
 """SQLite storage: chats (one per attempt), messages, runs, metered LLM calls, proofs."""
 
+import contextlib
 import json
 import sqlite3
 import threading
@@ -9,6 +10,7 @@ from . import config
 
 _lock = threading.RLock()
 _conn = None
+_local = threading.local()  # per-thread read-only connection, used inside reading()
 
 SCHEMA = """
 create table if not exists chats (
@@ -24,6 +26,7 @@ create table if not exists messages (
   meta text default '{}', created_at real
 );
 create index if not exists messages_attempt on messages(attempt_id, id);
+create index if not exists messages_attempt_role on messages(attempt_id, role, id);
 create table if not exists runs (
   id text primary key, attempt_id text not null, kind text, command text,
   continuation integer default 0, session_id text, resumed integer default 0, runner_box text,
@@ -45,6 +48,7 @@ create table if not exists llm_calls (
 create table if not exists proofs (
   code text primary key, run_id text, attempt_id text, payload text, created_at real
 );
+create index if not exists proofs_attempt on proofs(attempt_id);
 create table if not exists logins (
   id integer primary key autoincrement, ip text, identifier text, attempt_id text,
   ok integer, reason text, created_at real
@@ -101,8 +105,31 @@ def conn():
 
 
 def q(sql, args=()):
+    reader = getattr(_local, "active", None)
+    if reader is not None:
+        return [dict(r) for r in reader.execute(sql, args).fetchall()]
     with _lock:
         return [dict(r) for r in conn().execute(sql, args).fetchall()]
+
+
+@contextlib.contextmanager
+def reading():
+    """Run q()/one() in this block on the thread's own read-only connection, without the global lock. For heavy
+    read-only pages (the /admin lists): WAL lets them read while others write, so they no longer stall every
+    other request. Don't write, or read-then-write, inside it."""
+    conn()  # schema + migrations first
+    path = config.DATA_DIR / "portal.db"
+    if getattr(_local, "reader_path", None) != path:
+        reader = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        reader.row_factory = sqlite3.Row
+        reader.execute("pragma busy_timeout=5000")
+        _local.reader, _local.reader_path = reader, path
+    outer = getattr(_local, "active", None)
+    _local.active = _local.reader
+    try:
+        yield
+    finally:
+        _local.active = outer
 
 
 def one(sql, args=()):
