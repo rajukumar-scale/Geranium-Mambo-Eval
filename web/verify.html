@@ -31,7 +31,7 @@
       try {
         const p = await api("/api/verify/" + encodeURIComponent(code));
         const validity = p.valid ? " · ✔ record verified" : " · ✖ record signature mismatch";
-        $("#result").innerHTML = proofHtml(p, { foot: false, validity });
+        $("#result").innerHTML = proofHtml(p, { foot: false, validity, open: true });
       } catch (e) {
         $("#err").textContent = e.status === 404 ? "No pass with that code exists." : e.message;
         $("#err").classList.remove("hidden");

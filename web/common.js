@@ -228,6 +228,9 @@ function proofHtml(p, opts = {}) {
     .map(([k, v]) => `<div class="wide"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
   const verifyUrl = `${location.origin}/verify/${encodeURIComponent(p.code)}`;
   const stage = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" }[p.stage] || p.stage;
+  // Screenshot-safe (2026-10-27): the taxonomy reads the code off a screenshot with GPT-4o, and it misread small
+  // text in tall cards. So the card is short (header, the code large, four IDs) and everything else is folded
+  // under "More details", which a screenshot doesn't need.
   return `<div class="proof">
     <div class="head">
       <div class="left">
@@ -243,14 +246,17 @@ function proofHtml(p, opts = {}) {
     ${staleBand(p)}
     ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as the taxonomy shows it</div>
       <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div></div>` : ""}
+    <div class="grid ids">
+      <div><div class="k">Attempt ID</div><div class="v">${esc(p.attempt_id)}</div></div>
+      <div><div class="k">Outlier ID</div><div class="v">${esc(p.user_id)}</div></div>
+      <div><div class="k">User</div><div class="v">${esc(p.user_email)}</div></div>
+      <div><div class="k">Completed</div><div class="v">${esc(fmtUTC(p.finished_at))}</div></div>
+    </div>
+    <details class="more"${opts.open ? " open" : ""}><summary>More details</summary>
     ${rubricWeights(p.fingerprint) ? `<div class="wband"><div class="k">Rubric weights, one per row · not part of the verification code</div>
       <div class="w">${esc(rubricWeights(p.fingerprint))}</div></div>` : ""}
     <div class="grid">
-      <div><div class="k">Attempt ID</div><div class="v">${esc(p.attempt_id)}</div></div>
       ${p.task_id ? `<div><div class="k">Task ID</div><div class="v">${esc(p.task_id)}</div></div>` : ""}
-      <div><div class="k">User</div><div class="v">${esc(p.user_email)}</div></div>
-      <div><div class="k">Outlier ID</div><div class="v">${esc(p.user_id)}</div></div>
-      <div><div class="k">Completed</div><div class="v">${esc(fmtUTC(p.finished_at))}</div></div>
       <div><div class="k">Run time</div><div class="v">${esc(fmtDur(p.duration_seconds))}</div></div>
       <div class="wide"><div class="k">Models</div><div class="v">${esc(models)}</div></div>
       <div><div class="k">Model calls</div><div class="v">${fmtInt(t.calls)}</div></div>
@@ -265,10 +271,11 @@ function proofHtml(p, opts = {}) {
       ${hashes}
     </div>
     ${p.fingerprint ? "" : `<div class="code muted">Check this pass at <span class="mono">${esc(verifyUrl)}</span></div>`}
-    ${opts.foot === false ? "" : `<div class="foot"><div class="grow">⬇ <b>Download the pass image</b> and upload it in the taxonomy.
-      It's checked first with the same reader the taxonomy uses, so it reads correctly.</div>
+    </details>
+    ${opts.foot === false ? "" : `<div class="foot"><div class="grow">📸 <b>Screenshot this card</b> and upload it in the taxonomy.
+      Or download the image, which is checked with the taxonomy's reader first.</div>
       ${COPYABLE.has(p.stage) && p.fingerprint ? `<button data-copypass>Copy what passed</button>` : ""}
-      <button class="primary" data-dlpass>⬇ Download pass image</button><button data-close>Close</button></div>
+      <button data-dlpass>⬇ Download image</button><button data-close>Close</button></div>
       <div class="dlnote muted" data-dlnote hidden></div>`}
   </div>`;
 }
