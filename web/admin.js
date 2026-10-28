@@ -166,7 +166,7 @@ function openBudget() {
     <p class="muted" style="margin-bottom:0">The key is shared with the platform's own task traffic. The cap is set on the LiteLLM key, and LiteLLM
       stopped the key at the cap on Oct 11 (reviews here fail until the cycle resets or the cap is raised); since Oct 16 most calls go through SMIG.
       Figures are LiteLLM's tables plus SMIG's usage records in Snowflake (a few minutes behind).</p>`;
-  const w = openModal("LiteLLM key budget", body, `<a class="button" href="/admin/cost">Cost page</a><button data-refresh>Refresh now</button>${b.query_url ? `<a class="button" href="${esc(b.query_url)}" target="_blank" rel="noopener">Open in Redash</a>` : ""}`);
+  const w = openModal("LiteLLM key budget", body, `${S.owner ? `<a class="button" href="/admin/cost">Cost page</a>` : ""}<button data-refresh>Refresh now</button>${b.query_url ? `<a class="button" href="${esc(b.query_url)}" target="_blank" rel="noopener">Open in Redash</a>` : ""}`);
   wireSpendChart(w, b);
   const btn = w.querySelector("[data-refresh]");
   btn.onclick = async () => { btn.disabled = true; btn.textContent = "Refreshing…"; await loadBudget(true); w.remove(); openBudget(); };
@@ -550,6 +550,8 @@ async function loadChats() {
   const res = await api("/api/admin/chats");
   $("#whoami").innerHTML = `<b>${esc(res.me.email)}</b> · ${esc(res.me.role)}`;
   $("#admins-btn").classList.toggle("hidden", res.me.role !== "owner");
+  S.owner = res.me.role === "owner";  // only owners see the Cost page
+  document.querySelector('#view-switch [data-view="cost"]').classList.toggle("hidden", !S.owner);
   S.chats = res.chats;
   const st = res.stats_24h;
   $("#stats").innerHTML = `<span class="sb-label">Last 24 h</span><span>${st.runs} runs · ${fmtInt(st.calls)} model calls · ~$${Number(st.cost).toFixed(2)}</span>

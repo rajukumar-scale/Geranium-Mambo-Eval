@@ -102,7 +102,7 @@ PROOF_SECRET = _get("PROOF_SECRET", "")
 COOKIE_SECURE = _get("COOKIE_SECURE", "0") == "1"
 SESSION_DAYS = _int("SESSION_DAYS", 7)
 
-# Owner logins: a plain username (e.g. atlasadmin) or an email. All of them use ADMIN_PASSWORD.
+# Owner logins: a plain username (e.g. atlasadmin) or an email. All of them use ADMIN_PASSWORD. Only owners see the Cost page.
 ADMIN_EMAILS = [e.lower() for e in _list("ADMIN_EMAILS", "atlasadmin")]
 ADMIN_PASSWORD = _get("ADMIN_PASSWORD", "")
 

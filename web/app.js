@@ -87,6 +87,7 @@ async function showApp() {
   $("#chip-task").textContent = state.me.task_id ? "task " + state.me.task_id : "";
   $("#chip-task").classList.toggle("hidden", !state.me.task_id);
   $("#view-switch").classList.toggle("hidden", !state.me.admin);
+  document.querySelector('#view-switch [data-view="cost"]').classList.toggle("hidden", !state.me.cost_access);  // owners only
   renderSide();
   loadHistory();
   state.messages = await api("/api/messages");

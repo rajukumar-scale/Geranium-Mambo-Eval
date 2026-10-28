@@ -19,7 +19,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -269,7 +269,11 @@ def admin_page():
 
 
 @app.get("/admin/cost")
-def cost_page():
+def cost_page(request: Request):
+    """Owners only (ADMIN_EMAILS, i.e. atlasadmin): other admins go back to the admin page."""
+    session = auth.unsign(request.cookies.get(auth.ADMIN_COOKIE, ""), 12 * 3600)
+    if not session or admin_role(session.get("email")) != "owner":
+        return RedirectResponse("/admin", status_code=303)
     return FileResponse(WEB / "cost.html", headers=NO_CACHE)
 
 
@@ -448,6 +452,7 @@ def logout():
 def me(request: Request):
     session = current_user(request)
     return for_viewer(session, {**chat_state(session["attempt_id"]), "admin": session.get("admin"),
+                                "cost_access": bool(session.get("admin")) and admin_role(session["admin"]) == "owner",
                                 "spend": spend.status(db.get_chat(session["attempt_id"])),
                                 "review_minutes": {c: progress.calibration(c)["minutes"] for c in progress.DEFAULTS}})
 
@@ -1375,9 +1380,9 @@ def admin_unblock(body: UnblockBody, request: Request):
 
 @app.get("/api/admin/cost")
 async def admin_cost(request: Request, days: int = 14, start: str = "", end: str = "", refresh: int = 0):
-    """The Cost page: the key's budget plus spend per day / week / month, per submitted task and per contributor, for
-    the last `days` days or start..end (YYYY-MM-DD, UTC)."""
-    current_admin(request)
+    """The Cost page (owners only): the key's budget plus spend per day / week / month, per submitted task and per
+    contributor, for the last `days` days or start..end (YYYY-MM-DD, UTC)."""
+    current_admin(request, owner=True)
     key, report = await asyncio.gather(budget.status(force=bool(refresh)), cost.report(days, start, end, force=bool(refresh)))
     return {"budget": key, "cost": report}
 
