@@ -88,6 +88,15 @@ def text(stage, raw):
 
 _LINK_TARGET = re.compile(r"\]\([^)]*\)")
 _NOT_ALNUM = re.compile(r"[^A-Za-z0-9]")
+# The rubric builder saves a typed < or > as &lt; / &gt; ("Harmony Games <> Ludlow" -> "Harmony Games &lt;&gt; Ludlow"),
+# which adds the letters "lt"/"gt" to the taxonomy's count, but keeps <https://...> autolinks as they are (40
+# completed tasks, 2026-10-27: no raw < or > in any title outside an autolink; & stays raw). Write them the same way
+# here, so a rubric pasted with plain <> gets the taxonomy's code. Already-encoded &lt; has no < and is left alone.
+_BUILDER_ANGLE = re.compile(r"<https?://[^\s<>]*>|[<>]")
+
+
+def _as_builder_saves(titles):
+    return _BUILDER_ANGLE.sub(lambda m: m.group(0) if len(m.group(0)) > 1 else ("&lt;" if m.group(0) == "<" else "&gt;"), titles)
 
 
 def rubric(criteria):
@@ -102,7 +111,7 @@ def rubric(criteria):
         number = _jsonata_number(criterion.get("weight") if isinstance(criterion, dict) else None)
         weights.append(number if number else 1)  # missing, 0 or not a number counts as 1, as in the taxonomy
     titles = " | ".join(_jsonata_string(c["title"]) for c in criteria if isinstance(c, dict) and "title" in c)
-    letters = _NOT_ALNUM.sub("", _LINK_TARGET.sub("", titles))
+    letters = _NOT_ALNUM.sub("", _LINK_TARGET.sub("", _as_builder_saves(titles)))
     shown = f"{letters[:40]} … {letters[-40:]}" if len(letters) > 40 else letters
     return (f"{len(criteria)} criteria, Σweight {_js_number(sum(weights))}, weights [{','.join(_js_number(w) for w in weights)}]"
             f" · Titles {len(letters)} letters — {shown}")
