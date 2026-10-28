@@ -310,7 +310,9 @@ function notifyRunEnd(run) {
     title = `Your ${name} review stopped`;
     body = "It didn't finish. Open the chat for details; your saved inputs are kept.";
   } else if (report) {
-    const v = report.meta.verdict, passed = ["PASS", "NON-FAIL"].includes(v) && report.meta.exec_status === "COMPLETE";
+    // OE needs a PASS (server config.passing); other reviews also pass on NON-FAIL
+    const v = report.meta.verdict, passed = (report.meta.stage === "oe" ? v === "PASS" : ["PASS", "NON-FAIL"].includes(v))
+      && report.meta.exec_status === "COMPLETE";
     title = `Your ${name} report is ready`;
     body = `${v || "No verdict"}${report.meta.score != null ? " · score " + report.meta.score : ""}${passed ? " · your pass card is ready" : ""}`;
   } else {
@@ -637,7 +639,7 @@ function openGuide() {
       whole task for you in one go (a full prompt, rubric, OE set or all the SQL); build it together piece by piece instead.
       Type <b class="mono">/admin</b> and a message to reach a person.</p>
     <h4>4 · What to screenshot</h4>
-    <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run), a <b>pass screen</b> pops up with a verification
+    <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run; for <b>/oe</b> only a <b>PASS</b> counts), a <b>pass screen</b> pops up with a verification
       code. Screenshot that card and upload it in the taxonomy: one for each passing review. Keep the whole card in the shot and
       don't zoom far out. You can also click <b>⬇ Download image</b>: that image is checked with the taxonomy's reader before you get it.</p>
     <p>For the injection, prompt and oracle events, <b>Copy what passed</b> copies the exact text that review graded, so what you

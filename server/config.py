@@ -188,6 +188,13 @@ REPORT_FILES = {
 PASSING_VERDICTS = ("PASS", "NON-FAIL")
 
 
+def passing(stage, verdict):
+    """Whether a review's verdict counts as a pass for its stage. The oracle events need a PASS: the taxonomy's
+    OE verdict has no NON-FAIL choice and its "Golden eval verdict must pass" linter wants PASS (rubric and
+    hardness accept NON-FAIL), so an OE NON-FAIL counts as a fail here and gets no pass card (Evan, 2026-10-27)."""
+    return verdict == "PASS" if stage == "oe" else verdict in PASSING_VERDICTS
+
+
 def check():
     """Return a list of configuration problems that block startup."""
     problems = []

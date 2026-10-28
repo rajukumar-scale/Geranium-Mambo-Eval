@@ -41,8 +41,9 @@ def create(run, chat, report, override=None, inputs=None):
     totals = {k: sum(m.get(k, 0) for m in models.values()) for k in ("calls", "input", "output", "cache_read", "cache_creation")}
     payload = {
         "code": code,
-        # An override over a PARTIAL NON-FAIL stays NON-FAIL; over a failing review it's a PASS.
-        "verdict": report["verdict"] if not override or report["verdict"] in config.PASSING_VERDICTS else "PASS",
+        # An override over a PARTIAL NON-FAIL stays NON-FAIL; over a failing review it's a PASS (an OE NON-FAIL
+        # counts as failing, config.passing, so its override is a PASS the taxonomy accepts).
+        "verdict": report["verdict"] if not override or config.passing(report["stage"], report["verdict"]) else "PASS",
         "score": None if override else report["score"],
         "stage": report["stage"],
         # Set when the stage was checked inside another command's run; tokens and cost are that whole run's.
