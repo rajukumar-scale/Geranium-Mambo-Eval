@@ -83,16 +83,12 @@ REDASH_LOGIN_QUERY_ID = _int("REDASH_LOGIN_QUERY_ID", 387117)
 # Budget of the LiteLLM key, for the admin page: a saved query on the LiteLLM tables (0 = no budget panel).
 BUDGET_QUERY_ID = _int("BUDGET_QUERY_ID", 388350)
 BUDGET_DAILY_QUERY_ID = _int("BUDGET_DAILY_QUERY_ID", 389171)  # the key's spend per UTC day, for the bar chart (0 = none)
-# The admin Cost page (saved Redash queries with a "days" parameter): per day, per submitted task, per contributor.
-# v2 (2026-10-20) counts Atlas Commercial spend on every key: the platform's task runs bill pub-mcp-commercial and the
-# agent-env keys, not this portal's key (v1, 389180-389182, read only pub-atlas-commercial-sandbox).
-COST_DAY_QUERY_ID = _int("COST_DAY_QUERY_ID", 390879)
-COST_TASK_QUERY_ID = _int("COST_TASK_QUERY_ID", 390881)
-COST_PERSON_QUERY_ID = _int("COST_PERSON_QUERY_ID", 390882)
+# The admin Cost page: one saved Redash query with every fact since 2026-08-01 (per day, per task x contributor x day,
+# each submission), refreshed in the background; the page cuts any date range from it. v4 (2026-10-28) replaces the
+# per-range queries 390879 / 390881 / 390882, with the same rules (Atlas Commercial spend on every key, LiteLLM + SMIG).
+COST_FACTS_QUERY_ID = _int("COST_FACTS_QUERY_ID", 395415)
 # SMIG's billed cost per portal run (runId tag, sent since 2026-10-26 20:00 UTC); untagged runs keep the list-price estimate (0 = estimates only).
 COST_PORTAL_SMIG_QUERY_ID = _int("COST_PORTAL_SMIG_QUERY_ID", 394171)
-# Spend per day since 2026-08-01 plus tasks submitted per day/week/month, for the Daily / Weekly / Monthly toggle (0 = off).
-COST_HISTORY_QUERY_ID = _int("COST_HISTORY_QUERY_ID", 395411)
 BUDGET_KEY_ALIAS = _get("BUDGET_KEY_ALIAS", "pub-atlas-commercial-sandbox")
 # Platform submissions for tasks passed at /rubric, for the admin "Where they are now" panel (0 = don't hide anyone).
 SUBMISSIONS_QUERY_ID = _int("SUBMISSIONS_QUERY_ID", 388752)

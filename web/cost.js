@@ -3,9 +3,15 @@
 // hairline grid, one axis, a legend for two series (none for one), values only on the peak and today,
 // a tooltip on hover and keyboard focus (textContent only), and a table view. Colours are validated per mode.
 
-const C = { days: +(localStorage.getItem("evp_cost_days") || 14), view: localStorage.getItem("evp_cost_view") || "both", data: null, sort: {},
-            period: localStorage.getItem("evp_cost_period") || "day", chart: localStorage.getItem("evp_cost_chart") || "bar", history: null };
-// Daily charts follow the range above; weekly and monthly charts show the whole history since Aug 1 (UTC weeks start Monday).
+// The range is the last 7 / 14 / 30 days or a custom start..end (UTC days, from Aug 1), from the link or the last visit.
+const URLQ = new URLSearchParams(location.search);
+const C = { days: +(URLQ.get("days") || localStorage.getItem("evp_cost_days") || 14), view: localStorage.getItem("evp_cost_view") || "both", data: null, sort: {},
+            start: URLQ.get("start") || "", end: URLQ.get("end") || "",
+            period: localStorage.getItem("evp_cost_period") || "day", chart: localStorage.getItem("evp_cost_chart") || "bar" };
+if (!URLQ.get("days") && !C.start) [C.start, C.end] = (localStorage.getItem("evp_cost_custom") || "").split("..").concat("").slice(0, 2);
+if (!(C.start && C.end)) C.start = C.end = "";
+const FIRST_DAY = "2026-08-01";  // the cost data starts here
+// Charts show the range by UTC day, week (Monday start) or month; a week or month cut by the range is marked.
 const PERIODS = { day: "day", week: "week", month: "month" };
 // What the page counts: evals (portal reviews + the old in-task sandbox, where the evals ran before the portal), the platform's
 // task runs (Agent Runner / pre-check / verifier runs + the hint pipeline), or both. Every tile, chart and table follows it.
@@ -31,45 +37,42 @@ const utcDay = (t, opts) => new Date(t * 1000).toLocaleDateString("en-US", { tim
 const longDay = t => utcDay(t, { weekday: "short", month: "short", day: "numeric" });
 const when = t => new Date(t * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const shortDay = t => utcDay(t, { month: "short", day: "numeric" });
-// A chart column's full name: the day, the week (from its Monday) or the month.
-const periodName = (d, period) => period === "week" ? `Week of ${shortDay(d.day)}` + (d.partial_start ? ` (from ${shortDay(C.history.start)})` : "")
-  : period === "month" ? utcDay(d.day, { month: "long", year: "numeric" }) : longDay(d.day);
+const rangeOf = c => (c.start === c.end ? longDay(c.start) : `${shortDay(c.start)} – ${shortDay(c.end)}`);
+const rangeName = c => (c.days ? `last ${c.days} days` : rangeOf(c));
+// A chart column's full name: the day, the week (from its Monday) or the month, with where the range cuts it.
+const cutNote = (d, c) => d.partial_start ? `from ${shortDay(c.start)}` : d.partial_end && !d.today ? `to ${shortDay(c.end)}` : "";
+const periodName = (d, period) => {
+  const cut = period === "day" ? "" : cutNote(d, C.shown);
+  return (period === "week" ? `Week of ${shortDay(d.day)}` : period === "month" ? utcDay(d.day, { month: "long", year: "numeric" }) : longDay(d.day))
+    + (cut ? ` (${cut})` : "");
+};
 const periodRow = (d, period) => esc(periodName(d, period)) + (d.today ? " (so far)" : "");
 
-// The chart rows for the chosen period: the range's days, or the history's weeks/months re-totalled for the view.
+// The chart rows for the chosen period: the range's days, weeks or months, re-totalled for the view.
 function chartRows(c) {
   if (C.period === "day") return c.daily;
-  const h = C.history;
-  if (!h || h.error || !h.periods) return null;
-  return h.periods[C.period].map(d => ({ ...d, total: SERIES.reduce((t, x) => t + (inView(x.key) ? d[x.key] || 0 : 0), 0) }));
+  return (C.period === "week" ? c.weeks : c.months).map(d => ({ ...d, total: SERIES.reduce((t, x) => t + (inView(x.key) ? d[x.key] || 0 : 0), 0) }));
 }
-const chartSince = () => C.period === "day" ? "" : `since ${shortDay(C.history.start)}, by UTC ${C.period === "week" ? "week (Monday start)" : "month"} · `;
-function waitingCard(title) {
-  const h = C.history;
-  return `<div class="cc-head"><div><div class="cc-title">${esc(title)}</div><div class="cc-sub">${h && (h.error || h.stale)
-    ? esc(`Couldn't load the ${C.period}ly figures: ${h.error || h.stale}`) : `Loading the ${C.period}ly figures since Aug 1 (up to a minute the first time)…`}</div></div></div>`;
-}
+const chartSince = () => C.period === "day" ? "" : `${rangeOf(C.shown)}, by UTC ${C.period === "week" ? "week (Monday start)" : "month"} · `;
 
-async function loadHistory(refresh = false, poll = false) {
-  if (C.period === "day" || (!refresh && !poll && C.history && C.history.periods)) return;
+const rangeQuery = () => (C.start ? `start=${C.start}&end=${C.end}` : `days=${C.days}`);
+async function load(refresh = false, quiet = false) {
+  document.querySelectorAll("#range [data-days]").forEach(b => b.classList.toggle("on", !C.start && +b.dataset.days === C.days));
+  $("#custom").classList.toggle("on", !!C.start);
+  history.replaceState(null, "", `${location.pathname}?${rangeQuery()}`);
+  clearTimeout(C.poll);
+  if (!quiet) { $("#app").classList.add("refetching"); $("#asof").textContent = "Loading…"; }  // keep the last render, dimmed
   try {
-    const h = await api(`/api/admin/cost/history${refresh ? "?refresh=1" : ""}`);
-    if (!h.loading) C.history = h;
-    // the server looks it up in the background (about a minute the first time): keep what's shown and ask again
-    if ((h.loading || h.refreshing) && !C.historyPoll) C.historyPoll = setTimeout(() => { C.historyPoll = null; loadHistory(false, true); }, 8000);
-  } catch (err) {
-    if (!C.history || !C.history.periods) C.history = { error: err.message };
-  }
-  if (C.data) render();
-}
-
-async function load(refresh = false) {
-  document.querySelectorAll("#range [data-days]").forEach(b => b.classList.toggle("on", +b.dataset.days === C.days));
-  $("#app").classList.add("refetching");  // keep the last render, dimmed, while reloading
-  $("#asof").textContent = "Loading…";
-  try {
-    loadHistory(refresh, !refresh);  // weekly/monthly figures, when shown
-    C.data = await api(`/api/admin/cost?days=${C.days}${refresh ? "&refresh=1" : ""}`);
+    const data = await api(`/api/admin/cost?${rangeQuery()}${refresh ? "&refresh=1" : ""}`);
+    // The server keeps every figure since Aug 1 and refreshes them in the background, so this answers at once. Only
+    // the very first lookup (about a minute) makes the page wait: ask again until it's there, and after a refresh.
+    const c = data.cost || {};
+    if (c.loading || c.refreshing) C.poll = setTimeout(() => load(false, true), c.loading ? 5000 : 15000);
+    if (c.loading) {
+      $("#asof").textContent = "Fetching the cost data for the first time (about a minute)…";
+      return;
+    }
+    C.data = data;
   } catch (err) {
     if (err.status === 401 || err.status === 403) { location.href = "/admin"; return; }
     $("#asof").textContent = "";
@@ -85,13 +88,12 @@ function render() {
   const { budget: b = {} } = C.data;
   let c = C.data.cost || {};
   $("#asof").textContent = c.fetched_at ? `Data as of ${when(c.fetched_at)} (${fmtAgo(c.fetched_at)}) · `
-    + (c.refreshing ? "updating in the background" : "refreshes every 10 min")
-    + (C.period !== "day" && C.history && C.history.fetched_at ? ` · ${C.period}ly charts as of ${when(C.history.fetched_at)}` : "") : "";
+    + (c.refreshing ? "updating in the background" : "refreshes every 15 min") : "";
   const notes = [];
   if (c.error) notes.push(c.error);
   if (c.stale) notes.push(`Couldn't refresh just now (${c.stale}); showing the last figures.`);
   const cv = c.coverage || {}, runsShown = C.view !== "evals";  // the task-run logging gap doesn't affect eval figures
-  if (runsShown && cv.runs && cv.pct != null && cv.pct < 80) notes.push(`Task-run figures may be too low: of the ${fmtInt(cv.runs)} task runs in the last ${cv.days} days' submissions, only ${fmtInt(cv.logged)} (${cv.pct}%) have any spend in LiteLLM's log or SMIG's usage records. The runs happened (their IDs are in the submissions), so the rest of their spend is missing from both.`);
+  if (runsShown && cv.runs && cv.pct != null && cv.pct < 80) notes.push(`Task-run figures may be too low: of the ${fmtInt(cv.runs)} task runs in the range's last ${cv.days} days' submissions, only ${fmtInt(cv.logged)} (${cv.pct}%) have any spend in LiteLLM's log or SMIG's usage records. The runs happened (their IDs are in the submissions), so the rest of their spend is missing from both.`);
   if (runsShown && b.log_gap) notes.push(`Neither LiteLLM nor SMIG has recorded this portal's key since ${when(b.log_gap.since)}, although the portal has made ${fmtInt(b.log_gap.portal_calls)} calls since (about ${usd(b.log_gap.portal_usd)} by its own records). Portal reviews on this page come from the portal's own records, so they're unaffected; the key's budget figure may be under-counting.`);
   // Portal runs before the proxy tagged its calls (2026-10-26 20:00 UTC) are priced at list, not at SMIG's billed cost.
   const est = (c.summary || {}).portal_estimated;
@@ -111,16 +113,15 @@ function render() {
   renderTable("people");
   wireCharts();
   const q = c.queries || {};
-  $("#foot").innerHTML = `<b>How it's counted.</b> UTC days; weekly and monthly charts add up the days since Aug 1 (hourly refresh), with the current week or month so far. <b>Task runs</b> are the platform's Agent Runner, pre-check and verifier runs on
+  $("#foot").innerHTML = `<b>How it's counted.</b> UTC days from Aug 1, 2026; weekly and monthly charts add up the range's days, with the current week or month so far. <b>Task runs</b> are the platform's Agent Runner, pre-check and verifier runs on
     the HG4 env, from LiteLLM's request log and SMIG's usage records (most calls go through SMIG since Oct 16) on every key tagged with the Atlas Commercial project (mostly <span class="mono">pub-mcp-commercial</span>);
     a run counts for a task and contributor when its run ID is in one of their submitted attempts, or when it was launched from the task itself
     (run named after the task's pipeline node); earlier sandbox-viewer runs can't be tied to a task and only show in the daily totals. <b>In-task sandbox</b> is the old in-task chat
     (<span class="mono">${esc(b.key_alias || "")}</span>), <b>hint pipeline</b> the autohint runs. Other teams' work that carries the project tag
     (CoopBench, checkpoint evals) is left out. <b>Portal reviews</b> come from this portal's own records: SMIG's billed cost per run from Oct 26, 20:00 UTC, the list-price estimate before that. A <b>submitted task</b> is a contributor's
-    submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is its task runs since it started plus the portal reviews run on it. Sources:
-    <a href="${esc(q.daily || "#")}" target="_blank" rel="noopener">per day</a> ·
-    <a href="${esc(q.tasks || "#")}" target="_blank" rel="noopener">per task</a> ·
-    <a href="${esc(q.people || "#")}" target="_blank" rel="noopener">per contributor</a>.`;
+    submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is its task runs from when it started to the range's end, plus the portal reviews run on it.
+    Contributors count only what falls inside the range. Source: <a href="${esc(q.facts || "#")}" target="_blank" rel="noopener">every figure since Aug 1</a>,
+    refreshed in the background every 15 minutes.`;
 }
 
 function tile(label, value, sub) {
@@ -144,7 +145,7 @@ function perTaskTile(c) {
 function renderTiles(c, b) {
   const s = c.summary;
   $("#tiles").innerHTML = [
-    tile(`${VIEWS[C.view].label}, last ${c.days} days`, esc(usd(s.total)),
+    tile(`${VIEWS[C.view].label}, ${rangeName(c)}`, esc(usd(s.total)),
       SERIES.filter(x => inView(x.key) && s[x.key]).map(x => `${esc(usd(s[x.key]))} ${esc(x.label.toLowerCase())}`).join(" · ") || "nothing"),
     inView("runs") && tile("Task runs tied to a submission", s.runs ? `${Math.round(100 * s.runs_linked / s.runs)}%` : "–",
       `${esc(usd(s.runs_linked))} of ${esc(usd(s.runs))} · the rest are re-runs or unsubmitted work`),
@@ -204,7 +205,7 @@ function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleSt
     const first = i === 0 || utcDay(d.day, { day: "numeric" }) === "1";
     const name = period === "week" ? shortDay(d.day) : period === "month" ? utcDay(d.day, { month: "short" })
       : i % every && !first && !d.today ? "" : first ? shortDay(d.day) : utcDay(d.day, { day: "numeric" });
-    const note = d.today ? (period === "day" ? "today" : "so far") : d.partial_start && C.history ? `from ${shortDay(C.history.start)}` : "";
+    const note = d.today ? (period === "day" ? "today" : "so far") : period === "day" ? "" : cutNote(d, C.shown);
     svg += `<g class="sbar" data-chart="${id}" data-i="${i}" tabindex="0" role="img" aria-label="${esc(periodName(d, period))}: ${esc(fmt(totals[i]))}">
       <rect class="hit" x="${L + i * slot}" y="${T}" width="${slot}" height="${ph}"/>${parts}${label}
       <text class="tick" x="${cx(i)}" y="${base + 16}" text-anchor="middle">${esc(name)}</text>${note ? `<text class="note" x="${cx(i)}" y="${base + 30}" text-anchor="middle">${esc(note)}</text>` : ""}</g>`;
@@ -252,7 +253,6 @@ function wireCharts() {
 
 function dailyCard(c, b) {
   const title = `Spend per ${PERIODS[C.period]}`, days = chartRows(c), period = C.period;
-  if (!days) return waitingCard(title);
   const chart = columns({
     id: "daily", title, sub: `${chartSince() || "UTC days · "}task runs from LiteLLM + SMIG (all keys), portal reviews from the portal's own records`, days, period,
     series: SERIES.filter(x => inView(x.key)),
@@ -307,7 +307,7 @@ function runsPerTaskChart(c, id) {
     id, title: "Task-run cost per submitted task, by day",
     sub: "all task-run spend that day ÷ tasks submitted that day, test runs included (test runs can't be tied to a task, so this is an average)",
     days, series: [{ key: "avg", label: "Per submitted task", cls: "s-runs" }], value: (d, k) => d[k],
-    pace: overall, paceLabel: overall ? `${kUsd(overall)} average over the ${c.days} days` : "",
+    pace: overall, paceLabel: overall ? `${kUsd(overall)} average over ${rangeName(c)}` : "",
     tip: d => d.tasks_submitted
       ? [[usd(d.avg), " per submitted task (average)"], [usd(d.runs), ` task-run spend · ${fmtInt(d.tasks_submitted)} task${d.tasks_submitted === 1 ? "" : "s"} submitted`],
          ...(d.tied != null ? [[usd(d.tied), " median of the runs tied to each task (final batch)"]] : [])]
@@ -337,7 +337,7 @@ function perTaskChart(c, { id, title, what, cls, totalOf }) {
     id, title,
     sub: `median cost of the tasks submitted that day (${esc(what)}), since each task started`,
     days, series: [{ key: "median", label: "Median per task", cls }], value: (d, k) => d[k],
-    pace: overall || 0, paceLabel: overall ? `${kUsd(overall)} median over the ${c.days} days` : "",
+    pace: overall || 0, paceLabel: overall ? `${kUsd(overall)} median over ${rangeName(c)}` : "",
     tip: d => d.n ? [[usd(d.median), " median per task"], [fmtInt(d.n), ` task${d.n === 1 ? "" : "s"} submitted · average ${usd(d.mean)}`],
                      [`${usd(d.min)} – ${usd(d.max)}`, " cheapest – most expensive"]]
                   : [["No tasks", " submitted this day"]],
@@ -348,25 +348,26 @@ function perTaskChart(c, { id, title, what, cls, totalOf }) {
     <th>Median</th><th>Average</th><th>Cheapest</th><th>Most expensive</th></tr>${rows}</table></details>`;
 }
 
-// Weekly / monthly: per-task figures aren't kept for the whole history, so each column is the period's spend ÷ tasks
-// submitted in it (an average, test runs included), and the line is the same over every period shown.
+// Weekly / monthly: each column is the period's spend ÷ tasks submitted in it (an average, test runs included), and the
+// line is the same over the periods shown. A period with fewer than MIN_TASKS submissions is left out: one task carrying
+// a whole week's runs would dwarf every other column.
+const MIN_TASKS = 5;
 function periodPerTaskCard(c) {
   const days = chartRows(c), period = C.period;
-  if (!days) return waitingCard(`Cost per submitted task, by ${period}`);
   const evals = d => (d.sandbox || 0) + (d.portal || 0), runs = d => d.runs || 0;
   const one = (id, title, what, cls, part) => {
-    const rows = days.map(d => ({ ...d, part: part(d), avg: d.tasks_submitted ? part(d) / d.tasks_submitted : 0 }));
-    const spent = rows.filter(d => d.part > 0), subs = spent.reduce((n, d) => n + d.tasks_submitted, 0);  // evals only start in Sep
+    const rows = days.map(d => ({ ...d, part: part(d), avg: d.tasks_submitted >= MIN_TASKS ? part(d) / d.tasks_submitted : 0 }));
+    const spent = rows.filter(d => d.part > 0 && d.tasks_submitted >= MIN_TASKS), subs = spent.reduce((n, d) => n + d.tasks_submitted, 0);  // evals only start in Sep
     const overall = subs ? spent.reduce((n, d) => n + d.part, 0) / subs : 0;
     const chart = columns({
-      id, title, period, sub: `${chartSince()}${esc(what)} spend that ${period} ÷ tasks submitted that ${period} (an average: test runs can't be tied to a task)`,
+      id, title, period, sub: `${chartSince()}${esc(what)} spend that ${period} ÷ tasks submitted that ${period} (an average: test runs can't be tied to a task) · ${period}s with fewer than ${MIN_TASKS} submitted tasks left out`,
       days: rows, series: [{ key: "avg", label: "Per submitted task", cls }], value: (d, k) => d[k],
       pace: overall, paceLabel: overall ? `${kUsd(overall)} average over the ${spent.length} ${period}s with ${what} spend` : "",
-      tip: d => d.tasks_submitted ? [[usd(d.avg), " per submitted task (average)"], [usd(d.part), ` ${what} spend · ${fmtInt(d.tasks_submitted)} task${d.tasks_submitted === 1 ? "" : "s"} submitted`]]
-                                  : [[usd(d.part), ` ${what} spend`], ["No tasks", ` submitted this ${period}`]],
+      tip: d => d.tasks_submitted >= MIN_TASKS ? [[usd(d.avg), " per submitted task (average)"], [usd(d.part), ` ${what} spend · ${fmtInt(d.tasks_submitted)} tasks submitted`]]
+        : [[usd(d.part), ` ${what} spend`], [d.tasks_submitted ? `Only ${fmtInt(d.tasks_submitted)}` : "No tasks", ` submitted this ${period}, so it's left out`]],
     });
     const table = rows.slice().reverse().map(d => `<tr><td>${periodRow(d, period)}</td><td>${esc(usd(d.part))}</td><td>${fmtInt(d.tasks_submitted)}</td>
-      <td>${d.tasks_submitted ? esc(usd(d.avg)) : "–"}</td></tr>`).join("");
+      <td>${d.tasks_submitted >= MIN_TASKS ? esc(usd(d.avg)) : "–"}</td></tr>`).join("");
     return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "week" ? "Week" : "Month"} (UTC)</th>
       <th>Spend (${esc(what)})</th><th>Tasks submitted</th><th>Per submitted task</th></tr>${table}</table></details>`;
   };
@@ -377,7 +378,6 @@ function periodPerTaskCard(c) {
 
 function perCbCard(c) {
   const rows = chartRows(c), period = C.period;
-  if (!rows) return waitingCard(`Spend per active contributor, by ${period}`);
   if (period !== "day") {  // per contributor-day, so a long month and a partial week compare fairly
     const days = rows.map(d => ({ ...d, per_cb: d.cb_days ? d.total / d.cb_days : 0 }));
     return columns({
@@ -459,9 +459,33 @@ function renderTable(name, all = false) {
 // ---- controls ----
 $("#range").addEventListener("click", e => {
   const b = e.target.closest("[data-days]");
-  if (!b || +b.dataset.days === C.days) return;
-  C.days = +b.dataset.days;
-  localStorage.setItem("evp_cost_days", String(C.days));
+  if (b && (C.start || +b.dataset.days !== C.days)) {
+    C.days = +b.dataset.days;
+    C.start = C.end = "";
+    localStorage.setItem("evp_cost_days", String(C.days));
+    localStorage.removeItem("evp_cost_custom");
+    $("#custom-range").classList.add("hidden");
+    load();
+  }
+  if (e.target.closest("#custom")) {  // open the From / To fields, filled with the range on screen
+    const box = $("#custom-range"), c = (C.data || {}).cost || {}, iso = t => new Date(t * 1000).toISOString().slice(0, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    for (const f of [$("#from"), $("#to")]) { f.min = FIRST_DAY; f.max = today; }
+    $("#from").value = C.start || (c.start ? iso(c.start) : FIRST_DAY);
+    $("#to").value = C.end || (c.end ? iso(c.end) : today);
+    box.classList.toggle("hidden");
+    $("#custom").setAttribute("aria-expanded", String(!box.classList.contains("hidden")));
+    if (!box.classList.contains("hidden")) $("#from").focus();
+  }
+});
+$("#custom-range").addEventListener("submit", e => {
+  e.preventDefault();
+  let [from, to] = [$("#from").value, $("#to").value];
+  if (!from || !to) return;
+  if (from > to) [from, to] = [to, from];
+  [C.start, C.end] = [from, to];
+  localStorage.setItem("evp_cost_custom", `${from}..${to}`);
+  $("#custom-range").classList.add("hidden");
   load();
 });
 $("#view").addEventListener("click", e => {
@@ -478,7 +502,6 @@ $("#period").addEventListener("click", e => {
   C.period = b.dataset.period;
   localStorage.setItem("evp_cost_period", C.period);
   if (C.data) render();
-  loadHistory();
 });
 $("#chart-type").addEventListener("click", e => {
   const b = e.target.closest("[data-chart-type]");
@@ -497,5 +520,5 @@ $("#view-switch").addEventListener("click", async e => {
     catch (err) { uiAlert("Couldn't open the chat view", err.message); }
   }
 });
-setInterval(() => { if (!document.hidden) load(); }, 600000);
+setInterval(() => { if (!document.hidden) load(false, true); }, 300000);
 load();

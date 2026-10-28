@@ -21,8 +21,14 @@
     <main class="cost-main">
       <div class="cost-filters">
         <div class="seg" id="range" role="group" aria-label="Date range">
-          <button type="button" data-days="7">Last 7 days</button><button type="button" data-days="14">Last 14 days</button><button type="button" data-days="30">Last 30 days</button>
+          <button type="button" data-days="7">Last 7 days</button><button type="button" data-days="14">Last 14 days</button><button type="button" data-days="30">Last 30 days</button><button type="button" id="custom" aria-expanded="false">Custom…</button>
         </div>
+        <form class="custom-range hidden" id="custom-range" aria-label="Custom date range">
+          <label>From <input type="date" id="from" required></label>
+          <label>To <input type="date" id="to" required></label>
+          <button type="submit">Apply</button>
+          <span class="muted">UTC days, from Aug 1</span>
+        </form>
         <div class="seg" id="view" role="group" aria-label="What to count">
           <button type="button" data-view-pick="evals">Evals</button><button type="button" data-view-pick="runs">Task runs</button><button type="button" data-view-pick="both">Both</button>
         </div>

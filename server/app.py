@@ -67,6 +67,7 @@ async def startup():
     asyncio.create_task(submissions.loop())
     asyncio.create_task(status.loop())
     asyncio.create_task(linter_alerts.loop())
+    asyncio.create_task(cost.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
 
 
@@ -1373,18 +1374,12 @@ def admin_unblock(body: UnblockBody, request: Request):
 
 
 @app.get("/api/admin/cost")
-async def admin_cost(request: Request, days: int = 14, refresh: int = 0):
-    """The Cost page: the key's budget plus spend per day, per submitted task and per contributor."""
+async def admin_cost(request: Request, days: int = 14, start: str = "", end: str = "", refresh: int = 0):
+    """The Cost page: the key's budget plus spend per day / week / month, per submitted task and per contributor, for
+    the last `days` days or start..end (YYYY-MM-DD, UTC)."""
     current_admin(request)
-    key, report = await asyncio.gather(budget.status(force=bool(refresh)), cost.report(days, force=bool(refresh)))
+    key, report = await asyncio.gather(budget.status(force=bool(refresh)), cost.report(days, start, end, force=bool(refresh)))
     return {"budget": key, "cost": report}
-
-
-@app.get("/api/admin/cost/history")
-async def admin_cost_history(request: Request, refresh: int = 0):
-    """Spend per day, week and month since 2026-08-01, for the Cost page's Daily / Weekly / Monthly toggle."""
-    current_admin(request)
-    return await cost.history(force=bool(refresh))
 
 
 @app.get("/api/admin/budget")

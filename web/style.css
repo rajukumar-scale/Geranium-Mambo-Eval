@@ -375,6 +375,10 @@ button.danger-solid:hover { border-color: var(--ink); }
 .cost-app.refetching .cost-main > * { opacity: .55; transition: opacity .15s ease; }
 .cost-main { width: min(1180px, 100%); margin: 0 auto; padding: 18px 20px 40px; display: flex; flex-direction: column; gap: 16px; }
 .cost-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.custom-range { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.custom-range label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.custom-range input[type="date"] { width: auto; padding: 5px 10px; }
+.custom-range .muted { font-size: 12px; }
 .seg { display: inline-flex; padding: 3px; border-radius: 9999px; background: var(--grey-95); border: 1px solid var(--line); }
 .seg button { border: 0; background: transparent; padding: 5px 14px; font-size: 13px; color: var(--muted); }
 .seg button:hover { color: var(--ink); border: 0; }
