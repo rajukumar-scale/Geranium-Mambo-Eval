@@ -1,0 +1,180 @@
+[
+ {
+  "stage": "injection",
+  "text": "",
+  "taxonomy": "(empty - no injection)"
+ },
+ {
+  "stage": "prompt",
+  "text": "",
+  "taxonomy": "(empty)"
+ },
+ {
+  "stage": "oe",
+  "text": "",
+  "taxonomy": "(empty - no oracle events)"
+ },
+ {
+  "stage": "rubric",
+  "criteria": [],
+  "taxonomy": "(empty - no rubrics)"
+ },
+ {
+  "stage": "injection",
+  "text": " 0[X…\"1”;;[Z",
+  "taxonomy": "11 chars - 0[X… ... ;;[Z"
+ },
+ {
+  "stage": "injection",
+  "text": "Z  1b9🔏9| 91ba (1é–…b’…\"]”\n’):1X 🔏(:]1)9",
+  "taxonomy": "39 chars - Z 1b ... ]1)9"
+ },
+ {
+  "stage": "injection",
+  "text": "X’–Y .' c’\n'\taYb“ |🔏,’é[1[—a\t9”\n\n🔏.Z]–; ”:Yc|)\n é Y’Z… :[ü—“1:🔏”)0\"\"''.’’–ü”—””9\"",
+  "taxonomy": "79 chars - X’–Y ... ””9\""
+ },
+ {
+  "stage": "injection",
+  "text": "XY)",
+  "taxonomy": "3 chars - XY)"
+ },
+ {
+  "stage": "injection",
+  "text": " ’\t1a|X[' …[\"(\"🔏🔏🔏0–\tZ|b\"🔏Y]ü',……YZ9(’.1]'0.“[[;b a[ü;\t9: ,\n0 a\n ;0–a\"’.Y;,Y.é'X",
+  "taxonomy": "78 chars - ’ 1a ... .é'X"
+ },
+ {
+  "stage": "injection",
+  "text": "’–ü1:0;ü\nY”éY…\t09.9’1🔏“ ;[ “ é]; :– \nZ.b",
+  "taxonomy": "39 chars - ’–ü1 ...  Z.b"
+ },
+ {
+  "stage": "prompt",
+  "text": " bc🔏|9bX\"",
+  "taxonomy": "8 chars - bc🔏|"
+ },
+ {
+  "stage": "prompt",
+  "text": "Yb\t",
+  "taxonomy": "2 chars - Yb"
+ },
+ {
+  "stage": "prompt",
+  "text": "a|é… ",
+  "taxonomy": "4 chars - a|é…"
+ },
+ {
+  "stage": "prompt",
+  "text": " b’]",
+  "taxonomy": "3 chars - b’]"
+ },
+ {
+  "stage": "prompt",
+  "text": "…,,Z )’ \t…🔏\"\t,)”(  \n. –Y(|9(\t“\"…c,…\t 9' ",
+  "taxonomy": "35 chars - …,,Z ... … 9'"
+ },
+ {
+  "stage": "prompt",
+  "text": "1  …  b🔏Z(|Z b 0b: |(|;;a \"übb0)🔏\n— 9–1:…é🔏[0Y\"X 1X—“ ––…;”\n”[,1–”—; Z1'“Z Y]).—",
+  "taxonomy": "78 chars - 1 …  ... ]).—"
+ },
+ {
+  "stage": "oe",
+  "text": ")’é| –1  ",
+  "taxonomy": "7 chars - )’é|"
+ },
+ {
+  "stage": "oe",
+  "text": "1 ,,\":X““X:’—b]’:X…X  Z [b  1)\"Y”b 1Z“’Z",
+  "taxonomy": "38 chars - 1 ,, ... Z“’Z"
+ },
+ {
+  "stage": "oe",
+  "text": "”;\"[Y’“ ]9[Z]0)”;X–“Xac9“ü Zc0–🔏(– c🔏,.“ |\tb\"—\tü',1🔏X 🔏:( (;\"🔏—\"(' 0  ““\n’ \nc;:X🔏",
+  "taxonomy": "79 chars - ”;\"[ ... ;:X🔏"
+ },
+ {
+  "stage": "oe",
+  "text": "é Y(",
+  "taxonomy": "4 chars - é Y("
+ },
+ {
+  "stage": "oe",
+  "text": "-- A\nSELECT 1;\nEND;;  ",
+  "taxonomy": "18 chars - -- A ...  END"
+ },
+ {
+  "stage": "oe",
+  "text": "|",
+  "taxonomy": "1 chars - |"
+ },
+ {
+  "stage": "rubric",
+  "criteria": [
+   {
+    "title": ", x(1)— tü: ",
+    "weight": "2"
+   }
+  ],
+  "taxonomy": "1 criteria, weight 2, weights [2] | Titles 3 letters - x1t"
+ },
+ {
+  "stage": "rubric",
+  "criteria": [
+   {
+    "title": "– : ,o",
+    "weight": 0
+   }
+  ],
+  "taxonomy": "1 criteria, weight 1, weights [1] | Titles 1 letters - o"
+ },
+ {
+  "stage": "rubric",
+  "criteria": [
+   {
+    "title": "é]ob“ ’\"[,'”–oX1]🔏ü”🔏x1a[,][''tZ]’[\tx]tt1’lct:",
+    "weight": 1
+   }
+  ],
+  "taxonomy": "1 criteria, weight 1, weights [1] | Titles 17 letters - oboX ... 1lct"
+ },
+ {
+  "stage": "rubric",
+  "criteria": [
+   {
+    "title": "’]a a9:’ax–aé]Xaéb” ’, ”1– é]–🔏o: aléY’\"(a)",
+    "weight": 3
+   },
+   {
+    "title": " Z 1’’)\n–é tY –,oa);Z:ZX“[c:m”[0Xi(:’“[a(i\"….\nXo'\n:0]Z,",
+    "weight": 2.5
+   }
+  ],
+  "taxonomy": "2 criteria, weight 5.5, weights [3,2.5] | Titles 35 letters - aa9a ... Xo0Z"
+ },
+ {
+  "stage": "rubric",
+  "criteria": [
+   {
+    "title": " ü(Xüo9 :l)::[(X[o9 é –|;Y1 –9ü1“\nY[Yxc  \n]x🔏[.9“ [ :a",
+    "weight": 1
+   }
+  ],
+  "taxonomy": "1 criteria, weight 1, weights [1] | Titles 18 letters - Xo9l ... cx9a"
+ },
+ {
+  "stage": "rubric",
+  "criteria": [
+   {
+    "title": "🔏.[\"–\n9Y[)m(]i ]a9;é—()[[ [ébé—)xüt;(|,o9[99\t",
+    "weight": 5
+   },
+   {
+    "title": "':((  (.cbaX |é)\t “o”—🔏—,c  ]'c0m(\t9o\"",
+    "weight": 2.5
+   }
+  ],
+  "taxonomy": "2 criteria, weight 7.5, weights [5,2.5] | Titles 24 letters - 9Ymi ... 0m9o"
+ }
+]

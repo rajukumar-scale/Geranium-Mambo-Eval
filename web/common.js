@@ -182,31 +182,35 @@ function download(name, text, type = "text/markdown") {
 }
 
 // The screenshot-ready pass screen. Same markup on the chat, admin and verify pages.
-// The fingerprint as shown: exactly the line the taxonomy shows at L10 (template v317 "update to 4 instead of 40":
-// first 4 and last 4 characters), made from the stored full fingerprint (v316 format, first/last 40), which holds
-// everything needed. FP_SHOW is the taxonomy's number; change both together.
-//   "528 chars — leonard dumped … on these numbers" -> "528 chars — leon … bers"
+// The fingerprint as shown: exactly the line the taxonomy builds at L-1/L10 since v360 ("Uses plain hyphen and
+// three dots for OCR compatibility"): first 4 and last 4 characters (v317), made from the stored full fingerprint
+// (v316 format, first/last 40), which holds everything needed. FP_SHOW is the taxonomy's number; change both together.
+//   "528 chars — leonard dumped … on these numbers" -> "528 chars - leon ... bers"
+//   rubric: "12 criteria, weight 18 | Titles 548 letters - TheA ... nli"
+// Only plain characters, so the taxonomy's screenshot reader has nothing to convert: the em dash, ellipsis, Σ and
+// middle dot it used to be told to normalize were where it misread (2026-10-26/27).
 // The rubric's weights list (one number per row) is left out of the code: the taxonomy's screenshot check skips it
 // anyway, and with 100+ rows it wrapped over many lines and the reader couldn't get through it (2026-10-27).
 // rubricWeights() gives it back for its own line, outside the verification code band.
 const FP_SHOW = 4;
 // rubric titles count letters and digits only since 2026-10-17 ("letters"); older passes say "chars"
-const RUBRIC_FP = /^(\d+ criteria, Σweight [^,]+), weights (\[[^\]]*\]) · Titles (\d+) (chars|letters) — ?(.*)$/s;
+const RUBRIC_FP = /^(\d+ criteria), Σweight ([^,]+), weights (\[[^\]]*\]) · Titles (\d+) (chars|letters) — ?(.*)$/s;
 function shortFp(fp) {
-  if (!fp || fp.startsWith("(empty")) return fp || "";
+  if (!fp) return "";
+  if (fp.startsWith("(empty")) return fp.replace(/—/g, "-");
   const cut = (len, body) => {  // body = the whole text (<= 40 chars) or first 40 + " … " + last 40
     const chars = Array.from(body);
     return (len > FP_SHOW ? chars.slice(0, FP_SHOW).join("") : body)
-      + (len > 2 * FP_SHOW ? " … " + chars.slice(-FP_SHOW).join("") : "");
+      + (len > 2 * FP_SHOW ? " ... " + chars.slice(-FP_SHOW).join("") : "");
   };
   const rubric = fp.match(RUBRIC_FP);
-  if (rubric) return `${rubric[1]} · Titles ${rubric[3]} ${rubric[4]} — ${cut(+rubric[3], rubric[5])}`;
+  if (rubric) return `${rubric[1]}, weight ${rubric[2]} | Titles ${rubric[4]} ${rubric[5]} - ${cut(+rubric[4], rubric[6])}`;
   const text = fp.match(/^(\d+) chars — (.*)$/s);
-  return text ? `${text[1]} chars — ${cut(+text[1], text[2])}` : fp;
+  return text ? `${text[1]} chars - ${cut(+text[1], text[2])}` : fp;
 }
 function rubricWeights(fp) {
   const rubric = (fp || "").match(RUBRIC_FP);
-  return rubric ? rubric[2] : "";
+  return rubric ? rubric[3] : "";
 }
 
 // A pass whose review read an input that has changed since (server: staleness.check). Shown on the pass screen,
@@ -261,8 +265,11 @@ function proofHtml(p, opts = {}) {
       ${hashes}
     </div>
     ${p.fingerprint ? "" : `<div class="code muted">Check this pass at <span class="mono">${esc(verifyUrl)}</span></div>`}
-    ${opts.foot === false ? "" : `<div class="foot"><div class="grow">📸 Take a screenshot of this screen and submit it with your task.</div>
-      <button data-close>Close</button></div>`}
+    ${opts.foot === false ? "" : `<div class="foot"><div class="grow">⬇ <b>Download the pass image</b> and upload it in the taxonomy.
+      It's checked first with the same reader the taxonomy uses, so it reads correctly.</div>
+      ${COPYABLE.has(p.stage) && p.fingerprint ? `<button data-copypass>Copy what passed</button>` : ""}
+      <button class="primary" data-dlpass>⬇ Download pass image</button><button data-close>Close</button></div>
+      <div class="dlnote muted" data-dlnote hidden></div>`}
   </div>`;
 }
 
@@ -296,8 +303,153 @@ function showProof(p) {
     show.onclick = card;
   };
   step();
-  wrap.addEventListener("click", e => { if (e.target === wrap || e.target.closest("[data-close]")) wrap.remove(); });
+  wrap.addEventListener("click", e => {
+    if (e.target === wrap || e.target.closest("[data-close]")) wrap.remove();
+    else if (e.target.closest("[data-dlpass]")) downloadPassImage(p, wrap);
+    else if (e.target.closest("[data-copypass]")) copyPassInput(p, wrap);
+  });
   document.body.appendChild(wrap);
+}
+
+// ---- The pass image ----------------------------------------------------------------------------------------
+// What the contributor uploads in the taxonomy instead of their own screenshot. A screenshot's size depends on the
+// screen and the crop, and small text is where the taxonomy's GPT-4o reader misread the code (a zoomed-in
+// screenshot of the same pass went through, 2026-10-27). So the portal draws the pass itself: the green header the
+// reader looks for (verdict badge, "/stage · Stage review · COMPLETE"), then the 🔏 verification code large and in
+// plain characters, then the details. Before the download it's read with the taxonomy's own reader and prompt
+// (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
+const COPYABLE = new Set(["injection", "prompt", "oe"]);
+const PASS_IMAGE_SIZES = [44, 56, 68];  // code font sizes, px, tried in order
+const STAGE_NAMES = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" };
+
+function wrapCanvasText(ctx, text, maxWidth) {
+  // Break at spaces (a long head/tail without spaces is broken anywhere); prefer the code's own " | " and " - ".
+  const lines = [];
+  let line = "";
+  for (const word of text.split(/(?<= )/)) {
+    if (ctx.measureText(line + word).width <= maxWidth || !line) { line += word; continue; }
+    lines.push(line.trimEnd());
+    line = word;
+  }
+  if (line) lines.push(line.trimEnd());
+  return lines.flatMap(l => {
+    if (ctx.measureText(l).width <= maxWidth) return [l];
+    const out = []; let cur = "";
+    for (const ch of Array.from(l)) { if (ctx.measureText(cur + ch).width > maxWidth && cur) { out.push(cur); cur = ""; } cur += ch; }
+    return cur ? [...out, cur] : out;
+  });
+}
+
+async function passImage(p, codeSize) {
+  const mono = '"Aeonik Mono", ui-monospace, Menlo, Consolas, monospace', sans = 'Aeonik, Arial, sans-serif';
+  const codeFont = `${codeSize}px ${mono}`;
+  try { await Promise.all([document.fonts.load(codeFont), document.fonts.load('22px "Aeonik Mono"'), document.fonts.load('500 40px Aeonik')]); } catch (e) {}
+  const W = 1400, pad = 56, inner = W - 2 * pad;
+  const stage = STAGE_NAMES[p.stage] || p.stage;
+  const code = p.fingerprint ? shortFp(p.fingerprint) : p.code;
+  const measure = document.createElement("canvas").getContext("2d");
+  measure.font = codeFont;
+  const codeLines = wrapCanvasText(measure, code, inner);
+  measure.font = `24px ${sans}`;
+  const staleLines = p.outdated ? wrapCanvasText(measure, p.outdated.message || "", inner) : [];
+  const details = [["Attempt ID", p.attempt_id], ["Outlier ID", p.user_id], ["User", p.user_email],
+    ["Completed", fmtUTC(p.finished_at)], ["Report SHA-256", p.report_sha256]].filter(d => d[1]);
+  const headH = 250 + (p.checked_during ? 34 : 0) + (p.admin_override ? 34 : 0);
+  const staleH = staleLines.length ? 70 + staleLines.length * 32 : 0;
+  const codeH = 96 + codeLines.length * Math.round(codeSize * 1.3);
+  const H = headH + staleH + codeH + 60 + details.length * 40 + 70;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = "alphabetic";
+  // green header
+  ctx.fillStyle = "#193A29"; ctx.fillRect(0, 0, W, headH);
+  ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.font = `22px ${mono}`;
+  ctx.fillText("ORIGINAL CONFERENCE EVAL PORTAL", pad, 70);
+  ctx.font = `500 46px ${sans}`;
+  const badgeW = ctx.measureText(p.verdict).width + 56;
+  ctx.fillStyle = p.verdict === "NON-FAIL" ? "#EDE272" : "#79C96E";
+  ctx.beginPath(); ctx.roundRect(pad, 100, badgeW, 72, 36); ctx.fill();
+  ctx.fillStyle = "#000000"; ctx.fillText(p.verdict, pad + 28, 152);
+  if (p.score != null) { ctx.fillStyle = "#FFFFFF"; ctx.font = `46px ${sans}`; ctx.fillText(`Score ${p.score}`, pad + badgeW + 24, 152); }
+  ctx.fillStyle = "#FFFFFF"; ctx.font = `28px ${sans}`;
+  let y = 214;
+  ctx.fillText(`/${p.stage} · ${stage} review · ${p.execution_status}`, pad, y);
+  ctx.font = `22px ${sans}`;
+  if (p.checked_during) { y += 34; ctx.fillText(`Checked inside the /${p.checked_during} run`, pad, y); }
+  if (p.admin_override) { y += 34; ctx.fillText(`Admin override by ${p.admin_override.by}`, pad, y); }
+  y = headH;
+  if (staleLines.length) {
+    ctx.fillStyle = "#FDECEC"; ctx.fillRect(0, y, W, staleH);
+    ctx.fillStyle = "#8A1C22"; ctx.font = `500 24px ${sans}`; ctx.fillText("⚠ OUTDATED PASS", pad, y + 44);
+    ctx.font = `24px ${sans}`; staleLines.forEach((l, i) => ctx.fillText(l, pad, y + 80 + i * 32));
+    y += staleH;
+  }
+  // the verification code
+  ctx.fillStyle = "#F6FAF7"; ctx.fillRect(0, y, W, codeH);
+  ctx.fillStyle = "#575757"; ctx.font = `22px ${mono}`;
+  ctx.fillText(p.fingerprint ? `🔏 VERIFICATION CODE · THE ${stage.toUpperCase()} FINGERPRINT, AS THE TAXONOMY SHOWS IT` : "VERIFICATION CODE", pad, y + 52);
+  ctx.fillStyle = "#000000"; ctx.font = codeFont;
+  codeLines.forEach((l, i) => ctx.fillText(l, pad, y + 72 + codeSize + i * Math.round(codeSize * 1.3)));
+  y += codeH;
+  ctx.fillStyle = "#EAEAEA"; ctx.fillRect(0, y, W, 2);
+  // details
+  y += 60;
+  details.forEach(([k, v]) => {
+    ctx.fillStyle = "#575757"; ctx.font = `20px ${mono}`; ctx.fillText(k.toUpperCase(), pad, y);
+    ctx.fillStyle = "#000000"; ctx.font = `24px ${mono}`; ctx.fillText(String(v), pad + 280, y);
+    y += 40;
+  });
+  ctx.fillStyle = "#575757"; ctx.font = `20px ${sans}`;
+  ctx.fillText(`Pass image from the Original Conference Eval Portal · issued ${fmtUTC(p.issued_at || p.finished_at)}`, pad, H - 34);
+  return canvas;
+}
+
+const PASS_IMAGE_OK = {};  // pass code -> data URL of the image the reader read correctly (this page load)
+
+async function downloadPassImage(p, root) {
+  const button = root.querySelector("[data-dlpass]"), note = root.querySelector("[data-dlnote]");
+  const say = (html, cls = "") => { note.hidden = false; note.className = `dlnote ${cls}`; note.innerHTML = html; };
+  const name = `pass-${p.stage}-${p.attempt_id}.png`;
+  const save = url => { const a = document.createElement("a"); a.href = url; a.download = name; a.click(); };
+  if (PASS_IMAGE_OK[p.code]) { save(PASS_IMAGE_OK[p.code]); return say("✓ Downloaded. Upload this image in the taxonomy.", "ok"); }
+  button.disabled = true;
+  let url = null, last = null;
+  try {
+    for (const size of PASS_IMAGE_SIZES) {
+      say(`Checking the image with the taxonomy's reader…`);
+      url = (await passImage(p, size)).toDataURL("image/png");
+      last = await api(`/api/proofs/${encodeURIComponent(p.code)}/reader-check`, { json: { image: url } });
+      if (last.ok !== false) break;  // read correctly, or the check couldn't run
+    }
+  } catch (e) {
+    last = { ok: null, error: e.message };
+    if (!url) { button.disabled = false; return say(`Couldn't make the image: ${esc(e.message)}`, "bad"); }
+  }
+  button.disabled = false;
+  save(url);
+  if (last.ok) {
+    PASS_IMAGE_OK[p.code] = url;
+    say("✓ Downloaded. The taxonomy's reader reads this image correctly. Upload it in the taxonomy.", "ok");
+  } else if (last.ok === null) {
+    say("Downloaded. The reader check couldn't run right now, but this image is made for it. Upload it in the taxonomy.");
+  } else {
+    say(`Downloaded, but in our check the reader read <span class="mono">${esc(last.read || "nothing")}</span> instead of
+      <span class="mono">${esc(last.expected)}</span>. If the taxonomy blocks it, type <b class="mono">/admin</b> with your attempt ID.`, "bad");
+  }
+}
+
+async function copyPassInput(p, root) {
+  const note = root.querySelector("[data-dlnote]");
+  const say = (html, cls = "") => { note.hidden = false; note.className = `dlnote ${cls}`; note.innerHTML = html; };
+  try {
+    const text = await api(`/api/proofs/${encodeURIComponent(p.code)}/input`);
+    await navigator.clipboard.writeText(text);
+    say(`✓ Copied the exact ${esc(STAGE_NAMES[p.stage] || p.stage)} this pass graded. Paste it into the taxonomy as is.`, "ok");
+  } catch (e) {
+    say(esc(e.message), "bad");
+  }
 }
 
 // A message's time: "2:26 PM" today, "Oct 13, 2:26 PM" otherwise; the full local and UTC time on hover.

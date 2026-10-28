@@ -70,6 +70,12 @@ CLAUDE_BIN = _get("CLAUDE_BIN", "claude")
 
 LITELLM_BASE_URL = _get("LITELLM_BASE_URL", "https://litellm-proxy.ml.scale.com").rstrip("/")
 LITELLM_API_KEY = _get("LITELLM_API_KEY", "")
+# The taxonomy's pass-screen reader (server/taxo_reader.py): the same model and LiteLLM endpoint the taxonomy uses
+# to read uploaded pass screens. The portal reads its own pass image with it before the contributor downloads it.
+READER_URL = _get("READER_URL", "https://litellm-proxy.ml-serving-internal.scale.com/v1/chat/completions")
+READER_API_KEY = _get("READER_API_KEY", LITELLM_API_KEY)
+READER_MODEL = _get("READER_MODEL", "gpt-4o")
+READER_CHECKS_PER_HOUR = _int("READER_CHECKS_PER_HOUR", 60)  # per attempt; one download is 1-3 reads (~$0.005 each)
 
 REDASH_URL = _get("REDASH_URL", "https://redash.scale.com").rstrip("/")
 REDASH_API_KEY = _get("REDASH_API_KEY", "")
