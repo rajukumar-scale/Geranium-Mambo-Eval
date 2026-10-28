@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -66,6 +66,7 @@ async def startup():
     RUNNER.start()
     asyncio.create_task(submissions.loop())
     asyncio.create_task(status.loop())
+    asyncio.create_task(linter_alerts.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
 
 

@@ -113,6 +113,13 @@ SLACK_WEBHOOK_URL = _get("SLACK_WEBHOOK_URL", "")
 SLACK_ALERT_DETAIL = _int("SLACK_ALERT_DETAIL", 0)
 SLACK_BOT_TOKEN = _get("SLACK_BOT_TOKEN", "")
 SLACK_CHANNEL = _get("SLACK_CHANNEL", "")
+# Slack DM to Evan when a CB is stuck on a fingerprint linter (server/linter_alerts.py): needs SLACK_BOT_TOKEN.
+LINTER_ALERT_QUERY_ID = _int("LINTER_ALERT_QUERY_ID", 395304)  # 0 = off
+LINTER_ALERT_SLACK_USER = _get("LINTER_ALERT_SLACK_USER", "U0BD6FV1PJ4")
+LINTER_ALERT_EVERY_MIN = _int("LINTER_ALERT_EVERY_MIN", 15)
+LINTER_ALERT_REPEAT_HOURS = _int("LINTER_ALERT_REPEAT_HOURS", 3)  # same CB/task/stage again only after this
+LINTER_ALERT_DASHBOARD_URL = _get("LINTER_ALERT_DASHBOARD_URL",
+                                  "https://redash.scale.com/dashboards/12117-mcp-ac-fingerprint-linter-monitor")
 PUBLIC_BASE_URL = _get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
 # Set to 1 behind Caddy/nginx so login rate limits use the real client IP.
