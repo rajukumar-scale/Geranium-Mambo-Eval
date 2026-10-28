@@ -3,7 +3,10 @@
 // hairline grid, one axis, a legend for two series (none for one), values only on the peak and today,
 // a tooltip on hover and keyboard focus (textContent only), and a table view. Colours are validated per mode.
 
-const C = { days: +(localStorage.getItem("evp_cost_days") || 14), view: localStorage.getItem("evp_cost_view") || "both", data: null, sort: {} };
+const C = { days: +(localStorage.getItem("evp_cost_days") || 14), view: localStorage.getItem("evp_cost_view") || "both", data: null, sort: {},
+            period: localStorage.getItem("evp_cost_period") || "day", chart: localStorage.getItem("evp_cost_chart") || "bar", history: null };
+// Daily charts follow the range above; weekly and monthly charts show the whole history since Aug 1 (UTC weeks start Monday).
+const PERIODS = { day: "day", week: "week", month: "month" };
 // What the page counts: evals (portal reviews + the old in-task sandbox, where the evals ran before the portal), the platform's
 // task runs (Agent Runner / pre-check / verifier runs + the hint pipeline), or both. Every tile, chart and table follows it.
 const VIEWS = { evals: { label: "Evals", parts: ["sandbox", "portal"] }, runs: { label: "Task runs", parts: ["runs", "hint"] },
@@ -27,12 +30,45 @@ const kUsd = v => (v >= 1000 ? `$${+(v / 1000).toFixed(1)}K` : `$${Math.round(v)
 const utcDay = (t, opts) => new Date(t * 1000).toLocaleDateString("en-US", { timeZone: "UTC", ...opts });
 const longDay = t => utcDay(t, { weekday: "short", month: "short", day: "numeric" });
 const when = t => new Date(t * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const shortDay = t => utcDay(t, { month: "short", day: "numeric" });
+// A chart column's full name: the day, the week (from its Monday) or the month.
+const periodName = (d, period) => period === "week" ? `Week of ${shortDay(d.day)}` + (d.partial_start ? ` (from ${shortDay(C.history.start)})` : "")
+  : period === "month" ? utcDay(d.day, { month: "long", year: "numeric" }) : longDay(d.day);
+const periodRow = (d, period) => esc(periodName(d, period)) + (d.today ? " (so far)" : "");
+
+// The chart rows for the chosen period: the range's days, or the history's weeks/months re-totalled for the view.
+function chartRows(c) {
+  if (C.period === "day") return c.daily;
+  const h = C.history;
+  if (!h || h.error || !h.periods) return null;
+  return h.periods[C.period].map(d => ({ ...d, total: SERIES.reduce((t, x) => t + (inView(x.key) ? d[x.key] || 0 : 0), 0) }));
+}
+const chartSince = () => C.period === "day" ? "" : `since ${shortDay(C.history.start)}, by UTC ${C.period === "week" ? "week (Monday start)" : "month"} · `;
+function waitingCard(title) {
+  const h = C.history;
+  return `<div class="cc-head"><div><div class="cc-title">${esc(title)}</div><div class="cc-sub">${h && (h.error || h.stale)
+    ? esc(`Couldn't load the ${C.period}ly figures: ${h.error || h.stale}`) : `Loading the ${C.period}ly figures since Aug 1 (up to a minute the first time)…`}</div></div></div>`;
+}
+
+async function loadHistory(refresh = false, poll = false) {
+  if (C.period === "day" || (!refresh && !poll && C.history && C.history.periods)) return;
+  try {
+    const h = await api(`/api/admin/cost/history${refresh ? "?refresh=1" : ""}`);
+    if (!h.loading) C.history = h;
+    // the server looks it up in the background (about a minute the first time): keep what's shown and ask again
+    if ((h.loading || h.refreshing) && !C.historyPoll) C.historyPoll = setTimeout(() => { C.historyPoll = null; loadHistory(false, true); }, 8000);
+  } catch (err) {
+    if (!C.history || !C.history.periods) C.history = { error: err.message };
+  }
+  if (C.data) render();
+}
 
 async function load(refresh = false) {
   document.querySelectorAll("#range [data-days]").forEach(b => b.classList.toggle("on", +b.dataset.days === C.days));
   $("#app").classList.add("refetching");  // keep the last render, dimmed, while reloading
   $("#asof").textContent = "Loading…";
   try {
+    loadHistory(refresh, !refresh);  // weekly/monthly figures, when shown
     C.data = await api(`/api/admin/cost?days=${C.days}${refresh ? "&refresh=1" : ""}`);
   } catch (err) {
     if (err.status === 401 || err.status === 403) { location.href = "/admin"; return; }
@@ -49,7 +85,8 @@ function render() {
   const { budget: b = {} } = C.data;
   let c = C.data.cost || {};
   $("#asof").textContent = c.fetched_at ? `Data as of ${when(c.fetched_at)} (${fmtAgo(c.fetched_at)}) · `
-    + (c.refreshing ? "updating in the background" : "refreshes every 10 min") : "";
+    + (c.refreshing ? "updating in the background" : "refreshes every 10 min")
+    + (C.period !== "day" && C.history && C.history.fetched_at ? ` · ${C.period}ly charts as of ${when(C.history.fetched_at)}` : "") : "";
   const notes = [];
   if (c.error) notes.push(c.error);
   if (c.stale) notes.push(`Couldn't refresh just now (${c.stale}); showing the last figures.`);
@@ -62,6 +99,8 @@ function render() {
   $("#notes").innerHTML = notes.map(n => `<div class="error">${esc(n)}</div>`).join("") + (info ? `<p class="muted">${esc(info)}</p>` : "");
   if (c.error) return;
   document.querySelectorAll("#view [data-view-pick]").forEach(x => x.classList.toggle("on", x.dataset.viewPick === C.view));
+  document.querySelectorAll("#period [data-period]").forEach(x => x.classList.toggle("on", x.dataset.period === C.period));
+  document.querySelectorAll("#chart-type [data-chart-type]").forEach(x => x.classList.toggle("on", x.dataset.chartType === C.chart));
   C.shown = viewOf(c);
   c = C.shown;
   renderTiles(c, b);
@@ -72,7 +111,7 @@ function render() {
   renderTable("people");
   wireCharts();
   const q = c.queries || {};
-  $("#foot").innerHTML = `<b>How it's counted.</b> UTC days. <b>Task runs</b> are the platform's Agent Runner, pre-check and verifier runs on
+  $("#foot").innerHTML = `<b>How it's counted.</b> UTC days; weekly and monthly charts add up the days since Aug 1 (hourly refresh), with the current week or month so far. <b>Task runs</b> are the platform's Agent Runner, pre-check and verifier runs on
     the HG4 env, from LiteLLM's request log and SMIG's usage records (most calls go through SMIG since Oct 16) on every key tagged with the Atlas Commercial project (mostly <span class="mono">pub-mcp-commercial</span>);
     a run counts for a task and contributor when its run ID is in one of their submitted attempts, or when it was launched from the task itself
     (run named after the task's pipeline node); earlier sandbox-viewer runs can't be tied to a task and only show in the daily totals. <b>In-task sandbox</b> is the old in-task chat
@@ -118,16 +157,18 @@ function renderTiles(c, b) {
 }
 
 // ---- column charts ----
-// series: [{key, label, cls}] stacked bottom-up; value(d, key) gives each part.
-function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleStart, tip, fmt = kUsd }) {
-  const W = 1100, H = 250, L = 56, R = 12, T = 26, B = 42, pw = W - L - R, ph = H - T - B, GAP = 2;
+// series: [{key, label, cls}] stacked bottom-up; value(d, key) gives each part. In line mode (the Bars / Lines toggle)
+// each series is its own 2px line with 8px markers instead, on the same single axis. period names the columns.
+function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleStart, tip, fmt = kUsd, period = "day" }) {
+  const W = 1100, H = 250, L = 56, R = 12, T = 26, B = 42, pw = W - L - R, ph = H - T - B, GAP = 2, line = C.chart === "line";
   const totals = days.map(d => series.reduce((t, s) => t + (value(d, s.key) || 0), 0));
-  const top = Math.max(pace || 0, ...totals, 1) * 1.12;
+  const highs = line ? days.map(d => Math.max(0, ...series.map(s => value(d, s.key) || 0))) : totals;
+  const top = Math.max(pace || 0, ...highs, 1) * 1.12;
   const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000, 100000];
   const step = steps.find(s => top / s <= 5) || 200000;
   const yMax = Math.ceil(top / step) * step, y = v => T + ph - (v / yMax) * ph;
   const slot = pw / days.length, bw = Math.min(24, slot * 0.6);
-  const peak = totals.reduce((m, v, i) => (v > totals[m] ? i : m), 0);
+  const peak = highs.reduce((m, v, i) => (v > highs[m] ? i : m), 0), cx = i => L + (i + 0.5) * slot;
   let svg = "";
   for (let v = 0; v <= yMax + 1e-9; v += step) {
     svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${esc(fmt(v))}</text>`;
@@ -138,10 +179,15 @@ function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleSt
     svg += `<line class="ref" x1="${x}" x2="${x}" y1="${T - 14}" y2="${T + ph}"/><text class="note" x="${x + 4}" y="${T - 6}">cycle reset</text>`;
   }
   const every = days.length > 16 ? 2 : 1;
+  if (line) series.forEach(s => {
+    svg += `<polyline class="line ${s.cls}" points="${days.map((d, i) => `${cx(i).toFixed(1)},${y(value(d, s.key) || 0).toFixed(1)}`).join(" ")}"/>`;
+  });
   days.forEach((d, i) => {
-    const cx = L + (i + 0.5) * slot, x = cx - bw / 2, base = T + ph;
+    const x = cx(i) - bw / 2, base = T + ph;
     let cum = 0, parts = "";
-    const drawn = series.map(s => ({ s, v: value(d, s.key) || 0 })).filter(p => p.v > 0);
+    const drawn = line ? [] : series.map(s => ({ s, v: value(d, s.key) || 0 })).filter(p => p.v > 0);
+    if (line) parts = `<line class="guide" x1="${cx(i)}" x2="${cx(i)}" y1="${T}" y2="${base}"/>`
+      + series.map(s => `<circle class="dot ${s.cls}" cx="${cx(i)}" cy="${y(value(d, s.key) || 0)}" r="4"/>`).join("");
     drawn.forEach((p, j) => {
       let y1 = y(cum + p.v), y0 = y(cum);
       if (j > 0) y0 -= GAP;  // the surface gap between stacked parts
@@ -152,18 +198,22 @@ function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleSt
       parts += r ? `<path class="bar ${p.s.cls}" d="M${x},${y0} V${y1 + r} Q${x},${y1} ${x + r},${y1} H${x + bw - r} Q${x + bw},${y1} ${x + bw},${y1 + r} V${y0} Z"/>`
         : `<rect class="bar ${p.s.cls}" x="${x}" y="${y1}" width="${bw}" height="${h}"/>`;
     });
-    const label = (i === peak || d.today) && totals[i] > 0 ? `<text class="val" x="${cx}" y="${y(totals[i]) - 6}" text-anchor="middle">${esc(fmt(totals[i]))}</text>` : "";
+    // values only on the peak and the current period; with several lines the legend and tooltip carry them
+    const shown = line && series.length > 1 ? 0 : highs[i];
+    const label = (i === peak || d.today) && shown > 0 ? `<text class="val" x="${cx(i)}" y="${y(shown) - (line ? 10 : 6)}" text-anchor="middle">${esc(fmt(shown))}</text>` : "";
     const first = i === 0 || utcDay(d.day, { day: "numeric" }) === "1";
-    const name = i % every && !first && !d.today ? "" : first ? utcDay(d.day, { month: "short", day: "numeric" }) : utcDay(d.day, { day: "numeric" });
-    svg += `<g class="sbar" data-chart="${id}" data-i="${i}" tabindex="0" role="img" aria-label="${esc(longDay(d.day))}: ${esc(fmt(totals[i]))}">
+    const name = period === "week" ? shortDay(d.day) : period === "month" ? utcDay(d.day, { month: "short" })
+      : i % every && !first && !d.today ? "" : first ? shortDay(d.day) : utcDay(d.day, { day: "numeric" });
+    const note = d.today ? (period === "day" ? "today" : "so far") : d.partial_start && C.history ? `from ${shortDay(C.history.start)}` : "";
+    svg += `<g class="sbar" data-chart="${id}" data-i="${i}" tabindex="0" role="img" aria-label="${esc(periodName(d, period))}: ${esc(fmt(totals[i]))}">
       <rect class="hit" x="${L + i * slot}" y="${T}" width="${slot}" height="${ph}"/>${parts}${label}
-      <text class="tick" x="${cx}" y="${base + 16}" text-anchor="middle">${esc(name)}</text>${d.today ? `<text class="note" x="${cx}" y="${base + 30}" text-anchor="middle">today</text>` : ""}</g>`;
+      <text class="tick" x="${cx(i)}" y="${base + 16}" text-anchor="middle">${esc(name)}</text>${note ? `<text class="note" x="${cx(i)}" y="${base + 30}" text-anchor="middle">${esc(note)}</text>` : ""}</g>`;
   });
   if (pace) svg += `<line class="pace" x1="${L}" x2="${W - R}" y1="${y(pace)}" y2="${y(pace)}"/>`;
   svg += `<line class="axis" x1="${L}" x2="${W - R}" y1="${T + ph}" y2="${T + ph}"/>`;
-  const legend = (series.length > 1 ? series.map(s => `<span class="lg"><span class="sw ${s.cls}"></span>${esc(s.label)}</span>`).join("") : "")
+  const legend = (series.length > 1 ? series.map(s => `<span class="lg"><span class="sw ${line ? "swl " : ""}${s.cls}"></span>${esc(s.label)}</span>`).join("") : "")
     + (pace ? `<span class="lg"><span class="ln"></span>${esc(paceLabel)}</span>` : "");
-  CHARTS[id] = { days, tip };
+  CHARTS[id] = { days, tip, period };
   return `<div class="cc-head"><div><div class="cc-title">${esc(title)}</div><div class="cc-sub">${sub}</div></div><div class="legend">${legend}</div></div>
     <div class="sc-plot"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${svg}</svg><div class="sc-tip hidden" role="tooltip"></div></div>`;
 }
@@ -176,7 +226,7 @@ function wireCharts() {
       tip.replaceChildren();
       const head = document.createElement("div");
       head.className = "muted";
-      head.textContent = longDay(d.day) + (d.today ? " · today so far" : "") + " (UTC)";
+      head.textContent = periodName(d, chart.period) + (d.today ? (chart.period === "day" ? " · today so far" : " · so far") : "") + " (UTC)";
       tip.append(head);
       chart.tip(d).forEach(([strong, rest, cls]) => {
         const row = document.createElement("div"), b = document.createElement("b");
@@ -187,7 +237,7 @@ function wireCharts() {
       });
       tip.classList.remove("hidden");
       const box = plot.getBoundingClientRect(), hit = g.querySelector(".hit").getBoundingClientRect();
-      const topMark = [...g.querySelectorAll(".bar")].reduce((m, e) => Math.min(m, e.getBoundingClientRect().top), hit.bottom - 20);
+      const topMark = [...g.querySelectorAll(".bar, .dot")].reduce((m, e) => Math.min(m, e.getBoundingClientRect().top), hit.bottom - 20);
       tip.style.left = Math.min(Math.max(hit.left - box.left + hit.width / 2 - tip.offsetWidth / 2, 0), box.width - tip.offsetWidth) + "px";
       tip.style.top = Math.max(0, topMark - box.top - tip.offsetHeight - 8) + "px";
     };
@@ -201,18 +251,26 @@ function wireCharts() {
 }
 
 function dailyCard(c, b) {
+  const title = `Spend per ${PERIODS[C.period]}`, days = chartRows(c), period = C.period;
+  if (!days) return waitingCard(title);
   const chart = columns({
-    id: "daily", title: "Spend per day", sub: "UTC days · task runs from LiteLLM + SMIG (all keys), portal reviews from the portal's own records", days: c.daily,
+    id: "daily", title, sub: `${chartSince() || "UTC days · "}task runs from LiteLLM + SMIG (all keys), portal reviews from the portal's own records`, days, period,
     series: SERIES.filter(x => inView(x.key)),
     value: (d, k) => d[k],
     tip: d => [[usd(d.total), ` ${VIEWS[C.view].label.toLowerCase()}`],
-      ...(inView("runs") ? [[usd(d.runs), ` task runs (${usd(d.runs_linked)} tied to a submission)`, "s-runs"]] : []),
+      ...(inView("runs") ? [[usd(d.runs), d.runs_linked == null ? " task runs" : ` task runs (${usd(d.runs_linked)} tied to a submission)`, "s-runs"]] : []),
       ...(inView("hint") && d.hint ? [[usd(d.hint), " hint pipeline", "s-hint"]] : []),
       ...(inView("sandbox") && d.sandbox ? [[usd(d.sandbox), " in-task sandbox", "s-sandbox"]] : []),
       ...(inView("portal") ? [[usd(d.portal), " portal reviews", "s-untagged"]] : []),
       [fmtInt(d.active_cbs), ` active contributors · ${fmtInt(d.tasks_submitted)} tasks submitted`],
       ...(inView("runs") && d.sub_runs ? [[`${fmtInt(d.sub_runs_logged)} of ${fmtInt(d.sub_runs)}`, " runs in that day's submissions have logged spend"]] : [])],
   });
+  if (period !== "day") {
+    const rows = days.slice().reverse().map(d => `<tr><td>${periodRow(d, period)}</td><td>${esc(usd(d.total))}</td><td>${esc(usd(d.runs))}</td>
+      <td>${esc(usd(d.sandbox))}</td><td>${esc(usd(d.hint))}</td><td>${esc(usd(d.portal))}</td><td>${fmtInt(d.active_cbs)}</td><td>${fmtInt(d.tasks_submitted)}</td></tr>`).join("");
+    return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "week" ? "Week" : "Month"} (UTC)</th><th>Total</th>
+      <th>Task runs</th><th>In-task sandbox</th><th>Hint pipeline</th><th>Portal reviews</th><th>Active contributors</th><th>Tasks submitted</th></tr>${rows}</table></details>`;
+  }
   const rows = c.daily.slice().reverse().map(d => `<tr><td>${esc(longDay(d.day))}${d.today ? " (so far)" : ""}</td><td>${esc(usd(d.total))}</td>
     <td>${esc(usd(d.runs))}</td><td>${esc(usd(d.runs_linked))}</td><td>${esc(usd(d.sandbox))}</td><td>${esc(usd(d.hint))}</td><td>${esc(usd(d.portal))}</td>
     <td>${fmtInt(d.active_cbs)}</td><td>${fmtInt(d.tasks_submitted)}</td><td>${d.sub_runs ? `${fmtInt(d.sub_runs_logged)} / ${fmtInt(d.sub_runs)}` : "–"}</td></tr>`).join("");
@@ -225,6 +283,7 @@ function dailyCard(c, b) {
 // the column is that day's median, so one expensive task doesn't swing it; the line is the range's median.
 // In the "both" view it's split into an evals chart and a task-runs chart, so each part reads on its own.
 function perTaskCard(c) {
+  if (C.period !== "day") return periodPerTaskCard(c);
   if (C.view === "runs") return runsPerTaskChart(c, "pertask");
   if (C.view !== "both") return perTaskChart(c, { id: "pertask", title: "Cost per submitted task, by day submitted",
     what: VIEWS[C.view].label.toLowerCase(), cls: "s-runs", totalOf: t => t.total });
@@ -289,8 +348,46 @@ function perTaskChart(c, { id, title, what, cls, totalOf }) {
     <th>Median</th><th>Average</th><th>Cheapest</th><th>Most expensive</th></tr>${rows}</table></details>`;
 }
 
+// Weekly / monthly: per-task figures aren't kept for the whole history, so each column is the period's spend ÷ tasks
+// submitted in it (an average, test runs included), and the line is the same over every period shown.
+function periodPerTaskCard(c) {
+  const days = chartRows(c), period = C.period;
+  if (!days) return waitingCard(`Cost per submitted task, by ${period}`);
+  const evals = d => (d.sandbox || 0) + (d.portal || 0), runs = d => d.runs || 0;
+  const one = (id, title, what, cls, part) => {
+    const rows = days.map(d => ({ ...d, part: part(d), avg: d.tasks_submitted ? part(d) / d.tasks_submitted : 0 }));
+    const spent = rows.filter(d => d.part > 0), subs = spent.reduce((n, d) => n + d.tasks_submitted, 0);  // evals only start in Sep
+    const overall = subs ? spent.reduce((n, d) => n + d.part, 0) / subs : 0;
+    const chart = columns({
+      id, title, period, sub: `${chartSince()}${esc(what)} spend that ${period} ÷ tasks submitted that ${period} (an average: test runs can't be tied to a task)`,
+      days: rows, series: [{ key: "avg", label: "Per submitted task", cls }], value: (d, k) => d[k],
+      pace: overall, paceLabel: overall ? `${kUsd(overall)} average over the ${spent.length} ${period}s with ${what} spend` : "",
+      tip: d => d.tasks_submitted ? [[usd(d.avg), " per submitted task (average)"], [usd(d.part), ` ${what} spend · ${fmtInt(d.tasks_submitted)} task${d.tasks_submitted === 1 ? "" : "s"} submitted`]]
+                                  : [[usd(d.part), ` ${what} spend`], ["No tasks", ` submitted this ${period}`]],
+    });
+    const table = rows.slice().reverse().map(d => `<tr><td>${periodRow(d, period)}</td><td>${esc(usd(d.part))}</td><td>${fmtInt(d.tasks_submitted)}</td>
+      <td>${d.tasks_submitted ? esc(usd(d.avg)) : "–"}</td></tr>`).join("");
+    return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "week" ? "Week" : "Month"} (UTC)</th>
+      <th>Spend (${esc(what)})</th><th>Tasks submitted</th><th>Per submitted task</th></tr>${table}</table></details>`;
+  };
+  const evalsChart = () => one("pertask-evals", `Eval cost per submitted task, by ${period}`, "evals", "s-untagged", evals);
+  const runsChart = () => one("pertask-runs", `Task-run cost per submitted task, by ${period}`, "task-run", "s-runs", runs);
+  return C.view === "evals" ? evalsChart() : C.view === "runs" ? runsChart() : evalsChart() + runsChart();
+}
+
 function perCbCard(c) {
-  const days = c.daily.map(d => ({ ...d, per_cb: d.active_cbs ? d.total / d.active_cbs : 0 }));
+  const rows = chartRows(c), period = C.period;
+  if (!rows) return waitingCard(`Spend per active contributor, by ${period}`);
+  if (period !== "day") {  // per contributor-day, so a long month and a partial week compare fairly
+    const days = rows.map(d => ({ ...d, per_cb: d.cb_days ? d.total / d.cb_days : 0 }));
+    return columns({
+      id: "percb", title: `Spend per active contributor-day, by ${period}`, period, days,
+      sub: `${chartSince()}${VIEWS[C.view].label.toLowerCase()} ÷ contributor-days (each person counted once per day they were active)`,
+      series: [{ key: "per_cb", label: "Per contributor-day", cls: "s-runs" }], value: (d, k) => d[k],
+      tip: d => [[d.cb_days ? usd(d.per_cb) : "–", " per active contributor-day"], [fmtInt(d.active_cbs), ` contributors active · ${fmtInt(d.cb_days)} contributor-days`]],
+    });
+  }
+  const days = rows.map(d => ({ ...d, per_cb: d.active_cbs ? d.total / d.active_cbs : 0 }));
   return columns({
     id: "percb", title: "Spend per active contributor, per day", sub: `${VIEWS[C.view].label.toLowerCase()} ÷ contributors active that day · steady means each person costs about the same`,
     days, series: [{ key: "per_cb", label: "Per active contributor", cls: "s-runs" }], value: (d, k) => d[k],
@@ -374,6 +471,21 @@ $("#view").addEventListener("click", e => {
   localStorage.setItem("evp_cost_view", C.view);
   C.sort = {};
   render();
+});
+$("#period").addEventListener("click", e => {
+  const b = e.target.closest("[data-period]");
+  if (!b || b.dataset.period === C.period) return;
+  C.period = b.dataset.period;
+  localStorage.setItem("evp_cost_period", C.period);
+  if (C.data) render();
+  loadHistory();
+});
+$("#chart-type").addEventListener("click", e => {
+  const b = e.target.closest("[data-chart-type]");
+  if (!b || b.dataset.chartType === C.chart) return;
+  C.chart = b.dataset.chartType;
+  localStorage.setItem("evp_cost_chart", C.chart);
+  if (C.data) render();
 });
 $("#refresh").onclick = async () => { $("#refresh").disabled = true; await load(true); $("#refresh").disabled = false; };
 $("#logout").onclick = async () => { await api("/api/admin/logout", { method: "POST" }); location.href = "/admin"; };

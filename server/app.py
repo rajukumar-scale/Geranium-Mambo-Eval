@@ -1380,6 +1380,13 @@ async def admin_cost(request: Request, days: int = 14, refresh: int = 0):
     return {"budget": key, "cost": report}
 
 
+@app.get("/api/admin/cost/history")
+async def admin_cost_history(request: Request, refresh: int = 0):
+    """Spend per day, week and month since 2026-08-01, for the Cost page's Daily / Weekly / Monthly toggle."""
+    current_admin(request)
+    return await cost.history(force=bool(refresh))
+
+
 @app.get("/api/admin/budget")
 async def admin_budget(request: Request, refresh: int = 0):
     """The LiteLLM key's budget: cycle spend vs cap, burn rate and when it runs out at that pace."""

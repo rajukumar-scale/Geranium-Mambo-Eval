@@ -14,6 +14,7 @@ and @scale.com accounts excluded). Its cost is its attributable task runs since 
 """
 
 import asyncio
+import calendar
 import logging
 import statistics
 import time
@@ -170,4 +171,101 @@ async def _load(days, force, hit):
         billed_rows = []
     data = build(days, day_rows, task_rows, person_rows, billed_rows)
     _cache[days] = (time.time(), data)
+    return data
+
+
+# ---- history for the Daily / Weekly / Monthly toggle ----
+
+HISTORY_START = 1785542400  # 2026-08-01 00:00 UTC: task runs on the project's key start 08-10, the in-task sandbox 09-19
+HISTORY_CACHE_SEC = 3600
+_history = {"at": 0.0, "data": None, "task": None, "error": None, "failed_at": 0.0}
+HISTORY_RETRY_SEC = 60  # after a failed lookup, show the error this long before trying again
+
+
+def _period_start(day, period):
+    """The UTC day that starts `day`'s week (Monday) or calendar month."""
+    if period == "week":
+        return day - time.gmtime(day).tm_wday * DAY
+    if period == "month":
+        t = time.gmtime(day)
+        return calendar.timegm((t.tm_year, t.tm_mon, 1, 0, 0, 0))
+    return day
+
+
+def build_history(rows, billed_rows=()):
+    """Spend per UTC day, week and month since HISTORY_START: task runs, in-task sandbox and hint pipeline from the
+    history query, portal reviews from the portal's own records (billed when SMIG has the run, else the estimate)."""
+    today = int(time.time() // DAY * DAY)
+    rows = _rows(rows)
+    spent = {int(r["period_start"]): r for r in rows if r["period"] == "day"}
+    submitted = {(r["period"], int(r["period_start"])): int(r.get("tasks_submitted") or 0) for r in rows}
+    billed = {r["run_id"]: float(r.get("cost_usd") or 0) for r in _rows(billed_rows) if r.get("run_id")}
+    portal_day, _, _, portal_people, _ = _portal(HISTORY_START, billed)
+    num = lambda r, k: float(r.get(k) or 0)  # noqa: E731
+    days = []
+    for d in range(HISTORY_START, today + DAY, DAY):
+        r = spent.get(d, {})
+        active = {c for c in (r.get("cb_ids") or "").split(",") if c} | portal_people.get(d, set())
+        days.append({"day": d, "runs": num(r, "runs"), "sandbox": num(r, "sandbox"), "hint": num(r, "hint"),
+                     "portal": round(portal_day.get(d, 0), 2), "people": active, "tasks_submitted": submitted.get(("day", d), 0)})
+    periods = {}
+    for period in ("day", "week", "month"):
+        out = {}
+        for d in days:
+            start = _period_start(d["day"], period)
+            b = out.setdefault(start, {"day": start, "runs": 0.0, "sandbox": 0.0, "hint": 0.0, "portal": 0.0, "people": set(),
+                                       "cb_days": 0, "partial_start": start < HISTORY_START, "today": False})
+            for k in ("runs", "sandbox", "hint", "portal"):
+                b[k] += d[k]
+            b["people"] |= d["people"]
+            b["cb_days"] += len(d["people"])
+            b["today"] = b["today"] or d["day"] == today
+        periods[period] = [{**{k: v for k, v in b.items() if k != "people"},
+                            **{k: round(b[k], 2) for k in ("runs", "sandbox", "hint", "portal")},
+                            "active_cbs": len(b["people"]), "tasks_submitted": submitted.get((period, start), 0)}
+                           for start, b in sorted(out.items())]
+    return {"start": HISTORY_START, "today": today, "periods": periods, "fetched_at": time.time()}
+
+
+async def history(force=False):
+    """The day/week/month history, cached an hour. The lookup takes about a minute, longer than a proxy waits, so it
+    always runs in the background: callers get the last figures (marked refreshing) or {"loading": true} and ask again."""
+    hit, now = _history["data"], time.time()
+    due = force or not hit or now - _history["at"] >= HISTORY_CACHE_SEC
+    if due and not _history["task"] and (force or now - _history["failed_at"] >= HISTORY_RETRY_SEC):
+        _history["error"] = None
+        _history["task"] = asyncio.create_task(_refresh_history(force))
+    if not hit:
+        return {"error": _history["error"]} if _history["error"] else {"loading": True}
+    return {**hit, "refreshing": True} if _history["task"] else hit
+
+
+async def _refresh_history(force):
+    try:
+        data = await _load_history(force)
+        if data.get("error") or data.get("stale"):
+            _history.update(error=data.get("error"), failed_at=time.time())
+    except Exception as e:  # noqa: BLE001 - surfaced to the page, not raised into the event loop
+        log.warning("cost history refresh failed: %s", e)
+        _history.update(error=f"Couldn't read the cost history: {str(e)[:200]}", failed_at=time.time())
+    finally:
+        _history["task"] = None
+
+
+async def _load_history(force):
+    if not config.COST_HISTORY_QUERY_ID:
+        return {"error": "No history query configured."}
+    age = 0 if force else HISTORY_CACHE_SEC
+    billed_lookup = (auth.redash_rows(config.COST_PORTAL_SMIG_QUERY_ID, max_age=age, timeout=LOOKUP_TIMEOUT)
+                     if config.COST_PORTAL_SMIG_QUERY_ID else asyncio.sleep(0, result=[]))
+    rows, billed_rows = await asyncio.gather(
+        auth.redash_rows(config.COST_HISTORY_QUERY_ID, max_age=age, timeout=LOOKUP_TIMEOUT), billed_lookup,
+        return_exceptions=True)
+    if isinstance(rows, Exception):
+        log.warning("cost history lookup failed: %s", rows)
+        if _history["data"]:
+            return {**_history["data"], "stale": str(rows)[:200]}
+        return {"error": f"Couldn't read the cost history: {str(rows)[:200]}"}
+    data = build_history(rows, [] if isinstance(billed_rows, Exception) else billed_rows)
+    _history.update(at=time.time(), data=data)
     return data

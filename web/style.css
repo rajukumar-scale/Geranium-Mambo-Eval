@@ -405,6 +405,16 @@ button.danger-solid:hover { border-color: var(--ink); }
 .cost-app .bar.s-hint, .cost-app .sw.s-hint { fill: var(--hint); background: var(--hint); }
 .sc-tip .tk.s-sandbox { border-color: var(--sandbox); }
 .sc-tip .tk.s-hint { border-color: var(--hint); }
+/* line mode: 2px lines, 8px markers with a 2px surface ring, a hairline guide on hover */
+.sc-plot .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sc-plot .dot { stroke: var(--panel); stroke-width: 2; }
+.sc-plot .guide { stroke: var(--grey-60); stroke-width: 1; opacity: 0; }
+.sc-plot .sbar:hover .guide, .sc-plot .sbar:focus .guide { opacity: 1; }
+.cost-app .line.s-runs { stroke: var(--runs); } .cost-app .dot.s-runs { fill: var(--runs); }
+.cost-app .line.s-untagged { stroke: var(--untagged); } .cost-app .dot.s-untagged { fill: var(--untagged); }
+.cost-app .line.s-sandbox { stroke: var(--sandbox); } .cost-app .dot.s-sandbox { fill: var(--sandbox); }
+.cost-app .line.s-hint { stroke: var(--hint); } .cost-app .dot.s-hint { fill: var(--hint); }
+.legend .sw.swl { height: 2px; width: 16px; border-radius: 1px; }
 .table-wrap { overflow-x: auto; }
 .cost-table { font-size: 13px; }
 .cost-table th.num, .cost-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
