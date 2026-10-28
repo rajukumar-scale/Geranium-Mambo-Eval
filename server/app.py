@@ -31,7 +31,7 @@ from .runner import RUNNER
 log = logging.getLogger("portal")
 WEB = config.ROOT / "web"
 app = FastAPI(title="Original Conference Eval Portal", docs_url=None, redoc_url=None, openapi_url=None)
-app.add_middleware(GZipMiddleware, minimum_size=1000)  # boat's link is slow; event streams are left alone
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)  # boat's link is slow; event streams are left alone. Level 5: half the CPU of 9, ~2% bigger
 # Changes whenever the web files do: an open chat tab compares it on every reconnect and reloads after a deploy.
 WEB_BUILD = hashlib.sha256(b"".join(p.read_bytes() for p in sorted(WEB.glob("*")) if p.is_file())).hexdigest()[:12]
 NO_CACHE = {"Cache-Control": "no-cache"}  # browsers revalidate (cheap 304s), so a deploy shows up on the next load
