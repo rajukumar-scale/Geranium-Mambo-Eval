@@ -5,7 +5,7 @@ fingerprint linter · stuck now", 395304: the latest "… fingerprint must match
 3+ fails since the last pass, checked in the last 90 min) and DMs LINTER_ALERT_SLACK_USER the CBs it hasn't
 told him about in the last LINTER_ALERT_REPEAT_HOURS. A DM needs the Slack bot token (an incoming webhook
 can only post to its channel). On the first start it sends a one-time "alerts are on" DM; if that can't be
-sent it says so once in the portal's alert channel, so a missing token doesn't go unnoticed.
+sent it only logs a warning. It never posts anywhere but the DM (Evan, 2026-10-27).
 """
 
 import asyncio
@@ -14,7 +14,7 @@ import time
 
 import httpx
 
-from . import auth, config, db, notify
+from . import auth, config, db
 
 log = logging.getLogger("portal.linter_alerts")
 
@@ -79,8 +79,8 @@ async def _hello():
         _mark("linterdm:hello")
     else:
         _mark("linterdm:cant-dm")
-        await notify.slack("⚠️ The linter-stuck DM alerts can't DM Evan: the portal has no Slack bot token "
-                           "(SLACK_BOT_TOKEN), only a webhook. They stay off until one is set.")
+        log.warning("linter-stuck DM alerts can't DM %s: no working SLACK_BOT_TOKEN; they stay off",
+                    config.LINTER_ALERT_SLACK_USER)
 
 
 async def loop():
