@@ -32,7 +32,7 @@ Otherwise, messages without a command are follow-ups or input submissions:
 - Save any task inputs they supply, exactly as Evals/INPUTS.md requires, then confirm what was saved and what is still missing.
 - Answer questions about their saved inputs, reports and findings. Start from `python3 Evals/tools/hg_store_input.py list` and the reports in Evals/task_inputs/reports/, and check facts with a few targeted helper calls. Never invent evidence.
 - Do not start a new graded review or issue or change a verdict or score in a follow-up. To regrade, tell them to send the command again (for example `/prompt`) after updating their inputs.
-- For /oe only a PASS counts: an OE NON-FAIL gets no pass card and can't be submitted (the taxonomy needs PASS), so treat it like a fail and help them fix the report's items and run /oe again. For the other reviews NON-FAIL still counts as a pass.
+- For /oe only a PASS counts: an OE NON-FAIL gets no pass card and can't be submitted (the taxonomy needs PASS). The portal shows it to them as FAIL, so call it a FAIL too (for example "FAIL: /oe needs a PASS"), never "NON-FAIL" or a near-pass; keep the score as graded, and help them fix the report's items and run /oe again. For the other reviews NON-FAIL still counts as a pass.
 - A pass covers every input its review read, not only the one its code fingerprints: /injection reads the SQL; /prompt reads the prompt, task details, injection SQL, error/async config and dynamic context; /hardness reads the prompt and injection SQL; /oe reads the OEs, prompt, task details, injection SQL and error/async config; /rubric reads the rubric, OEs, prompt, task details, injection SQL, error/async config and dynamic context. So when an input changes (they paste a new version, or you save one for them), every earlier pass that read it is outdated and its pass screen no longer counts. Whenever you save a new version of an input or suggest changing one, list the commands they must send again, in order (/injection, /prompt, /hardness, /oe, /rubric, only those that read the changed input). Never say a change to one input (for example only the injection) leaves another stage's pass valid. The portal also marks outdated passes on their pass screens and in the sidebar.
 - A follow-up that mentions a command without starting with it (for example "Normal /prompt" or "Task type: Normal /rubric") is still a follow-up: don't run that review or its skill here. Reply in one or two lines that a review only starts when the message begins with the command, and show the exact message to send (for example `/rubric Task type: Normal`). Reviews run on their own machine, with a progress bar and a pass card; a review run inside a follow-up gets neither.
 
@@ -808,8 +808,8 @@ class Runner:
             hub.publish(attempt, "proof", payload)
         if oe_nonfail:
             msg = db.add_message(attempt, "system",
-                                 "Your /oe came back **NON-FAIL**. For the oracle events only a **PASS** counts (the taxonomy "
-                                 "needs PASS to submit), so there's no pass card. Fix the items in the report and run /oe again.",
+                                 "Your /oe is a **FAIL**: for the oracle events only a **PASS** counts (the taxonomy needs PASS "
+                                 "to submit), so there's no pass card yet. Fix the items in the report and run /oe again to get one.",
                                  {"run_id": run_id})
             hub.publish(attempt, "message", msg)
         self._stale_notice(attempt, run_id)

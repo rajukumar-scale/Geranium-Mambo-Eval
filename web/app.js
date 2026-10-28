@@ -315,7 +315,7 @@ function notifyRunEnd(run) {
     const v = report.meta.verdict, passed = (report.meta.stage === "oe" ? v === "PASS" : ["PASS", "NON-FAIL"].includes(v))
       && report.meta.exec_status === "COMPLETE";
     title = `Your ${name} report is ready`;
-    body = `${v || "No verdict"}${report.meta.score != null ? " · score " + report.meta.score : ""}${passed ? " · your pass card is ready" : ""}`;
+    body = `${shownVerdict(report.meta.stage, v) || "No verdict"}${report.meta.score != null ? " · score " + report.meta.score : ""}${passed ? " · your pass card is ready" : ""}`;
   } else {
     title = `Your ${name} review replied`;
     body = "It didn't write a new report. Open the chat to see its reply; it may be asking you something.";
@@ -432,7 +432,7 @@ function renderSide() {
     : "Paste inputs, ask a question, or type a command like /prompt";
   const labels = { injection: "Injection", prompt: "Prompt", oe: "Oracle Events", rubric: "Rubric", hardness: "Hardness" };
   $("#reports").innerHTML = me.reports.length ? me.reports.map(r =>
-    `<div class="list-item" data-rep="${esc(r.file)}"><span class="grow">${esc(labels[r.stage] || r.stage)}</span>${pill(r.verdict)}</div>`).join("") : "None yet";
+    `<div class="list-item" data-rep="${esc(r.file)}"><span class="grow">${esc(labels[r.stage] || r.stage)}</span>${pill(shownVerdict(r.stage, r.verdict))}</div>`).join("") : "None yet";
   $("#proofs").innerHTML = me.proofs.length ? me.proofs.map((p, i) =>
     `<div class="list-item" data-pr="${i}" title="${esc(p.outdated ? p.outdated.message : p.fingerprint || p.code)}"><span class="grow">/${esc(p.stage)} · <span class="mono">${p.fingerprint ? "🔏 " + esc(shortFp(p.fingerprint)) : esc(p.code)}</span></span>${pill(p.outdated ? "OUTDATED" : p.verdict)}</div>`).join("") : "None yet";
   syncProofCards(me.proofs);

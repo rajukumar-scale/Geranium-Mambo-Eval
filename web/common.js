@@ -42,6 +42,10 @@ function fmtDur(sec) {
 }
 const short = (h, n = 12) => (h ? `${h.slice(0, n)}…` : "–");
 const pill = v => `<span class="pill ${esc(v || "none")}">${esc(v || "no verdict")}</span>`;
+// For /oe only a PASS counts (no pass card, can't submit), so an OE NON-FAIL is shown as FAIL everywhere a verdict
+// is displayed. The stored report, its score and the run's verdict stay as the eval graded them.
+const shownVerdict = (stage, v) => (stage === "oe" && v === "NON-FAIL" ? "FAIL" : v);
+const OE_NONFAIL_NOTE = "Shown as FAIL: for the oracle events only a PASS counts, so fix the items in this report and run /oe again. (The report itself says NON-FAIL.)";
 
 // "5m ago" for lists (the full time goes in a tooltip).
 function fmtAgo(t) {
@@ -111,7 +115,7 @@ function chatListTools(box, onChange) {
 function chatRowHtml(c, { attr, current = false, god = false, preview = "" }) {
   const short = id => esc((id || "").slice(0, 8));
   const status = c.running ? `<span class="pill run">running</span>`
-    : c.last_verdict ? `<span class="pill ${esc(c.last_verdict)}" title="Last review: /${esc(c.last_cmd)} ${esc(c.last_verdict)}">/${esc(c.last_cmd)} ${esc(c.last_verdict)}</span>`
+    : c.last_verdict ? (v => `<span class="pill ${esc(v)}" title="Last review: /${esc(c.last_cmd)} ${esc(v)}">/${esc(c.last_cmd)} ${esc(v)}</span>`)(shownVerdict(c.last_cmd, c.last_verdict))
     : `<span class="cr-none">no reviews yet</span>`;
   const badges = [
     c.admin_open && `<span class="badge alert" title="Open /admin request">● /admin</span>`,
@@ -485,7 +489,8 @@ function messageHtml(m, opts = {}) {
   if (m.role === "admin") return `<div class="msg admin"><div class="bubble"><div class="who">Admin${opts.admin && meta.admin ? ` · ${esc(meta.admin)}` : ""} ${ts}</div>${md(m.content)}</div></div>`;
   if (m.role === "report") {
     const label = { injection: "Injection", prompt: "Prompt", oe: "Oracle Events", rubric: "Rubric", hardness: "Hardness" }[meta.stage] || meta.stage;
-    return `<div class="msg system"><div class="bubble"><div class="rcard"><div class="grow">📋 <b>${esc(label)} report</b> ${pill(meta.verdict)}
+    const oeNonfail = shownVerdict(meta.stage, meta.verdict) !== meta.verdict;
+    return `<div class="msg system"><div class="bubble"><div class="rcard"><div class="grow">📋 <b>${esc(label)} report</b> ${oeNonfail ? `<span class="pill FAIL" title="${esc(OE_NONFAIL_NOTE)}">FAIL</span>` : pill(meta.verdict)}
       ${meta.score != null ? `<span class="muted">score ${esc(meta.score)}</span>` : ""}
       ${meta.exec_status && meta.exec_status !== "COMPLETE" ? `<span class="muted">· ${esc(meta.exec_status)}</span>` : ""}</div>
       ${ts}<button data-report="${m.id}">View</button><button data-download="${m.id}">Download</button></div>
@@ -510,8 +515,10 @@ function wireMessageClicks(container, getMessage, reportName) {
       t.remove();
     } else if (t.dataset.report) {
       const m = getMessage(+t.dataset.report);
-      const label = `${m.meta.stage} report — ${m.meta.verdict || "no verdict"}`;
-      const w = openModal(label, `<div class="bubble" style="border:0;padding:0">${md(m.content)}</div>`,
+      const shown = shownVerdict(m.meta.stage, m.meta.verdict);
+      const label = `${m.meta.stage} report — ${shown || "no verdict"}`;
+      const banner = shown !== m.meta.verdict ? `<div class="bubble warnnote" style="margin-bottom:10px">${esc(OE_NONFAIL_NOTE)}</div>` : "";
+      const w = openModal(label, `${banner}<div class="bubble" style="border:0;padding:0">${md(m.content)}</div>`,
         `<button data-dl>Download</button>`);
       w.querySelector("[data-dl]").onclick = () => download(reportName(m), m.content);
     } else if (t.dataset.download) {
