@@ -202,10 +202,12 @@ class Runner:
                 self.reattach.append(run["id"])
             elif run["runner_box"] or run["kind"] == "review" and config.REVIEW_RUNNER == "boat":
                 # a review still setting up its box: start it over (the half-made box is swept below)
-                db.update("runs", "id", run["id"], status="queued", started_at=None, runner_box=None, boat_phase=None)
+                db.update("runs", "id", run["id"], status="queued", started_at=None, runner_box=None, boat_phase=None,
+                          proxy_token=None)
                 self.requeue.append(run["id"])
             else:
-                db.update("runs", "id", run["id"], status="failed", error="server restarted", finished_at=time.time())
+                db.update("runs", "id", run["id"], status="failed", error="server restarted", finished_at=time.time(),
+                          proxy_token=None)
                 msg = db.add_message(run["attempt_id"], "system",
                                      "This was cut off by a server update. Please send your message again.",
                                      {"run_id": run["id"]})
@@ -444,6 +446,7 @@ class Runner:
         err_path = workspace.attempt_dir(attempt) / "logs" / f"{run_id}.stderr.txt"
         outcome = {"events": 0, "result": None, "texts": [], "init": False}
         proxy.ACTIVE_TOKENS[token] = run_id
+        db.update("runs", "id", run_id, proxy_token=token)  # the metering proxy is its own process: it checks the table
         local = config.RUNNER_MODE == "local"
         if local:
             await self.local_lock.acquire()
@@ -491,6 +494,7 @@ class Runner:
                     outcome["reports"][name] = workspace.read_report(attempt, name)
         finally:
             proxy.ACTIVE_TOKENS.pop(token, None)
+            db.update("runs", "id", run_id, proxy_token=None)
             self.procs.pop(run_id, None)
             if local:
                 workspace.swap_out(attempt)

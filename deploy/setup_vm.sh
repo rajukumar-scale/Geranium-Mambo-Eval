@@ -2,7 +2,7 @@
 # One-time VM setup for the HarmonyGames Eval Portal (Ubuntu 22.04 / 24.04). Run as root:
 #   sudo DOMAIN=eval.example.com bash deploy/setup_vm.sh   (or DOMAIN=auto for <ip>.sslip.io)
 # Re-running is safe: it skips finished steps. Afterwards put the keys in /opt/eval-portal/.env
-# (LITELLM_API_KEY, REDASH_API_KEY, SLACK_WEBHOOK_URL) and `systemctl restart eval-portal`.
+# (LITELLM_API_KEY, REDASH_API_KEY, SLACK_WEBHOOK_URL) and `systemctl restart eval-portal-meter eval-portal`.
 set -euo pipefail
 
 APP_DIR=/opt/eval-portal
@@ -87,10 +87,11 @@ chown -R root:root "$APP_DIR"; chown "$APP_USER:$APP_USER" "$ENV"
 
 log "systemd service"
 install -m 644 "$APP_DIR/deploy/eval-portal.service" /etc/systemd/system/eval-portal.service
+install -m 644 "$APP_DIR/deploy/eval-portal-meter.service" /etc/systemd/system/eval-portal-meter.service
 install -m 644 "$APP_DIR/deploy/eval-portal-firewall.service" /etc/systemd/system/eval-portal-firewall.service
 install -m 644 "$APP_DIR/deploy/eval-portal-firewall.timer" /etc/systemd/system/eval-portal-firewall.timer
 systemctl daemon-reload
-systemctl enable eval-portal
+systemctl enable eval-portal eval-portal-meter
 systemctl enable --now eval-portal-firewall.timer
 
 if [ -n "$DOMAIN" ] && [ -z "$PUBLIC_URL" ]; then
@@ -108,9 +109,9 @@ fi
 log "done"
 missing=$(grep -E '^(LITELLM_API_KEY|REDASH_API_KEY)=$' "$ENV" || true)
 if [ -n "$missing" ]; then
-  echo "Fill these in $ENV, then run: systemctl restart eval-portal"
+  echo "Fill these in $ENV, then run: systemctl restart eval-portal-meter eval-portal"
   echo "$missing"
 else
-  systemctl restart eval-portal
+  systemctl restart eval-portal-meter eval-portal
 fi
 echo "Admin password: $(grep '^ADMIN_PASSWORD=' "$ENV" | cut -d= -f2)  (admin page: /admin)"

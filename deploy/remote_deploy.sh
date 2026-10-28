@@ -46,7 +46,7 @@ done
 LIVE=$(q "$LIVE_SQL")
 QUEUED=$(q "select count(*) from runs where status='queued'")
 RELOAD=0
-for unit in eval-portal.service eval-portal-update.service eval-portal-pull.service eval-portal-pull.timer; do
+for unit in eval-portal.service eval-portal-meter.service eval-portal-update.service eval-portal-pull.service eval-portal-pull.timer; do
   [ -e "$APP/deploy/$unit" ] || continue
   if ! cmp -s "$APP/deploy/$unit" "/etc/systemd/system/$unit"; then
     install -m 644 "$APP/deploy/$unit" "/etc/systemd/system/$unit"; RELOAD=1; echo "$unit updated"
@@ -59,11 +59,46 @@ if ! cmp -s "$APP/deploy/eval-portal-update.sudoers" /etc/sudoers.d/eval-portal-
     install -m 440 "$APP/deploy/eval-portal-update.sudoers" /etc/sudoers.d/eval-portal-update && echo "sudoers rule updated"
 fi
 chmod 755 "$APP/deploy/"*.sh
-systemctl restart eval-portal
-for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8000/healthz && break; sleep 1; done
-if ! curl -sf -o /dev/null http://127.0.0.1:8000/healthz; then
+# The metering proxy (eval-portal-meter) carries running reviews' model calls, so it is left running: only the portal
+# restarts. The meter restarts only when its own code (server/proxy.py) changed, and then waits for in-flight calls.
+PROXY_PORT=$(grep -E '^PROXY_PORT=' $APP/.env 2>/dev/null | cut -d= -f2 | awk '{print $1}' || true)
+METER_URL=http://127.0.0.1:${PROXY_PORT:-8001}/__meter_health
+METER=none
+if [ -e "$APP/deploy/eval-portal-meter.service" ]; then
+  if ! systemctl is-active -q eval-portal-meter; then METER=first
+  elif ! cmp -s "$BACKUP/server/proxy.py" "$APP/server/proxy.py"; then METER=restart; fi
+fi
+if [ "$METER" = first ]; then
+  # Switch-over: the old portal process still serves the proxy port, so stop it before the meter takes the port.
+  echo "starting the metering proxy as its own service"
+  systemctl stop eval-portal
+  systemctl enable -q eval-portal-meter
+  systemctl start eval-portal-meter
+  systemctl start eval-portal
+else
+  if [ "$METER" = restart ]; then
+    echo "server/proxy.py changed: restarting the metering proxy (it waits for in-flight model calls)"
+    systemctl restart eval-portal-meter
+  fi
+  systemctl restart eval-portal
+fi
+healthy() {
+  curl -sf -o /dev/null http://127.0.0.1:8000/healthz || return 1
+  [ "$METER" = none ] || curl -sf -o /dev/null "$METER_URL"
+}
+for i in $(seq 1 30); do healthy && break; sleep 1; done
+if ! healthy; then
   echo "new code failed its health check; rolling back to $STAMP"
   for item in server web deploy README.md; do rm -rf "$APP/$item"; cp -a "$BACKUP/$item" "$APP/$item"; done
+  for unit in eval-portal.service eval-portal-meter.service; do
+    if [ -e "$BACKUP/deploy/$unit" ]; then install -m 644 "$BACKUP/deploy/$unit" "/etc/systemd/system/$unit"; fi
+  done
+  if [ ! -e "$BACKUP/deploy/eval-portal-meter.service" ]; then  # back to the proxy inside the portal process
+    systemctl disable -q --now eval-portal-meter 2>/dev/null || true
+    rm -f /etc/systemd/system/eval-portal-meter.service
+  fi
+  systemctl daemon-reload
+  [ "$METER" = restart ] && systemctl restart eval-portal-meter
   systemctl restart eval-portal
   exit 1
 fi

@@ -241,6 +241,7 @@ def migrate():
     if "stale_notified" not in proof_cols:  # which changed inputs the chat was last told made this pass outdated
         ex("alter table proofs add column stale_notified text")
     ex("create index if not exists runs_created on runs(created_at)")
+    ex("create index if not exists runs_proxy_token on runs(proxy_token)")  # the metering proxy checks tokens here
     ex("create index if not exists llm_calls_created on llm_calls(created_at)")  # status page hourly error counts
     # last_activity = the chat's latest message. Opening a chat or signing in used to bump it, which made the
     # chat lists say "just now" for a chat nobody had touched; put those back to the real last interaction.

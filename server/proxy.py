@@ -4,6 +4,10 @@ The runner never sees the real LiteLLM key. Each run gets a random token that
 is only valid while that run is active; this proxy swaps it for the real key,
 forwards the request, and records the token usage of every model call
 (including subagent calls, which Claude Code's own summary can miss).
+
+It runs as its own service (eval-portal-meter), so a portal restart never cuts a running review's model calls. A token
+is checked against the runs table (runs.proxy_token, kept while the run lives), so the two processes share nothing in
+memory; ACTIVE_TOKENS is only a shortcut when both run in one process (local development).
 """
 
 import asyncio
@@ -19,8 +23,9 @@ from . import config, db
 
 log = logging.getLogger("portal.proxy")
 
-# token -> run_id, only for runs that are currently executing
+# token -> run_id, only for runs that are currently executing (same-process shortcut; the runs table is the truth)
 ACTIVE_TOKENS = {}
+CANCELLED = "cancelled by user"  # runner.CANCELLED: a cancelled run's calls stop at once
 
 HOP_HEADERS = {"host", "content-length", "authorization", "x-api-key", "connection", "accept-encoding", "x-litellm-tags",
                "transfer-encoding", "keep-alive", "proxy-authorization", "te", "trailer", "upgrade"}
@@ -101,9 +106,25 @@ class SSEUsage:
                 self.usage[key] = max(self.usage.get(key, 0), int(value))
 
 
+def run_for(token):
+    """The run a token belongs to, while that run is queued or running and not being cancelled; else None."""
+    if not token:
+        return None
+    if token in ACTIVE_TOKENS:
+        return ACTIVE_TOKENS[token]
+    row = db.one("select id from runs where proxy_token=? and status in ('queued','running') and coalesce(error,'')!=?",
+                 (token, CANCELLED))
+    return row["id"] if row else None
+
+
+@app.get("/__meter_health")
+def meter_health():
+    return {"ok": True}
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def forward(path: str, request: Request):
-    run_id = ACTIVE_TOKENS.get(_token(request))
+    run_id = run_for(_token(request))
     if not run_id:
         return JSONResponse({"type": "error", "error": {"type": "authentication_error",
                                                         "message": "run token is not active"}}, status_code=401)

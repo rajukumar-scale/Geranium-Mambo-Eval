@@ -1,7 +1,7 @@
 [Unit]
 Description=HarmonyGames Eval Portal
-After=network-online.target docker.service
-Wants=network-online.target
+After=network-online.target docker.service eval-portal-meter.service
+Wants=network-online.target eval-portal-meter.service
 Requires=docker.service
 
 [Service]
@@ -10,6 +10,8 @@ Group=evalportal
 SupplementaryGroups=docker
 WorkingDirectory=/opt/eval-portal
 Environment=PORTAL_ENV_FILE=/opt/eval-portal/.env
+# The metering proxy is its own service (eval-portal-meter.service): restarting the portal never cuts model calls.
+Environment=EVP_METER=separate
 ExecStart=/opt/eval-portal/.venv/bin/python -m server.main
 Restart=always
 RestartSec=5

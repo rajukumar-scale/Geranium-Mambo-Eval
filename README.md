@@ -90,6 +90,11 @@ and a small metering proxy on the VM (`server/proxy.py`, port 8001) swaps in the
 forwards to LiteLLM. Because every model call passes through the proxy, its token counts include
 nested subagents, which Claude Code's own `modelUsage` can miss.
 
+On the server the proxy is its own service, `eval-portal-meter` (`python -m server.main meter`); the
+portal service runs with `EVP_METER=separate`. It checks each token against `runs.proxy_token`, so the
+two share nothing in memory, and restarting the portal never cuts a running review's model calls.
+Locally, `python -m server.main` still runs both in one process.
+
 LiteLLM returns no cost on streamed responses, so cost comes from Claude Code's own
 `total_cost_usd` (list price). On a resumed session that number is cumulative, so a run's cost is
 its total minus the session's total at its previous run. If a run dies without a result, the proxy
@@ -196,19 +201,22 @@ once. Code copied to the server any other way is overwritten by the next merge.
 3. waits up to 5 minutes for what can't survive a restart: follow-ups running on the server, and
    reviews still setting up their box;
 4. backs up the current code to `/opt/eval-portal-backups/` (last 10), swaps in the new code and
-   restarts (about 3 seconds);
-5. rolls back automatically if the new code fails its health check.
+   restarts the portal (about 3 seconds). The metering proxy keeps running; it restarts only when
+   `server/proxy.py` changed, and then waits for in-flight model calls (up to 10 minutes);
+5. rolls back automatically if the new code fails its health check (portal, and the proxy's
+   `/__meter_health`).
 
 After the restart, reviews already running on their own box are re-attached. The box never
 stopped; the server re-reads its output from the start and finishes the run as usual. Queued
 runs start, and anything else that was cut off gets a "please send it again" note in its chat.
-The two costs: users' pages reconnect within a few seconds, and model calls in flight at that
-moment are retried by Claude Code and may go unmetered.
+The one cost: users' pages reconnect within a few seconds. Model calls are not touched, since they
+go through the separate proxy service.
 
 `.env` changes need a restart too: `sudo touch /srv/eval-data/DRAIN`, wait until
 `select count(*) from runs where status='running' and coalesce(boat_phase,'')!='started'` is 0,
 then `sudo systemctl restart eval-portal`. The DRAIN file is removed on startup, and ignored if it
-is older than 15 minutes.
+is older than 15 minutes. A changed `LITELLM_API_KEY` (or other proxy setting) also needs
+`sudo systemctl restart eval-portal-meter`, which waits for in-flight model calls.
 
 On startup the server also deletes leftover review boxes, meaning clones named after
 `BOAT_SNAPSHOT` that aren't re-attached. Its boat key can delete only boxes it created itself, so
