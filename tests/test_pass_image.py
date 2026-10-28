@@ -46,6 +46,18 @@ class TaxonomyLineTest(unittest.TestCase):
                          "3 criteria, weight 7 | Titles 120 chars - The  ...  end")
         self.assertEqual(line({"fingerprint": None, "code": "EVP-ABCD-1234-WXYZ"}), "EVP-ABCD-1234-WXYZ")
 
+    def test_rubric_angle_brackets_as_the_builder_saves_them(self):
+        """The rubric builder saves a typed <> as &lt;&gt; and keeps <https://...> autolinks (2 of 40 completed
+        tasks on 2026-10-27 had "&lt;&gt;" titles); a rubric pasted with plain <> must get the taxonomy's code."""
+        rubric = self.fingerprint.rubric
+        typed = [{"title": 'Replies on the "Harmony Games <> Ludlow Ventures" email', "weight": 3}]
+        saved = [{"title": 'Replies on the "Harmony Games &lt;&gt; Ludlow Ventures" email', "weight": 3}]
+        self.assertEqual(rubric(typed), rubric(saved))
+        self.assertIn("Titles 47 letters", rubric(saved))  # the taxonomy counts the "lt" and "gt"
+        link = [{"title": "The Agent gives <https://prod.example.com/health> as the check", "weight": 1}]
+        plain = [{"title": "The Agent gives https://prod.example.com/health as the check", "weight": 1}]
+        self.assertEqual(rubric(link), rubric(plain))
+
     def test_matches_like_the_linters(self):
         m = self.taxo_reader.matches
         self.assertTrue(m("68 chars - Hey ... back", "68 chars - Hey  ... back"))  # whitespace runs
