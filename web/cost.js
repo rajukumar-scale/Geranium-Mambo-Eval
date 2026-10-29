@@ -28,9 +28,15 @@ function viewOf(c) {
   const tasks = c.tasks.map(t => ({ ...t, total: rowTotal(t) }));
   const people = c.people.map(p => ({ ...p, total: rowTotal(p), per_task: p.tasks_submitted ? rowTotal(p) / p.tasks_submitted : null }));
   const totals = tasks.map(t => t.total), cbDays = daily.reduce((n, d) => n + d.active_cbs, 0), total = daily.reduce((n, d) => n + d.total, 0);
-  return { ...c, daily, tasks, people, summary: { ...c.summary, total, per_task_median: median(totals),
+  const lost = c.lost && { ...c.lost, total: lostOf(c.lost), tasks: c.lost.tasks.map(t => ({ ...t, total: rowTotal(t) })).filter(t => t.total > 0),
+                           reasons: c.lost.reasons.map(r => ({ ...r, total: lostOf(r) })).filter(r => r.total > 0), waiting: { ...c.lost.waiting, total: lostOf(c.lost.waiting) } };
+  return { ...c, daily, tasks, people, lost, summary: { ...c.summary, total, per_task_median: median(totals),
     per_task_mean: totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : null, per_cb_day: cbDays ? total / cbDays : null } };
 }
+// Lost spend (tasks never submitted, quiet for days) in the chosen view: task runs, evals (in-task sandbox + portal), or both.
+const lostOf = x => (C.view !== "evals" ? x.agent_runs || 0 : 0) + (C.view !== "runs" ? x.evals || 0 : 0);
+const LOST_SERIES = () => [{ key: "lost_runs", label: "Task runs", cls: "s-runs" }, { key: "lost_evals", label: "Evals (sandbox + portal reviews)", cls: "s-untagged" }]
+  .filter(x => x.key === "lost_runs" ? C.view !== "evals" : C.view !== "runs");
 const usd = (v, d = 0) => "$" + Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const kUsd = v => (v >= 1000 ? `$${+(v / 1000).toFixed(1)}K` : `$${Math.round(v)}`);
 const utcDay = (t, opts) => new Date(t * 1000).toLocaleDateString("en-US", { timeZone: "UTC", ...opts });
@@ -109,6 +115,10 @@ function render() {
   $("#daily-card").innerHTML = dailyCard(c, b);
   $("#pertask-card").innerHTML = perTaskCard(c);
   $("#percb-card").innerHTML = perCbCard(c);
+  $("#lost-card").innerHTML = c.lost ? lostCard(c) : "";
+  $("#lost-card").classList.toggle("hidden", !c.lost);
+  $("#losttasks-card").classList.toggle("hidden", !c.lost);
+  if (c.lost) renderTable("losttasks");
   renderTable("tasks");
   renderTable("people");
   wireCharts();
@@ -120,7 +130,11 @@ function render() {
     (<span class="mono">${esc(b.key_alias || "")}</span>), <b>hint pipeline</b> the autohint runs. Other teams' work that carries the project tag
     (CoopBench, checkpoint evals) is left out. <b>Portal reviews</b> come from this portal's own records: SMIG's billed cost per run from Oct 26, 20:00 UTC, the list-price estimate before that. A <b>submitted task</b> is a contributor's
     submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is its task runs from when it started to the range's end, plus the portal reviews run on it.
-    Contributors count only what falls inside the range. Source: <a href="${esc(q.facts || "#")}" target="_blank" rel="noopener">every figure since Aug 1</a>,
+    Contributors count only what falls inside the range. <b>Lost spend</b> is spend in the range on tasks that never got an L-1/L0 submission (by anyone) and have had
+    no task runs, portal reviews or claim for ${esc((c.lost || {}).idle_days || 3)} days, split by where the task stands now (cancelled, claim dropped or expired, still claimed but idle, paused);
+    contributors' work only (admin and @scale.com tests left out). Tasks are judged as they stand now, so a past day's figure can grow as its tasks go quiet. Platform task runs
+    that never reached a submission can't be tied to a task, so they're not in it: they're the "not tied to a submission" share of task runs.
+    ${q.states ? `Task states: <a href="${esc(q.states)}" target="_blank" rel="noopener">platform state per task</a>. ` : ""}Source: <a href="${esc(q.facts || "#")}" target="_blank" rel="noopener">every figure since Aug 1</a>,
     refreshed in the background every 15 minutes.`;
 }
 
@@ -149,6 +163,10 @@ function renderTiles(c, b) {
       SERIES.filter(x => inView(x.key) && s[x.key]).map(x => `${esc(usd(s[x.key]))} ${esc(x.label.toLowerCase())}`).join(" · ") || "nothing"),
     inView("runs") && tile("Task runs tied to a submission", s.runs ? `${Math.round(100 * s.runs_linked / s.runs)}%` : "–",
       `${esc(usd(s.runs_linked))} of ${esc(usd(s.runs))} · the rest are re-runs or unsubmitted work`),
+    c.lost ? tile(`Lost spend, ${rangeName(c)}`, esc(usd(c.lost.total)),
+      `${fmtInt(c.lost.tasks.length)} tasks never submitted, idle ${esc(c.lost.idle_days)}+ days`
+      + (c.summary.total ? ` · ${Math.round(100 * c.lost.total / c.summary.total)}% of ${esc(VIEWS[C.view].label.toLowerCase())}` : "")
+      + (c.lost.waiting.tasks ? ` · ${esc(usd(c.lost.waiting.total))} more on ${fmtInt(c.lost.waiting.tasks)} not submitted yet but still active` : "")) : null,
     perTaskTile(c),
     tile("Per active contributor, per day", s.per_cb_day == null ? "–" : esc(usd(s.per_cb_day)), `${esc(VIEWS[C.view].label.toLowerCase())} ÷ contributor-days`),
     tile("Tasks submitted", esc(fmtInt(s.tasks_submitted)), `by ${fmtInt(s.submitters)} contributors · L-1/L0`),
@@ -279,6 +297,25 @@ function dailyCard(c, b) {
     <th>Tasks submitted</th><th>Runs logged / in submissions</th></tr>${rows}</table></details>`;
 }
 
+// Lost spend over time, by the day it was spent, split into task runs and evals, plus why the tasks were lost.
+function lostCard(c) {
+  const days = chartRows(c), period = C.period, series = LOST_SERIES(), L = c.lost;
+  const chart = columns({
+    id: "lost", title: `Lost spend per ${PERIODS[period]}`, period, days, series, value: (d, k) => d[k],
+    sub: `${chartSince() || "UTC days · "}spend on tasks never submitted at L-1/L0 and idle ${esc(L.idle_days)}+ days, by the day it was spent`,
+    tip: d => {
+      const lost = series.reduce((t, x) => t + (d[x.key] || 0), 0);
+      return [[usd(lost), " lost"], ...series.filter(x => d[x.key]).map(x => [usd(d[x.key]), ` ${x.label.toLowerCase()}`, x.cls]),
+              ...(d.total ? [[`${Math.round(100 * lost / d.total)}%`, ` of ${VIEWS[C.view].label.toLowerCase()} that ${period}`]] : [])];
+    },
+  });
+  const why = L.reasons.length ? `<div class="cc-sub">Why: ${L.reasons.map(r => `<b>${esc(usd(r.total))}</b> ${esc(r.label.toLowerCase())} (${fmtInt(r.tasks)} task${r.tasks === 1 ? "" : "s"})`).join(" · ")}</div>` : "";
+  const rows = days.slice().reverse().filter(d => d.lost_runs || d.lost_evals).map(d => `<tr><td>${periodRow(d, period)}</td>
+    ${series.map(x => `<td>${esc(usd(d[x.key]))}</td>`).join("")}<td>${esc(usd(series.reduce((t, x) => t + (d[x.key] || 0), 0)))}</td></tr>`).join("");
+  return chart + why + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "day" ? "Day" : period === "week" ? "Week" : "Month"} (UTC)</th>
+    ${series.map(x => `<th>${esc(x.label)}</th>`).join("")}<th>Lost</th></tr>${rows}</table></details>`;
+}
+
 // Each task's full cost (task runs since it started + portal reviews), grouped by the UTC day it was submitted:
 // the column is that day's median, so one expensive task doesn't swing it; the line is the range's median.
 // In the "both" view it's split into an evals chart and a task-runs chart, so each part reads on its own.
@@ -397,6 +434,22 @@ function perCbCard(c) {
 
 // ---- tables (click a header to sort; the first 25 rows, then "show all") ----
 const TABLES = {
+  losttasks: {
+    title: "Lost spend per task",
+    sub: "Tasks never submitted at L-1/L0 and idle for days: their spend in the range, why they were lost, who held them last and who spent on them.",
+    rows: () => C.shown.lost.tasks, key: "total",
+    cols: [
+      ["Task", "task_id", r => `<span class="mono" title="${esc(r.task_id)}">${esc(r.task_id.slice(-6))}</span>`],
+      ["Why", "reason_label", r => esc(r.reason_label) + (r.cancel_reason ? ` <span class="muted" title="${esc(r.cancel_reason)}">· ${esc(r.cancel_reason.slice(0, 40))}</span>` : "")],
+      ["Last activity", "last_activity", r => esc(longDay(r.last_activity))],
+      ["Held last by", "holder", r => esc(r.holder || "–")],
+      ["Spent by", "contributors", r => esc(r.contributors || "–")],
+      ["Task runs", "agent_runs", r => esc(usd(r.agent_runs)), true, "runs"],
+      ["In-task sandbox", "sandbox", r => esc(usd(r.sandbox)), true, "sandbox"],
+      ["Portal reviews", "portal", r => esc(usd(r.portal)), true, "portal"],
+      ["Total", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+    ],
+  },
   tasks: {
     title: "Cost per submitted task",
     sub: "Tasks a contributor submitted in the range, cost since each started. Task runs = runs whose IDs are in the task's submissions plus runs launched from the task itself (earlier sandbox-viewer runs can't be tied to a task); in-task sandbox and portal reviews are the evals.",

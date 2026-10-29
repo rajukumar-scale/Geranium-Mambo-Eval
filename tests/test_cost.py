@@ -28,7 +28,7 @@ FACTS = [
     {"KIND": "sub", "T": utc(2026, 9, 2) + 60, "TASK": "t1", "CB": "b", "EMAIL": "b@x.com"},
     {"KIND": "sub", "T": utc(2026, 9, 2) + 90, "TASK": "t3", "CB": "b", "EMAIL": "b@x.com"},
 ]
-NO_PORTAL = ({}, {}, {}, {}, {"billed": 0.0, "estimated": 0.0})
+NO_PORTAL = ({}, {}, {}, {}, {"billed": 0.0, "estimated": 0.0}, {})
 
 
 class BuildTest(unittest.TestCase):
@@ -75,6 +75,44 @@ class BuildTest(unittest.TestCase):
         self.assertTrue(week["partial_start"] and not week["partial_end"])  # Jul 27 week, from Aug 2
         self.assertEqual(r["weeks"][1]["day"], utc(2026, 8, 3))
         self.assertTrue(r["weeks"][1]["partial_end"])
+
+    def test_lost_spend(self):
+        now = utc(2026, 10, 20) + 3600
+        facts = FACTS + [
+            {"KIND": "tcd", "T": utc(2026, 10, 10), "TASK": "gone", "CB": "c", "EMAIL": "c@x.com", "RUNS": 4, "SANDBOX": 1, "REQUESTS": 1},
+            {"KIND": "tcd", "T": utc(2026, 10, 12), "TASK": "held", "CB": "d", "EMAIL": "d@x.com", "RUNS": 2, "SANDBOX": 0, "REQUESTS": 1},
+            {"KIND": "tcd", "T": utc(2026, 10, 19), "TASK": "busy", "CB": "e", "EMAIL": "e@x.com", "RUNS": 3, "SANDBOX": 0, "REQUESTS": 1},
+            {"KIND": "tcd", "T": utc(2026, 10, 11), "TASK": "l1", "CB": "f", "EMAIL": "f@x.com", "RUNS": 9, "SANDBOX": 0, "REQUESTS": 1},
+            {"KIND": "tcd", "T": utc(2026, 10, 11), "TASK": "test", "CB": "s", "EMAIL": "s@scale.com", "RUNS": 8, "SANDBOX": 0, "REQUESTS": 1},
+        ]
+        states = [
+            {"TASK": "gone", "TASK_STATUS": "canceled", "SUBMITTED": 0, "LIVE_CLAIM": 0, "LAST_ACTIVITY": utc(2026, 10, 10), "CANCEL_REASON": "dup"},
+            {"TASK": "held", "TASK_STATUS": "pending", "SUBMITTED": 0, "LIVE_CLAIM": 1, "PENDING": 1, "LAST_ACTIVITY": utc(2026, 10, 12)},
+            {"TASK": "quiet", "TASK_STATUS": "pending", "SUBMITTED": 0, "LIVE_CLAIM": 0, "PENDING": 1, "LAST_ACTIVITY": utc(2026, 10, 1)},
+            {"TASK": "busy", "TASK_STATUS": "pending", "SUBMITTED": 0, "LIVE_CLAIM": 1, "PENDING": 1, "LAST_ACTIVITY": utc(2026, 10, 19)},
+            {"TASK": "l1", "TASK_STATUS": "pending", "SUBMITTED": 1, "LAST_ACTIVITY": utc(2026, 10, 11)},  # submitted by an @scale.com account
+        ]
+        # portal reviews: a contributor's on "quiet" counts;
+        # admins' runs never reach _lost (_portal leaves them out)
+        portal = ({}, {}, {}, {}, {"billed": 0.0, "estimated": 0.0},
+                  {"quiet": [(utc(2026, 10, 14) + 60, 6.0, "q@x.com")], "gone": []})
+        with mock.patch.object(cost, "_portal", lambda s, b, e: portal), mock.patch.object(cost.time, "time", lambda: now):
+            r = cost.build(facts, utc(2026, 10, 7), utc(2026, 10, 20), states=states)
+            off = cost.build(facts, utc(2026, 10, 7), utc(2026, 10, 20))
+        lost = r["lost"]
+        by = {t["task_id"]: t for t in lost["tasks"]}
+        self.assertEqual(set(by), {"gone", "held", "quiet"})  # busy: active 1 day ago; l1: submitted; test: @scale.com
+        self.assertEqual((by["gone"]["reason"], by["gone"]["cancel_reason"], by["gone"]["total"]), ("cancelled", "dup", 5))
+        self.assertEqual((by["held"]["reason"], by["quiet"]["reason"]), ("idle", "dropped"))
+        self.assertEqual((by["quiet"]["portal"], by["quiet"]["contributors"]), (6, "q@x.com"))
+        self.assertEqual((lost["agent_runs"], lost["evals"]), (6, 7))
+        self.assertEqual(lost["waiting"], {"tasks": 1, "agent_runs": 3, "evals": 0})
+        self.assertEqual({x["reason"]: x["tasks"] for x in lost["reasons"]}, {"cancelled": 1, "dropped": 1, "idle": 1})
+        day = {d["day"]: d for d in r["daily"]}
+        self.assertEqual((day[utc(2026, 10, 10)]["lost_runs"], day[utc(2026, 10, 10)]["lost_evals"]), (4, 1))
+        self.assertEqual(day[utc(2026, 10, 14)]["lost_evals"], 6)
+        self.assertAlmostEqual(sum(w["lost_runs"] + w["lost_evals"] for w in r["weeks"]), 13)
+        self.assertIsNone(off["lost"])  # no task-state query: lost spend left out
 
     def test_span(self):
         with mock.patch.object(cost.time, "time", lambda: utc(2026, 10, 28) + 100):
