@@ -1,4 +1,5 @@
-"""REVIEW_SH: a review whose model connection drops mid-reply is resumed once on the same machine."""
+"""REVIEW_SH: a review whose model connection drops mid-reply or is refused is resumed on the same machine,
+up to 3 times."""
 
 import pathlib
 import shutil
@@ -12,6 +13,8 @@ INIT = '{"type":"system","subtype":"init"}'
 DROP = "API Error: Connection closed mid-response. The response above may be incomplete."
 DROPPED = [INIT, '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}' % DROP,
            '{"type":"result","is_error":true,"result":"%s"}' % DROP]
+REFUSE = "API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)"
+REFUSED = [INIT, '{"type":"result","is_error":true,"result":"%s"}' % REFUSE]
 FINISHED = [INIT, '{"type":"result","is_error":false,"result":"done"}']
 
 
@@ -30,7 +33,7 @@ class ReviewShTest(unittest.TestCase):
             (payload / "resume.sh").write_text(_script(second, second_rc))
         sh = (boatrun.REVIEW_SH.replace("/tmp/payload", str(payload)).replace("/tmp/out.jsonl", str(out))
               .replace("/tmp/err.txt", str(err)).replace("/tmp/claude.exit", str(done))
-              .replace("sudo -u runner -H ", "").replace("sleep 5", "true"))
+              .replace("sudo -u runner -H ", "").replace("sleep $((60 * n))", "true"))
         (d / "review.sh").write_text(sh)
         subprocess.run(["bash", str(d / "review.sh")], check=True)
         return out.read_text().splitlines(), done.read_text().strip(), err.read_text() if err.exists() else ""
@@ -40,9 +43,16 @@ class ReviewShTest(unittest.TestCase):
         self.assertEqual((len(lines), rc), (5, "0"))
         self.assertIn("resuming", err)
 
-    def test_second_drop_fails(self):
-        lines, rc, _ = self.run_review(DROPPED, second=DROPPED, second_rc=1)
-        self.assertEqual((len(lines), rc), (6, "1"))
+    def test_refused_connection_resumes(self):
+        lines, rc, err = self.run_review(REFUSED)
+        self.assertEqual((len(lines), rc), (4, "0"))
+        self.assertIn("resuming the session (1 of 3)", err)
+
+    def test_keeps_failing_stops_after_three_resumes(self):
+        lines, rc, err = self.run_review(DROPPED, second=REFUSED, second_rc=1)
+        self.assertEqual((len(lines), rc), (3 + 3 * 2, "1"))
+        self.assertIn("(3 of 3)", err)
+        self.assertNotIn("(4 of 3)", err)
 
     def test_other_api_error_is_not_resumed(self):
         lines, rc, err = self.run_review([INIT, '{"type":"result","is_error":true,"result":"API Error: 500 overloaded"}'])

@@ -101,24 +101,28 @@ setsid nohup bash /tmp/payload/memguard.sh > /dev/null 2>&1 < /dev/null &
 echo STARTED
 """
 
-# Runs as root: the review itself, as the runner user. If the model connection drops mid-reply (the run ends with
-# "API Error: Connection closed mid-response", first seen 2026-10-26), resume the same session once on this machine,
-# so the work so far is kept, instead of failing a review that may be 30 minutes in. The output stream and the exit
-# file carry on as one run, so the server reads it like any other.
+# Runs as root: the review itself, as the runner user. If the model connection fails (the run ends with "API Error:
+# Connection closed mid-response", first seen 2026-10-26, or "API Error: Connection refused ... (ECONNREFUSED)" once
+# Claude Code's own retries run out, seen in bursts on boat's network 2026-10-29), resume the same session on this
+# machine, up to 3 times with a growing wait (1, 2, 3 minutes) so a burst can pass, so the work so far is kept instead
+# of failing a review that may be 30 minutes in. The output stream and the exit file carry on as one run, so the
+# server reads it like any other (it keeps the last result line).
 REVIEW_SH = r"""#!/bin/bash
 P=/tmp/payload
 sudo -u runner -H bash $P/cmd.sh >> /tmp/out.jsonl 2>> /tmp/err.txt; rc=$?
-if [ -e $P/resume.sh ] && tail -n 1 /tmp/out.jsonl | grep -q '"is_error":true' \
-   && tail -n 3 /tmp/out.jsonl | grep -q 'API Error: Connection closed mid-response'; then
-  echo "$(date -u +%FT%TZ) model connection dropped mid-response; resuming the session once" >> /tmp/err.txt
-  sleep 5
+n=0
+while [ -e $P/resume.sh ] && [ $n -lt 3 ] && tail -n 1 /tmp/out.jsonl | grep -q '"is_error":true' \
+   && tail -n 3 /tmp/out.jsonl | grep -qE 'API Error: Connection (closed mid-response|refused)|ECONNREFUSED'; do
+  n=$((n+1))
+  echo "$(date -u +%FT%TZ) model connection failed; resuming the session ($n of 3) in $((60 * n))s" >> /tmp/err.txt
+  sleep $((60 * n))
   sudo -u runner -H bash $P/resume.sh >> /tmp/out.jsonl 2>> /tmp/err.txt; rc=$?
-fi
+done
 echo $rc > /tmp/claude.exit
 """
 
-RESUME_PROMPT = ("The connection to the model dropped in the middle of your last step (API Error: Connection closed "
-                 "mid-response). Continue exactly where you left off: don't redo steps that already finished, and "
+RESUME_PROMPT = ("The connection to the model failed in the middle of your last step (a dropped or refused "
+                 "connection). Continue exactly where you left off: don't redo steps that already finished, and "
                  "redo the step that was cut off only if its result is missing. Then finish the task as instructed.")
 
 # Runs as root next to the review. When the machine is about to run out of memory (seen: parallel recheck passes
