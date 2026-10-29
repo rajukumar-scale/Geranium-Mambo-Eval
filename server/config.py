@@ -91,7 +91,7 @@ COST_FACTS_QUERY_ID = _int("COST_FACTS_QUERY_ID", 395415)
 COST_PORTAL_SMIG_QUERY_ID = _int("COST_PORTAL_SMIG_QUERY_ID", 394171)
 # Each Atlas Commercial task's platform state (ever submitted at L-1/L0, cancelled, claimed, paused, last activity), for the
 # Cost page's lost spend: tasks never submitted and quiet for 3 days (0 = the page leaves lost spend out).
-COST_TASK_STATES_QUERY_ID = _int("COST_TASK_STATES_QUERY_ID", 0)
+COST_TASK_STATES_QUERY_ID = _int("COST_TASK_STATES_QUERY_ID", 396595)
 BUDGET_KEY_ALIAS = _get("BUDGET_KEY_ALIAS", "pub-atlas-commercial-sandbox")
 # Platform submissions for tasks passed at /rubric, for the admin "Where they are now" panel (0 = don't hide anyone).
 SUBMISSIONS_QUERY_ID = _int("SUBMISSIONS_QUERY_ID", 388752)

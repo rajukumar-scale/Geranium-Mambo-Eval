@@ -1,5 +1,5 @@
 -- Eval portal cost page: each Atlas Commercial task's platform state, for lost spend (tasks never submitted and quiet
--- for 3 days). Save on ds 22 (tag eval-portal), then set COST_TASK_STATES_QUERY_ID to its id in the portal .env / config.
+-- for 3 days). Saved as Redash query 396595 (ds 22, tag eval-portal) = COST_TASK_STATES_QUERY_ID.
 --   submitted     = any completed L-1/L0 node with an attempt, by any account (a submitted task is never lost)
 --   live_claim    = a pending node held by someone whose claim hasn't run out
 --   pending       = a pending node (claimed or back in the queue); paused = a paused node
