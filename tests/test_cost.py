@@ -148,7 +148,8 @@ class ServeTest(unittest.IsolatedAsyncioTestCase):
             r = await cost.report(start="2026-08-01", end="2026-09-02")
             self.assertIn("t1", [t["task_id"] for t in r["tasks"]])
             self.assertFalse(r["refreshing"])
-            self.assertEqual(len(calls), 2)  # facts + portal billed, once
+            self.assertEqual(len(calls), 3)  # facts + portal billed + task states, once
+            self.assertIn("lost", r)
             self.assertTrue((await cost.report(14, force=True))["refreshing"])
             await cost._facts["task"]
         saved = json.loads((self.tmp / "cost_facts.json").read_text())
