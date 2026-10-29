@@ -103,8 +103,9 @@ echo STARTED
 """
 
 # Runs as root: the review itself, as the runner user. If the model connection fails (the run ends with "API Error:
-# Connection closed mid-response", first seen 2026-10-26, or "API Error: Connection refused ... (ECONNREFUSED)" once
-# Claude Code's own retries run out, seen in bursts on boat's network 2026-10-29), resume the same session on this
+# Connection closed mid-response", first seen 2026-10-26, or, once Claude Code's own retries run out, "API Error:
+# Connection refused ... (ECONNREFUSED)" or "API Error: Can't reach the API server ... (ENOTFOUND)", both seen in
+# bursts on boat's network 2026-10-29), resume the same session on this
 # machine, up to 3 times with a growing wait (1, 2, 3 minutes) so a burst can pass, so the work so far is kept instead
 # of failing a review that may be 30 minutes in. The output stream and the exit file carry on as one run, so the
 # server reads it like any other (it keeps the last result line).
@@ -113,7 +114,7 @@ P=/tmp/payload
 sudo -u runner -H bash $P/cmd.sh >> /tmp/out.jsonl 2>> /tmp/err.txt; rc=$?
 n=0
 while [ -e $P/resume.sh ] && [ $n -lt 3 ] && tail -n 1 /tmp/out.jsonl | grep -q '"is_error":true' \
-   && tail -n 3 /tmp/out.jsonl | grep -qE 'API Error: Connection (closed mid-response|refused)|ECONNREFUSED'; do
+   && tail -n 3 /tmp/out.jsonl | grep -qE 'API Error: Connection (closed mid-response|refused)|ECONNREFUSED|ENOTFOUND'; do
   n=$((n+1))
   echo "$(date -u +%FT%TZ) model connection failed; resuming the session ($n of 3) in $((60 * n))s" >> /tmp/err.txt
   sleep $((60 * n))

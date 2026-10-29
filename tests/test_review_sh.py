@@ -1,5 +1,5 @@
-"""REVIEW_SH: a review whose model connection drops mid-reply or is refused is resumed on the same machine,
-up to 3 times."""
+"""REVIEW_SH: a review whose model connection drops mid-reply, is refused or can't resolve the proxy is resumed on
+the same machine, up to 3 times."""
 
 import pathlib
 import shutil
@@ -15,6 +15,8 @@ DROPPED = [INIT, '{"type":"assistant","message":{"content":[{"type":"text","text
            '{"type":"result","is_error":true,"result":"%s"}' % DROP]
 REFUSE = "API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)"
 REFUSED = [INIT, '{"type":"result","is_error":true,"result":"%s"}' % REFUSE]
+NOT_FOUND = [INIT, '{"type":"result","is_error":true,'
+                   '"result":"API Error: Can\'t reach the API server — check your internet or DNS (ENOTFOUND)"}']
 FINISHED = [INIT, '{"type":"result","is_error":false,"result":"done"}']
 
 
@@ -45,6 +47,11 @@ class ReviewShTest(unittest.TestCase):
 
     def test_refused_connection_resumes(self):
         lines, rc, err = self.run_review(REFUSED)
+        self.assertEqual((len(lines), rc), (4, "0"))
+        self.assertIn("resuming the session (1 of 3)", err)
+
+    def test_unresolvable_proxy_resumes(self):
+        lines, rc, err = self.run_review(NOT_FOUND)
         self.assertEqual((len(lines), rc), (4, "0"))
         self.assertIn("resuming the session (1 of 3)", err)
 
