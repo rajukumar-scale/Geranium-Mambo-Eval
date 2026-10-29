@@ -50,6 +50,70 @@ class PayloadTest(unittest.TestCase):
         self.assertNotIn("check.sh", files)
         self.assertIn("review.sh", files)
 
+    OLD = "0912a4d4-77e2-4ef4-a57a-6c45d00222fd"
+    KEEP = "204694c4-3e28-4504-9746-c90dd90f2157"
+
+    def chat_home(self):
+        proj = self.root / "home/.claude/projects/-work"
+        (proj / self.KEEP / "subagents").mkdir(parents=True)
+        (proj / self.OLD / "subagents").mkdir(parents=True)
+        for sid in (self.OLD, self.KEEP):
+            (proj / f"{sid}.jsonl").write_text(sid)
+            (proj / sid / "subagents" / "a.jsonl").write_text("sub")
+        (proj / "memory").mkdir()
+        (proj / "memory" / "notes.md").write_text("kept")
+        (self.root / "home/.bashrc").write_text("rc")
+
+    def uploaded_home(self, args):
+        payload = boatrun.build_payload("run1", "att1", "do /prompt", args, {})
+        with tarfile.open(payload) as outer:
+            state = outer.extractfile("state.tgz").read()
+        out = self.tmp / "state.tgz"
+        out.write_bytes(state)
+        with tarfile.open(out) as tar:
+            return {n.split("home/runner/", 1)[1] for n in tar.getnames() if n.startswith("home/runner/")}
+
+    def test_fresh_review_uploads_no_past_sessions(self):
+        self.chat_home()
+        names = self.uploaded_home(["claude", "-p", "--session-id", "11111111-2222-3333-4444-555555555555"])
+        self.assertFalse([n for n in names if self.OLD in n or self.KEEP in n])
+        self.assertIn(".claude/projects/-work/memory/notes.md", names)
+        self.assertIn(".bashrc", names)
+
+    def test_resumed_review_uploads_only_its_own_session(self):
+        self.chat_home()
+        names = self.uploaded_home(["claude", "-p", "--resume", self.KEEP])
+        self.assertIn(f".claude/projects/-work/{self.KEEP}.jsonl", names)
+        self.assertIn(f".claude/projects/-work/{self.KEEP}/subagents/a.jsonl", names)
+        self.assertFalse([n for n in names if self.OLD in n])
+
+    def test_restore_merges_home_and_replaces_inputs_and_cache(self):
+        self.chat_home()
+        (self.root / "task_inputs/old.txt").write_text("old")
+        (self.root / "cache/old.idx").write_text("old")
+        back = self.tmp / "back"
+        new_sid = "33333333-4444-5555-6666-777777777777"
+        proj = back / "home/runner/.claude/projects/-work"
+        proj.mkdir(parents=True)
+        (proj / f"{new_sid}.jsonl").write_text("new")
+        (proj / f"{self.KEEP}.jsonl").write_text("continued")
+        (back / "work/Evals/task_inputs").mkdir(parents=True)
+        (back / "work/Evals/task_inputs/new.txt").write_text("new")
+        (back / "work/Evals/.cache").mkdir(parents=True)
+        tgz = self.tmp / "back.tgz"
+        with tarfile.open(tgz, "w:gz") as tar:
+            tar.add(str(back / "home"), "home")
+            tar.add(str(back / "work"), "work")
+        boatrun.restore_state("att1", tgz)
+        home = self.root / "home/.claude/projects/-work"
+        self.assertEqual((home / f"{self.OLD}.jsonl").read_text(), self.OLD)  # a session the box never got is kept
+        self.assertEqual((home / f"{self.KEEP}.jsonl").read_text(), "continued")
+        self.assertEqual((home / f"{new_sid}.jsonl").read_text(), "new")
+        self.assertEqual((self.root / "home/.bashrc").read_text(), "rc")
+        self.assertFalse((self.root / "task_inputs/old.txt").exists())
+        self.assertTrue((self.root / "task_inputs/new.txt").exists())
+        self.assertFalse((self.root / "cache/old.idx").exists())
+
 
 class WaitForClaudeTest(unittest.TestCase):
     """The RUN_SH block that waits for Claude Code (boat installs it in the background after boot)."""

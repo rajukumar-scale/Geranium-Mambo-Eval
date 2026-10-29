@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -207,6 +208,21 @@ def _pack_bundle():
     return path
 
 
+_SESSION = re.compile(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}(\.jsonl)?")
+
+
+def _only_session(info, keep):
+    """Upload filter for home/runner. Claude Code keeps every past session of the chat under
+    .claude/projects/<project>/ (<id>.jsonl plus an <id>/ folder), up to 1.3 GB on long chats, and a review
+    needs none of them but the one it resumes. Leaving the rest out cut a heavy upload from ~58 MB to ~12 MB
+    while boat's network was slow (2026-10-29); restore_state merges home, so they stay on the server."""
+    parts = info.name.split("/")  # home/runner/.claude/projects/<project>/<entry>/...
+    if len(parts) >= 6 and parts[2:4] == [".claude", "projects"] and _SESSION.fullmatch(parts[5]):
+        if parts[5].split(".")[0] != keep:
+            return None
+    return info
+
+
 def build_payload(run_id, attempt_id, prompt, args, env, extra=None):
     """Write payload.tgz for one run and return its path. `extra`: more files for /tmp/payload."""
     root = workspace.attempt_dir(attempt_id)
@@ -214,10 +230,11 @@ def build_payload(run_id, attempt_id, prompt, args, env, extra=None):
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     shutil.copy(_bundle(), work / "bundle.tgz")
+    resumed = args[args.index("--resume") + 1] if "--resume" in args[:-1] else None
     with tarfile.open(work / "state.tgz", "w:gz") as tar:
         tar.add(str(root / "task_inputs"), "work/Evals/task_inputs")
         tar.add(str(root / "cache"), "work/Evals/.cache")
-        tar.add(str(root / "home"), "home/runner")
+        tar.add(str(root / "home"), "home/runner", filter=lambda info: _only_session(info, resumed))
     (work / "run.env").write_text("".join(f"export {k}={shlex.quote(str(v))}\n" for k, v in env.items()))
     (work / "cmd.sh").write_text("#!/bin/bash\nset -a; . /tmp/payload/run.env; set +a\ncd /work\n"
                                  f"exec {shlex.join(args)} < /tmp/payload/prompt.txt\n")
@@ -248,15 +265,18 @@ def build_payload(run_id, attempt_id, prompt, args, env, extra=None):
 
 
 def restore_state(attempt_id, tgz):
-    """Replace the attempt's task_inputs, cache and home with what the box sent back."""
+    """Replace the attempt's task_inputs and cache with what the box sent back, and merge its home into the
+    attempt's: the box only got the session it resumed (_only_session), so replacing home would delete the
+    chat's other sessions, which follow-ups resume."""
     root = workspace.attempt_dir(attempt_id)
     tmp = root / f".restore-{int(time.time() * 1000)}"
     tmp.mkdir()
     try:
         with tarfile.open(tgz, "r:gz") as tar:
             tar.extractall(tmp, filter="data")  # the box is untrusted: no absolute paths, .. or outside links
-        for src, dst in (("work/Evals/task_inputs", "task_inputs"), ("work/Evals/.cache", "cache"),
-                         ("home/runner", "home")):
+        if (tmp / "home/runner").is_dir():
+            shutil.copytree(tmp / "home/runner", root / "home", symlinks=True, dirs_exist_ok=True)
+        for src, dst in (("work/Evals/task_inputs", "task_inputs"), ("work/Evals/.cache", "cache")):
             new = tmp / src
             if not new.is_dir():
                 continue
