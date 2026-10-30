@@ -82,6 +82,11 @@ a { color: var(--link); }
 .blocked-note { margin: 0 auto; width: min(860px, calc(100% - 40px)); padding: 10px 14px; border-radius: 12px; font-size: 14px;
   color: var(--error-ink); background: var(--fail-soft); border: 1px solid rgba(217, 83, 88, .35); }
 .blocked-note.admin-view { color: var(--ink); background: var(--grey-95); border-color: var(--line); }
+/* A review paused by the time limit: continue it or start over (pause.py). Orange = attention, never a verdict colour. */
+.paused-note { margin: 0 auto 8px; width: min(860px, calc(100% - 40px)); padding: 12px 14px; border-radius: 12px; font-size: 14px;
+  background: rgba(232, 113, 10, .08); border: 1px solid rgba(232, 113, 10, .45); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.paused-note .grow { flex: 1; min-width: 240px; }
+.paused-note .actions { display: flex; gap: 8px; }
 .bubble.warnnote { border-color: rgba(217, 83, 88, .55) !important; background: var(--fail-soft) !important; }
 .chip.flag { color: var(--error-ink); background: var(--fail-soft); border-color: rgba(217, 83, 88, .35); font-family: var(--sans); white-space: nowrap; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }

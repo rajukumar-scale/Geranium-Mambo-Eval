@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -214,6 +214,15 @@ def run_view(run):
     return view
 
 
+def _paused_view(attempt_id, chat):
+    """A review paused by the time limit that can still be continued (pause.py), for the chat page's notice."""
+    state = pause.load(attempt_id)
+    if not state or state.get("run_id") != chat.get("pending_review_run"):
+        return None
+    return {"command": state["command"], "at": state["at"], "minutes": config.RUN_TIMEOUT_MIN,
+            "inputs_changed": pause.inputs_changed(attempt_id, state)}
+
+
 def chat_state(attempt_id):
     chat = db.get_chat(attempt_id)
     return {
@@ -222,6 +231,7 @@ def chat_state(attempt_id):
         "email": chat["email"],
         "admin_open": bool(chat["admin_open"]),
         "pending_review": (db.get_run(chat["pending_review_run"]) or {}).get("command") if chat.get("pending_review_run") else None,
+        "paused_review": _paused_view(attempt_id, chat),
         "active_run": run_view(db.active_run(attempt_id)),
         "reports": workspace.list_reports(attempt_id),
         "inputs": workspace.saved_inputs(attempt_id),
@@ -751,10 +761,27 @@ async def send(body: SendBody, request: Request):
         raise HTTPException(429, f"You've reached today's limit of {limit} {'reviews' if kind == 'review' else 'messages'} "
                                  "for this attempt. Type /admin if you need more.")
 
+    # A review paused by the time limit (pause.py) continues only on the inputs it was graded on.
+    paused = pause.load(attempt_id) if pending else None
+    paused = paused if paused and paused.get("run_id") == pending["id"] else None
+    blocked_resume = bool(paused and pause.inputs_changed(attempt_id, paused))
+    if blocked_resume:
+        pause.clear(attempt_id)
+        db.update("chats", "attempt_id", attempt_id, pending_review_run=None)
+        pending = paused = None
+
     user_msg = db.add_message(attempt_id, "user", text, {"files": files, "command": command})
     hub.publish(attempt_id, "message", user_msg)
+    if blocked_resume:
+        note = db.add_message(attempt_id, "system", "Your inputs changed since the review was paused, so it can't continue "
+                                                    "(it would grade a mix of old and new). Send the command again to run "
+                                                    "it fresh. Answering your message as a normal question meanwhile.",
+                              {"warn": True})
+        hub.publish(attempt_id, "message", note)
     prompt = (f"/{command} {rest}".strip() if command else text) or "(see attached files)"
-    if pending:
+    if paused:
+        prompt = pause.RESUME_NOTE.format(command=paused["command"], minutes=config.RUN_TIMEOUT_MIN) + "\n\n" + prompt
+    elif pending:
         # Not every message sent while a review waits is its answer: "revise the injection for me" was treated as
         # review input, and the review's grade-don't-author rules then refused the help.
         prompt = (f"(Portal note: your /{pending['command']} review is paused, waiting for something from them. If this "
@@ -779,6 +806,7 @@ async def send(body: SendBody, request: Request):
               actor_email=admin or chat["email"], actor_user_id=None if admin else (session.get("user_id") or chat["user_id"]))
     if command:
         db.update("chats", "attempt_id", attempt_id, pending_review_run=None)
+        pause.clear(attempt_id)  # a fresh command replaces a paused review
     RUNNER.submit(run_id)
     return for_viewer(session, {"ok": True, "run": run_view(db.get_run(run_id))})
 

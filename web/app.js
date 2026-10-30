@@ -219,6 +219,7 @@ wireMessageClicks($("#messages"), id => state.messages.find(m => m.id === id),
 // ---- run status ----
 function setRun(run) {
   state.run = run && ["queued", "running"].includes(run.status) ? run : null;
+  if (state.me) renderPaused();
   const bar = $("#runbar");
   clearInterval(state.timer);
   clearInterval(state.spendTimer);
@@ -421,13 +422,37 @@ function syncProofCards(proofs) {
   }
 }
 
+// A review that hit the time limit is paused (server/pause.py): continue it once, or start over. Hidden while a run is on.
+function renderPaused() {
+  const note = $("#paused-note"), p = state.me && state.me.paused_review;
+  if (!p || state.run) { note.classList.add("hidden"); note.innerHTML = ""; return; }
+  const cmd = esc(p.command);
+  note.innerHTML = p.inputs_changed
+    ? `<div class="grow">⏸ Your <b class="mono">/${cmd}</b> review was paused by the ${esc(p.minutes)}-minute limit, but your inputs
+        changed since, so it can't continue. Run it again on the new inputs.</div>
+       <div class="actions"><button class="primary" data-paused="restart">Run /${cmd} again</button></div>`
+    : `<div class="grow">⏸ Your <b class="mono">/${cmd}</b> review hit the ${esc(p.minutes)}-minute limit before it finished.
+        Its work so far is saved: continue it from where it stopped (once), or start over.</div>
+       <div class="actions"><button class="primary" data-paused="continue">Continue review</button>
+        <button data-paused="restart">Start over</button></div>`;
+  note.classList.remove("hidden");
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-paused]");
+  if (!b || !state.me || !state.me.paused_review) return;
+  input.value = b.dataset.paused === "continue" ? "continue" : `/${state.me.paused_review.command}`;
+  send();
+});
+
 function renderSide() {
   const me = state.me;
   renderDate();
   renderSpend(me.spend);
   renderBlocked();
+  renderPaused();
   $("#limits").textContent = me.limits.reviews_left == null ? "" : `${me.limits.reviews_left} reviews left today`;
   $("#input").placeholder = me.blocked && !me.admin ? "This chat is blocked. Type /admin <message> to reach an admin."
+    : me.paused_review ? `Your /${me.paused_review.command} review is paused. Press Continue review, or type "continue".`
     : me.pending_review ? `Your /${me.pending_review} review is waiting for your answer. Reply here to continue it.`
     : "Paste inputs, ask a question, or type a command like /prompt";
   const labels = { injection: "Injection", prompt: "Prompt", oe: "Oracle Events", rubric: "Rubric", hardness: "Hardness" };

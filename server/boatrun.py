@@ -58,6 +58,11 @@ tar xzf $P/state.tgz -C /
 chown -R root:root /work/Evals /work/claude /work/.claude
 chmod -R a+rX,go-w /work/Evals /work/claude /work/.claude
 chown -R runner:runner /work/Evals/task_inputs /work/Evals/.cache /home/runner
+if [ -s $P/scratch.tgz ]; then  # continuing a review paused by the time limit: put back its /tmp scratch files
+  for n in $(tar tzf $P/scratch.tgz | cut -d/ -f1 | sort -u); do rm -rf "/tmp/$n"; done
+  tar xzf $P/scratch.tgz -C /tmp --no-same-owner
+  for n in $(tar tzf $P/scratch.tgz | cut -d/ -f1 | sort -u); do chown -R runner:runner "/tmp/$n"; done
+fi
 chmod 711 $P; chmod 600 $P/bundle.tgz $P/state.tgz
 chown runner:runner $P/run.env $P/cmd.sh $P/prompt.txt; chmod 600 $P/run.env $P/prompt.txt
 if [ -e $P/resume.sh ]; then chown runner:runner $P/resume.sh $P/resume_prompt.txt; chmod 600 $P/resume_prompt.txt; fi
@@ -145,10 +150,18 @@ done
 """
 
 COLLECT_SH = r"""#!/bin/bash
-# Pack this attempt's state for the server. Runs as root.
+# Pack this attempt's state for the server. Runs as root. Also the review's scratch files under /tmp (whatever the
+# runner user made there), so a review paused by the time limit can continue with them; skipped above 50 MB.
 cd /
 tar czf /tmp/state_out.tgz work/Evals/task_inputs work/Evals/.cache home/runner 2>/dev/null || true
 chmod 644 /tmp/state_out.tgz
+cd /tmp
+rm -f /tmp/scratch_out.tgz
+names=$(find /tmp -mindepth 1 -maxdepth 1 -user runner -printf '%f\n' 2>/dev/null)
+if [ -n "$names" ] && [ "$(du -scm $names 2>/dev/null | tail -1 | cut -f1)" -le 50 ]; then
+  tar czf /tmp/scratch_out.tgz $names 2>/dev/null || rm -f /tmp/scratch_out.tgz
+  [ -e /tmp/scratch_out.tgz ] && chmod 644 /tmp/scratch_out.tgz
+fi
 """
 
 
@@ -224,13 +237,16 @@ def _only_session(info, keep):
     return info
 
 
-def build_payload(run_id, attempt_id, prompt, args, env, extra=None):
-    """Write payload.tgz for one run and return its path. `extra`: more files for /tmp/payload."""
+def build_payload(run_id, attempt_id, prompt, args, env, extra=None, scratch=None):
+    """Write payload.tgz for one run and return its path. `extra`: more files for /tmp/payload.
+    `scratch`: a paused review's /tmp scratch files (scratch.tgz), put back by RUN_SH."""
     root = workspace.attempt_dir(attempt_id)
     work = root / "logs" / f"{run_id}.payload"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
     shutil.copy(_bundle(), work / "bundle.tgz")
+    if scratch:
+        shutil.copy(scratch, work / "scratch.tgz")
     resumed = args[args.index("--resume") + 1] if "--resume" in args[:-1] else None
     with tarfile.open(work / "state.tgz", "w:gz") as tar:
         tar.add(str(root / "task_inputs"), "work/Evals/task_inputs")

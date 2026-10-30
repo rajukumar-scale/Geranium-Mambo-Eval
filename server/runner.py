@@ -12,7 +12,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, config, db, fingerprint, hostload, hub, progress, proofs, proxy, spend, staleness, workspace
+from . import boatrun, config, db, fingerprint, hostload, hub, pause, progress, proofs, proxy, spend, staleness, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -579,7 +579,8 @@ class Runner:
                                                                           "fake_report.md": report}
             else:
                 args, extra = self._command(chat, session_args, followup=self._is_followup(run_id)), None
-            payload = await asyncio.to_thread(boatrun.build_payload, run_id, attempt, prompt, args, env, extra)
+            scratch = pause.scratch(attempt) if run.get("continuation") and pause.load(attempt) else None
+            payload = await asyncio.to_thread(boatrun.build_payload, run_id, attempt, prompt, args, env, extra, scratch)
             self._push_activity(run_id, attempt, "🚤 Starting a fresh review machine")
 
             async def start_review():
@@ -689,6 +690,13 @@ class Runner:
             await boatrun.scp_from(box, "/tmp/state_out.tgz", state)
             await asyncio.to_thread(boatrun.restore_state, attempt, state)
             state.unlink(missing_ok=True)
+            if outcome.get("timeout"):  # kept only if the review is paused (see _complete)
+                scratch = workspace.attempt_dir(attempt) / "logs" / f"{run_id}.scratch.tgz"
+                try:
+                    await boatrun.scp_from(box, "/tmp/scratch_out.tgz", scratch)
+                    outcome["scratch"] = scratch
+                except Exception:  # noqa: BLE001 - no scratch files, or over the size cap
+                    scratch.unlink(missing_ok=True)
         except Exception as error:  # noqa: BLE001 - surface as a failed run, never leak the box
             log.exception("boat run %s failed", run_id)
             outcome["stderr_tail"] = f"{outcome.get('stderr_tail', '')}\n{error}"
@@ -803,10 +811,28 @@ class Runner:
         else:
             status, error = "done", None
 
-        if final_text:
+        # A review stopped by the time limit is paused, not lost: the next plain message continues it (pause.py).
+        # Once: a continuation that times out again is a normal failure.
+        paused = bool(outcome.get("timeout") and run["kind"] == "review" and not run["continuation"]
+                      and run.get("session_id") and not run.get("loadtest"))
+        if run["continuation"] and pause.load(attempt):
+            pause.clear(attempt)  # this run was the one continuation (or its answer): done either way
+        if paused:
+            pause.save(attempt, run, outcome.get("scratch"))
+        elif outcome.get("scratch"):
+            outcome["scratch"].unlink(missing_ok=True)
+        if final_text and not paused:
             msg = db.add_message(attempt, "assistant", final_text, {"run_id": run_id, "command": run["command"]})
             hub.publish(attempt, "message", msg)
-        if status == "failed":
+        if paused:
+            msg = db.add_message(attempt, "system",
+                                 f"⏸ Your /{run['command']} review hit the {config.RUN_TIMEOUT_MIN}-minute time limit before it "
+                                 "finished, so it's **paused**. Its work so far is saved. Press **Continue review** (or send "
+                                 f"`continue`) to pick up where it left off, or send `/{run['command']}` to start over. "
+                                 "It can be continued once, and only if you don't change your inputs first.",
+                                 {"run_id": run_id, "paused": True, "warn": True})
+            hub.publish(attempt, "message", msg)
+        elif status == "failed":
             log.warning("run %s failed: %s | stderr: %s", run_id, error, outcome.get("stderr_tail", "")[-500:])
             msg = db.add_message(attempt, "system",
                                  f"This run didn't finish ({error}). Your saved inputs are kept; please try again, "
@@ -843,7 +869,7 @@ class Runner:
         self._finish(run, status, error, **fields, **report_fields)
         # A review that ended without its report stopped to ask the user something:
         # their next plain message continues it instead of starting a follow-up.
-        waiting = run["kind"] == "review" and status == "done" and not report_fields
+        waiting = (run["kind"] == "review" and status == "done" and not report_fields) or paused
         db.update("chats", "attempt_id", attempt, pending_review_run=run_id if waiting else None)
         for info in sorted(passes, key=lambda i: i["stage"] != run["command"]):  # the typed command's pass first
             payload = proofs.create(db.get_run(run_id) | {"cost_estimate": cost}, chat, info,
