@@ -11,10 +11,24 @@ q() { sqlite3 "$DB" "$1"; }
 
 $APP/.venv/bin/python -m compileall -q "$NEW/server" >/dev/null
 
+# Reviews running on this server (boat_phase='server', the server-first commands) can't be re-attached and take
+# 5-15 minutes. First stop new ones from starting here (DEPLOY_PENDING: they go to boat instead, so nobody waits) and
+# let the running ones finish, up to 20 minutes, before holding anything back.
+touch "$DATA/DEPLOY_PENDING"; chown "$OWNER" "$DATA/DEPLOY_PENDING"
+trap 'rm -f "$DATA/DEPLOY_PENDING"' EXIT
+if q "select boat_phase from runs limit 0" 2>/dev/null; then
+  for i in $(seq 1 1200); do
+    ON_SERVER=$(q "select count(*) from runs where status='running' and boat_phase='server'")
+    [ "$ON_SERVER" = 0 ] && break
+    [ $((i % 60)) = 1 ] && echo "waiting for $ON_SERVER review(s) running on this server to finish…"
+    sleep 1
+  done
+fi
+
 # Hold new runs (they stay queued and survive the restart), then wait for what can't be re-attached:
 # follow-ups running in Docker here, and reviews still setting up their box.
 touch "$DATA/DRAIN"; chown "$OWNER" "$DATA/DRAIN"
-trap 'rm -f "$DATA/DRAIN"' EXIT
+trap 'rm -f "$DATA/DRAIN" "$DATA/DEPLOY_PENDING"' EXIT
 # (Before the first deploy of re-attach support there is no boat_phase column: then every running run counts.)
 if q "select boat_phase from runs limit 0" 2>/dev/null; then
   BUSY_SQL="select count(*) from runs where status='running' and coalesce(boat_phase,'')!='started'"

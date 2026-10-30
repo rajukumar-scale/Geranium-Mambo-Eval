@@ -12,7 +12,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, config, db, fingerprint, hub, progress, proofs, proxy, spend, staleness, workspace
+from . import boatrun, config, db, fingerprint, hostload, hub, progress, proofs, proxy, spend, staleness, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -176,11 +176,26 @@ def draining():
         return False
 
 
+def deploy_pending():
+    """True while a deploy waits for the reviews running on this server to finish (remote_deploy.sh): new reviews then
+    go to boat, so the deploy never cuts one off and never holds anyone back. A stale file stops counting after 30 min."""
+    try:
+        return time.time() - (config.DATA_DIR / "DEPLOY_PENDING").stat().st_mtime < 1800
+    except FileNotFoundError:
+        return False
+
+
+def server_reviews_enabled():
+    return config.REVIEW_RUNNER == "boat" and config.RUNNER_MODE == "docker" and config.SERVER_REVIEW_SLOTS > 0
+
+
 class Runner:
     def __init__(self):
-        # "main" = this machine (docker/local); "boat" = one fresh boat box per review.
-        self.queues = {"main": asyncio.Queue(), "boat": asyncio.Queue()}
-        self.pending = {"main": [], "boat": []}  # queued run ids per pool, in order
+        # "main" = this machine (docker/local); "boat" = one fresh boat box per review; "server" = a review in a
+        # container on this machine, in its own slots (server first, boat as overflow; see place()).
+        self.queues = {"main": asyncio.Queue(), "boat": asyncio.Queue(), "server": asyncio.Queue()}
+        self.pending = {"main": [], "boat": [], "server": []}  # queued run ids per pool, in order
+        self.server_held = set()  # run ids holding a server slot, from placement until the run ends
         self.pool_of = {}
         self.procs = {}  # run id -> process
         self.activity = {}  # run id -> recent activity lines
@@ -239,6 +254,9 @@ class Runner:
             log.exception("leftover box cleanup failed")
         for _ in range(config.MAX_BOAT_RUNS):
             self.workers.append(asyncio.create_task(self._worker("boat")))
+        if server_reviews_enabled():
+            for _ in range(config.SERVER_REVIEW_SLOTS):
+                self.workers.append(asyncio.create_task(self._worker("server")))
         self._submit_requeued()
 
     def _submit_requeued(self):
@@ -279,9 +297,27 @@ class Runner:
                 log.exception("cache cleanup failed")
             await asyncio.sleep(6 * 3600)
 
+    def place(self, run):
+        """Where a run goes. Follow-ups: this machine. Reviews: a fresh boat box, except the SERVER_REVIEW_COMMANDS,
+        which run here when a server slot is free, enough memory is available and no deploy is waiting; a review is
+        never queued for a server slot, it overflows to boat instead."""
+        if not (config.REVIEW_RUNNER == "boat" and run["kind"] == "review"):
+            return "main"
+        if (server_reviews_enabled() and run["command"] in config.SERVER_REVIEW_COMMANDS
+                and len(self.server_held) < config.SERVER_REVIEW_SLOTS and not deploy_pending()):
+            free = hostload.mem_available_gb()
+            if free is not None and free >= config.SERVER_REVIEW_MIN_FREE_GB:
+                return "server"
+        return "boat"
+
+    def _release_server_slot(self, run_id):
+        self.server_held.discard(run_id)
+
     def submit(self, run_id):
         run = db.get_run(run_id)
-        pool = "boat" if config.REVIEW_RUNNER == "boat" and run["kind"] == "review" else "main"
+        pool = self.place(run)
+        if pool == "server":
+            self.server_held.add(run_id)
         self.pool_of[run_id] = pool
         self.pending[pool].append(run_id)
         self.queues[pool].put_nowait(run_id)
@@ -308,6 +344,7 @@ class Runner:
         pending = self.pending[self.pool_of.get(run_id, "main")]
         if run_id in pending:
             pending.remove(run_id)
+            self._release_server_slot(run_id)
             self._finish(run, "cancelled", CANCELLED)
             self._broadcast_positions()
             return True
@@ -353,6 +390,8 @@ class Runner:
                                          "Something went wrong on our side and this run stopped. Please try again, "
                                          "or type `/admin` if it keeps happening.", {"run_id": run_id})
                     hub.publish(run["attempt_id"], "message", msg)
+            finally:
+                self._release_server_slot(run_id)
 
     # ---- one run -------------------------------------------------------------
     def _command(self, chat, extra_args, followup=False):
@@ -392,6 +431,8 @@ class Runner:
         started = time.time()
         # milestones "{}" = this run records its steps (runs from before step tracking keep NULL, see _mark_step)
         db.update("runs", "id", run_id, status="running", started_at=started, milestones="{}")
+        if self.pool_of.get(run_id) == "server":  # a review on this machine: no box to wait for (status page, deploys)
+            db.update("runs", "id", run_id, boat_phase="server", review_started_at=started)
         hub.publish(attempt, "run", {"id": run_id, "status": "running", "command": run["command"], "kind": run["kind"],
                                      "started_at": started, "continuation": bool(run.get("continuation")),
                                      "progress": progress.calibration(run["command"]) if run["kind"] == "review" else None})

@@ -20,7 +20,7 @@ import logging
 import re
 import time
 
-from . import config, db, notify
+from . import config, db, hostload, notify
 
 log = logging.getLogger("portal.status")
 
@@ -271,7 +271,22 @@ def build(now=None):
                    start=i["start"], end=i["end"], updates=i["updates"], manual=bool(i.get("manual")),
                    key=i.get("key") or f"m{i['id']}") for i in incidents]
     return dict(generated_at=now, overall=overall, overall_level=max(worst), components=components,
-                incidents=public, thresholds=dict(zip(("slow_start_min", "yellow_pct", "red_pct"), _settings())))
+                incidents=public, thresholds=dict(zip(("slow_start_min", "yellow_pct", "red_pct"), _settings())),
+                server=_server(now))
+
+
+def _server(now):
+    """The portal's own machine: memory, CPU, disk, and where reviews ran (this server or a boat box). Counts only."""
+    day = now - 86400
+    count = lambda sql, *a: db.one(sql, a)["n"]  # noqa: E731
+    return dict(**hostload.snapshot(),
+                review_slots=config.SERVER_REVIEW_SLOTS if config.REVIEW_RUNNER == "boat" else 0,
+                reviews_here_now=count("select count(*) n from runs where status='running' and boat_phase='server'"),
+                followups_now=count("select count(*) n from runs where status='running' and kind='followup'"),
+                reviews_here_24h=count("select count(*) n from runs where kind='review' and boat_phase='server' "
+                                       "and created_at>=? and coalesce(loadtest,0)=0", day),
+                reviews_machines_24h=count("select count(*) n from runs where kind='review' and runner_box is not null "
+                                           "and created_at>=? and coalesce(loadtest,0)=0", day))
 
 
 async def current(force=False):

@@ -45,6 +45,11 @@
     .legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin: 10px 0 34px; }
     .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
     h2 { font-size: 20px; margin: 0 0 14px; }
+    .srv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 34px; }
+    .srv div { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+    .srv b { display: block; font-size: 18px; margin-top: 2px; }
+    .srv span { color: var(--muted); font-size: 12px; }
+    .srv .warn b { color: #b08800; } .srv .bad b { color: var(--maj); }
     .day { border-bottom: 1px solid var(--line); padding: 14px 0; }
     .day h3 { font-size: 15px; margin: 0 0 6px; }
     .day .none { color: var(--muted); font-size: 14px; }
@@ -84,6 +89,23 @@ function bars(c) {
   return c.bars.map((b, i) => `<i class="${b.level == null ? "nd" : b.level ? "l" + b.level : ""}" data-c="${esc(c.key)}" data-i="${i}"></i>`).join("");
 }
 
+// The portal's own machine: live numbers, refreshed with the page. Yellow/red when memory, disk or CPU run low.
+function serverTiles(s) {
+  if (!s) return "";
+  const tile = (label, value, cls = "") => `<div class="${cls}"><span>${esc(label)}</span><b>${esc(value)}</b></div>`;
+  const memPct = s.memory_total_gb ? (100 * s.memory_free_gb) / s.memory_total_gb : null;
+  const busy = s.cpus && s.load1 != null ? s.load1 / s.cpus : null;
+  return `<h2>Server</h2><div class="srv">
+    ${tile("Memory free", s.memory_free_gb == null ? "–" : `${s.memory_free_gb} of ${s.memory_total_gb} GB`,
+           memPct == null ? "" : memPct < 15 ? "bad" : memPct < 30 ? "warn" : "")}
+    ${tile("CPU load", s.load1 == null ? "–" : `${s.load1} on ${s.cpus} cores`, busy == null ? "" : busy > 1 ? "bad" : busy > 0.7 ? "warn" : "")}
+    ${tile("Disk free", s.disk_free_pct == null ? "–" : `${s.disk_free_pct} %`, s.disk_free_pct == null ? "" : s.disk_free_pct < 8 ? "bad" : s.disk_free_pct < 15 ? "warn" : "")}
+    ${tile("Reviews on this server now", s.review_slots ? `${s.reviews_here_now} of ${s.review_slots} slots` : "off")}
+    ${tile("Chat replies running now", s.followups_now)}
+    ${tile("Reviews in the last 24 h", `${s.reviews_here_24h} here · ${s.reviews_machines_24h} on review machines`)}
+  </div>`;
+}
+
 function render(d) {
   const comps = d.components.map(c => `<div class="comp">
       <div class="row"><div><span class="name">${esc(c.name)}</span> <span class="desc">· ${esc(c.description)}</span></div>
@@ -116,6 +138,7 @@ function render(d) {
        <div class="comps">${comps}</div>
        <div class="legend"><span style="--c:var(--ok)">No downtime</span><span style="--c:var(--deg)">Degraded performance</span>
          <span style="--c:var(--part)">Partial outage</span><span style="--c:var(--maj)">Major outage</span><span style="--c:var(--none)">No data</span></div>
+       ${serverTiles(d.server)}
        <h2>Past Incidents</h2>${list}`;
   document.getElementById("hist-link").textContent = history ? "← Current status" : "← Incident History";
   document.getElementById("hist-link").href = history ? "/status" : "/status/history";

@@ -145,6 +145,13 @@ BOAT_BIN = _get("BOAT_BIN", "boat")
 BOAT_SNAPSHOT = _get("BOAT_SNAPSHOT", "hg-runner")
 BOAT_BOX_TYPE = _get("BOAT_BOX_TYPE", "default")
 MAX_BOAT_RUNS = _int("MAX_BOAT_RUNS", 20)
+# Server first, boat as overflow (2026-10-30): boat bills machine hours, and this server is paid for around the clock
+# and mostly idle. With REVIEW_RUNNER=boat and RUNNER_MODE=docker, these commands run in a container here while a
+# server slot is free and at least SERVER_REVIEW_MIN_FREE_GB of memory is available; otherwise on a boat box as before,
+# so they never queue. Their own slots: follow-ups (MAX_CONCURRENT_RUNS) never wait for them. 0 slots = off.
+SERVER_REVIEW_SLOTS = _int("SERVER_REVIEW_SLOTS", 2)
+SERVER_REVIEW_COMMANDS = _list("SERVER_REVIEW_COMMANDS", "injection,hardness")
+SERVER_REVIEW_MIN_FREE_GB = float(_get("SERVER_REVIEW_MIN_FREE_GB", 5))
 # Public URL of the metering proxy, as reached from review boxes (e.g. https://<id>-8001.on.boat.dev).
 PROXY_PUBLIC_URL = _get("PROXY_PUBLIC_URL", "").rstrip("/")
 BOAT_RESTRICT_EGRESS = _get("BOAT_RESTRICT_EGRESS", "1") == "1"
