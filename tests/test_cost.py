@@ -101,17 +101,17 @@ class BuildTest(unittest.TestCase):
             off = cost.build(facts, utc(2026, 10, 7), utc(2026, 10, 20))
         lost = r["lost"]
         by = {t["task_id"]: t for t in lost["tasks"]}
-        self.assertEqual(set(by), {"gone", "held", "quiet"})  # busy: active 1 day ago; l1: submitted; test: @scale.com
+        self.assertEqual(set(by), {"gone", "quiet"})  # held: still claimed; busy: active 1 day ago; l1: submitted; test: @scale.com
         self.assertEqual((by["gone"]["reason"], by["gone"]["cancel_reason"], by["gone"]["total"]), ("cancelled", "dup", 5))
-        self.assertEqual((by["held"]["reason"], by["quiet"]["reason"]), ("idle", "dropped"))
+        self.assertEqual(by["quiet"]["reason"], "dropped")
         self.assertEqual((by["quiet"]["portal"], by["quiet"]["contributors"]), (6, "q@x.com"))
-        self.assertEqual((lost["agent_runs"], lost["evals"]), (6, 7))
-        self.assertEqual(lost["waiting"], {"tasks": 1, "agent_runs": 3, "evals": 0})
-        self.assertEqual({x["reason"]: x["tasks"] for x in lost["reasons"]}, {"cancelled": 1, "dropped": 1, "idle": 1})
+        self.assertEqual((lost["agent_runs"], lost["evals"]), (4, 7))
+        self.assertEqual(lost["waiting"], {"tasks": 2, "agent_runs": 5, "evals": 0})  # busy + held
+        self.assertEqual({x["reason"]: x["tasks"] for x in lost["reasons"]}, {"cancelled": 1, "dropped": 1})
         day = {d["day"]: d for d in r["daily"]}
         self.assertEqual((day[utc(2026, 10, 10)]["lost_runs"], day[utc(2026, 10, 10)]["lost_evals"]), (4, 1))
         self.assertEqual(day[utc(2026, 10, 14)]["lost_evals"], 6)
-        self.assertAlmostEqual(sum(w["lost_runs"] + w["lost_evals"] for w in r["weeks"]), 13)
+        self.assertAlmostEqual(sum(w["lost_runs"] + w["lost_evals"] for w in r["weeks"]), 11)
         self.assertIsNone(off["lost"])  # no task-state query: lost spend left out
 
     def test_span(self):

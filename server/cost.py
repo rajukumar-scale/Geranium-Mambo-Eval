@@ -17,8 +17,8 @@ per task x contributor x day, and each submission). It's refreshed in the backgr
 across restarts; any date range is then cut from it at once.
 
 Lost spend is what went into tasks that never reached an L-1/L0 submission (by anyone) and have had no activity for
-LOST_IDLE_DAYS: no task runs, no portal reviews, no claim. A second, small query gives each task's platform state, which
-says why (cancelled, claim dropped, still claimed but idle, paused). Only spend tied to a task can count: portal
+LOST_IDLE_DAYS (no task runs, no portal reviews) and that nobody holds a live claim on. A second, small query gives each
+task's platform state, which says why (cancelled, claim dropped or expired, paused). Only spend tied to a task can count: portal
 reviews, the in-task sandbox and runs launched from the task. Platform task runs that never made it into a submission
 can't be tied to any task, so they stay in the "not tied to a submission" figure rather than here.
 """
@@ -40,8 +40,7 @@ RETRY_SEC = 120  # after a failed refresh, wait this long before trying again
 LOOKUP_TIMEOUT = 300  # the query scans LiteLLM + SMIG; Redash can also queue it behind other work
 COVERAGE_DAYS = 5  # how far back from the range's end the "task runs not logged" check looks
 LOST_IDLE_DAYS = 3  # a task never submitted and quiet this long is lost (Evan, 2026-10-29); newer ones are still in progress
-LOST_REASONS = {"cancelled": "Task cancelled", "dropped": "Claim dropped or expired", "idle": "Still claimed, idle",
-                "paused": "Paused", "missing": "Not found on the platform"}
+LOST_REASONS = {"cancelled": "Task cancelled", "dropped": "Claim dropped or expired", "paused": "Paused", "missing": "Not found on the platform"}
 CACHE_FILE = config.DATA_DIR / "cost_facts.json"
 _facts = {"at": 0.0, "rows": None, "billed": [], "states": [], "task": None, "error": None, "failed_at": 0.0}
 
@@ -96,8 +95,9 @@ def _period_end(start, period):
 
 
 def _lost(tcd, rows, task_runs, states, start, stop, now):
-    """Spend in the range on tasks that were never submitted and have been quiet for LOST_IDLE_DAYS, per day and per
-    task, with why (from the task's platform state now); and the same for tasks not submitted yet but still active.
+    """Spend in the range on tasks that were never submitted, have been quiet for LOST_IDLE_DAYS and aren't claimed, per day
+    and per task, with why (from the task's platform state now); and the same for tasks not submitted yet but still active
+    (recent work or a live claim), which isn't counted.
     Tasks are classified as they stand now, so a past day's figure grows as its tasks go quiet."""
     num = lambda r, k: float(r.get(k) or 0)  # noqa: E731
     state = {r["task"]: r for r in _rows(states) if r.get("task")}
@@ -135,13 +135,13 @@ def _lost(tcd, rows, task_runs, states, start, stop, now):
             continue
         s = state.get(t) or {}
         last = max(p["last"], int(s.get("last_activity") or 0))
-        if now - last < LOST_IDLE_DAYS * DAY:
+        # still active: worked on lately, or someone still holds the claim (they may yet submit) - not counted (Evan, 10-30)
+        if now - last < LOST_IDLE_DAYS * DAY or int(s.get("live_claim") or 0):
             waiting["tasks"] += 1
             waiting["agent_runs"] += p["agent_runs"]
             waiting["evals"] += p["sandbox"] + p["portal"]
             continue
-        reason = ("missing" if not s else "cancelled" if (s.get("task_status") or "") == "canceled" else "idle" if int(s.get("live_claim") or 0)
-                  else "paused" if int(s.get("paused") or 0) and not int(s.get("pending") or 0) else "dropped")
+        reason = ("missing" if not s else "cancelled" if (s.get("task_status") or "") == "canceled" else "paused" if int(s.get("paused") or 0) and not int(s.get("pending") or 0) else "dropped")
         for d, (runs_usd, evals_usd) in p["days"].items():
             day = per_day.setdefault(d, [0.0, 0.0])
             day[0] += runs_usd

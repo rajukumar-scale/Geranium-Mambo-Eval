@@ -131,7 +131,8 @@ function render() {
     (CoopBench, checkpoint evals) is left out. <b>Portal reviews</b> come from this portal's own records: SMIG's billed cost per run from Oct 26, 20:00 UTC, the list-price estimate before that. A <b>submitted task</b> is a contributor's
     submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is its task runs from when it started to the range's end, plus the portal reviews run on it.
     Contributors count only what falls inside the range. <b>Lost spend</b> is spend in the range on tasks that never got an L-1/L0 submission (by anyone) and have had
-    no task runs, portal reviews or claim for ${esc((c.lost || {}).idle_days || 3)} days, split by where the task stands now (cancelled, claim dropped or expired, still claimed but idle, paused);
+    no task runs or portal reviews for ${esc((c.lost || {}).idle_days || 3)} days and nobody holds a live claim on, split by where the task stands now (cancelled, claim dropped or expired, paused);
+    tasks still active (recent work or a live claim) aren't counted;
     contributors' work only (admin and @scale.com tests left out). Tasks are judged as they stand now, so a past day's figure can grow as its tasks go quiet. Platform task runs
     that never reached a submission can't be tied to a task, so they're not in it: they're the "not tied to a submission" share of task runs.
     ${q.states ? `Task states: <a href="${esc(q.states)}" target="_blank" rel="noopener">platform state per task</a>. ` : ""}Source: <a href="${esc(q.facts || "#")}" target="_blank" rel="noopener">every figure since Aug 1</a>,
@@ -164,9 +165,9 @@ function renderTiles(c, b) {
     inView("runs") && tile("Task runs tied to a submission", s.runs ? `${Math.round(100 * s.runs_linked / s.runs)}%` : "–",
       `${esc(usd(s.runs_linked))} of ${esc(usd(s.runs))} · the rest are re-runs or unsubmitted work`),
     c.lost ? tile(`Lost spend, ${rangeName(c)}`, esc(usd(c.lost.total)),
-      `${fmtInt(c.lost.tasks.length)} tasks never submitted, idle ${esc(c.lost.idle_days)}+ days`
+      `${fmtInt(c.lost.tasks.length)} tasks never submitted, idle ${esc(c.lost.idle_days)}+ days, unclaimed`
       + (c.summary.total ? ` · ${Math.round(100 * c.lost.total / c.summary.total)}% of ${esc(VIEWS[C.view].label.toLowerCase())}` : "")
-      + (c.lost.waiting.tasks ? ` · ${esc(usd(c.lost.waiting.total))} more on ${fmtInt(c.lost.waiting.tasks)} not submitted yet but still active` : "")) : null,
+      + (c.lost.waiting.tasks ? ` · ${esc(usd(c.lost.waiting.total))} not counted on ${fmtInt(c.lost.waiting.tasks)} still active (recent work or claimed)` : "")) : null,
     perTaskTile(c),
     tile("Per active contributor, per day", s.per_cb_day == null ? "–" : esc(usd(s.per_cb_day)), `${esc(VIEWS[C.view].label.toLowerCase())} ÷ contributor-days`),
     tile("Tasks submitted", esc(fmtInt(s.tasks_submitted)), `by ${fmtInt(s.submitters)} contributors · L-1/L0`),
@@ -302,7 +303,7 @@ function lostCard(c) {
   const days = chartRows(c), period = C.period, series = LOST_SERIES(), L = c.lost;
   const chart = columns({
     id: "lost", title: `Lost spend per ${PERIODS[period]}`, period, days, series, value: (d, k) => d[k],
-    sub: `${chartSince() || "UTC days · "}spend on tasks never submitted at L-1/L0 and idle ${esc(L.idle_days)}+ days, by the day it was spent`,
+    sub: `${chartSince() || "UTC days · "}spend on tasks never submitted at L-1/L0, idle ${esc(L.idle_days)}+ days and unclaimed, by the day it was spent`,
     tip: d => {
       const lost = series.reduce((t, x) => t + (d[x.key] || 0), 0);
       return [[usd(lost), " lost"], ...series.filter(x => d[x.key]).map(x => [usd(d[x.key]), ` ${x.label.toLowerCase()}`, x.cls]),
@@ -436,7 +437,7 @@ function perCbCard(c) {
 const TABLES = {
   losttasks: {
     title: "Lost spend per task",
-    sub: "Tasks never submitted at L-1/L0 and idle for days: their spend in the range, why they were lost, who held them last and who spent on them.",
+    sub: "Tasks never submitted at L-1/L0, idle for days and unclaimed: their spend in the range, why they were lost, who held them last and who spent on them.",
     rows: () => C.shown.lost.tasks, key: "total",
     cols: [
       ["Task", "task_id", r => `<span class="mono" title="${esc(r.task_id)}">${esc(r.task_id.slice(-6))}</span>`],
