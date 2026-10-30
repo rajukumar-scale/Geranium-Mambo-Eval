@@ -158,7 +158,7 @@ BOAT_RESTRICT_EGRESS = _get("BOAT_RESTRICT_EGRESS", "1") == "1"
 # Usage caps are off by default (0 = unlimited); set them only if spend needs a ceiling.
 DAILY_REVIEW_LIMIT = _int("DAILY_REVIEW_LIMIT", 0)
 DAILY_FOLLOWUP_LIMIT = _int("DAILY_FOLLOWUP_LIMIT", 0)
-RUN_TIMEOUT_MIN = _int("RUN_TIMEOUT_MIN", 90)
+RUN_TIMEOUT_MIN = _int("RUN_TIMEOUT_MIN", 150)  # /rubric with its fix rechecks ran past 90 min (2026-10-30)
 MAX_CALLS_PER_RUN = _int("MAX_CALLS_PER_RUN", 0)
 # Spend limit per contributor (USD, all their attempts, all time). Shown in their top bar; reaching it flags them,
 # warns them in the chat and alerts the admins. Runs are not blocked. 0 = no limit shown.
