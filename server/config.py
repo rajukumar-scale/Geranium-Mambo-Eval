@@ -149,8 +149,8 @@ MAX_BOAT_RUNS = _int("MAX_BOAT_RUNS", 20)
 # and mostly idle. With REVIEW_RUNNER=boat and RUNNER_MODE=docker, these commands run in a container here while a
 # server slot is free and at least SERVER_REVIEW_MIN_FREE_GB of memory is available; otherwise on a boat box as before,
 # so they never queue. Their own slots: follow-ups (MAX_CONCURRENT_RUNS) never wait for them. 0 slots = off.
-SERVER_REVIEW_SLOTS = _int("SERVER_REVIEW_SLOTS", 3)
-SERVER_REVIEW_COMMANDS = _list("SERVER_REVIEW_COMMANDS", "injection,hardness")
+SERVER_REVIEW_SLOTS = _int("SERVER_REVIEW_SLOTS", 5)
+SERVER_REVIEW_COMMANDS = _list("SERVER_REVIEW_COMMANDS", "injection,hardness,oe")
 SERVER_REVIEW_MIN_FREE_GB = float(_get("SERVER_REVIEW_MIN_FREE_GB", 5))
 # Public URL of the metering proxy, as reached from review boxes (e.g. https://<id>-8001.on.boat.dev).
 PROXY_PUBLIC_URL = _get("PROXY_PUBLIC_URL", "").rstrip("/")
