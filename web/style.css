@@ -523,3 +523,13 @@ button.danger-solid:hover { border-color: var(--ink); }
 .proof details.more > summary::before { content: "▸ "; }
 .proof details.more[open] > summary::before { content: "▾ "; }
 .proof details.more > .wband { border-top: 1px solid var(--line); }
+
+/* "Check my taxonomy" dialog (opened from the chat's pass message; the pass screen itself stays unchanged) */
+.check-panel { width: min(680px, 100%); max-height: 92vh; overflow: auto; background: #FFF; color: #000; border: 1px solid #C7C7C7; border-radius: 12px; padding: 14px 18px; font-size: 14px; }
+.check-panel .k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #575757; }
+.check-panel p { margin: 6px 0 8px; }
+.check-panel textarea { width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px; }
+.check-panel .row { display: flex; gap: 10px; align-items: flex-start; margin-top: 8px; }
+.check-panel .ok { color: #1E6B34; } .check-panel .bad { color: #8A1C22; }
+.check-panel .diff { margin-top: 6px; display: grid; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
+.check-panel mark { background: #F6D365; }

@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -912,6 +912,30 @@ async def proof_reader_check(code: str, body: PassImageBody, request: Request):
         return {"ok": None, "error": "The check couldn't run right now."}
     log.info("reader check %s %s: ok=%s read=%r", payload["attempt_id"], payload["stage"], result["ok"], result["read"])
     return result
+
+
+class CheckInputBody(BaseModel):
+    text: str
+
+
+@app.post("/api/proofs/{code}/check-input")
+def proof_check_input(code: str, body: CheckInputBody, request: Request):
+    """Does the text in the taxonomy field match this pass? Same fingerprint as the taxonomy's linter; for text,
+    where it first differs from what passed (when the saved input is still that version)."""
+    payload = proof_for_viewer(code, request)
+    stage = payload["stage"]
+    if stage not in taxo_check.STAGES or not payload.get("fingerprint"):
+        raise HTTPException(404, "This pass has no fingerprint to check against.")
+    if len(body.text) > 30_000_000:
+        raise HTTPException(413, "That's too long to check here.")
+    saved = None
+    if stage in taxo_check.TEXT_STAGES and fingerprint.for_attempt(payload["attempt_id"], stage) == payload["fingerprint"]:
+        entry = workspace.read_input(payload["attempt_id"], stage, limit=200_000_000)
+        saved = "\n".join(f["text"] for f in (entry or {}).get("files", []) if f.get("text") is not None)
+    try:
+        return taxo_check.compare(stage, body.text, payload["fingerprint"], saved)
+    except ValueError as error:
+        raise HTTPException(400, str(error))
 
 
 @app.get("/api/proofs/{code}/input")

@@ -330,6 +330,7 @@ function showProof(p) {
 // plain characters, then the details. Before the download it's read with the taxonomy's own reader and prompt
 // (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
 const COPYABLE = new Set(["injection", "prompt", "oe"]);
+const CHECKABLE = new Set(["injection", "prompt", "oe", "rubric"]);
 const PASS_IMAGE_SIZES = [44, 56, 68];  // code font sizes, px, tried in order
 const STAGE_NAMES = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" };
 
@@ -457,9 +458,63 @@ async function copyPassInput(p, root) {
   try {
     const text = await api(`/api/proofs/${encodeURIComponent(p.code)}/input`);
     await navigator.clipboard.writeText(text);
-    say(`✓ Copied the exact ${esc(STAGE_NAMES[p.stage] || p.stage)} this pass graded. Paste it into the taxonomy as is.`, "ok");
+    say(`✓ Copied the exact ${esc(STAGE_NAMES[p.stage] || p.stage)} this pass graded (${fmtInt(text.length)} characters).
+      In the taxonomy field press <b>Ctrl/⌘+A</b>, then paste, so nothing old is left.`, "ok");
   } catch (e) {
     say(esc(e.message), "bad");
+  }
+}
+
+// ---- "Check my taxonomy": paste the taxonomy field, see if it matches this pass -------------------------------
+// The linter's own fingerprint (server/taxo_check.py), so "it's identical" can be checked before pressing Next.
+// It sits under the card, outside it, so a screenshot of the card never shows it.
+function showTaxoCheck(p) {
+  const wrap = document.createElement("div");
+  wrap.className = "overlay";
+  wrap.innerHTML = `<div class="check-panel" data-checkpanel></div>`;
+  wrap.addEventListener("click", e => {
+    if (e.target === wrap || e.target.closest("[data-close]")) wrap.remove();
+    else if (e.target.closest("[data-runcheck]")) runTaxoCheck(p, wrap);
+  });
+  document.body.appendChild(wrap);
+  openTaxoCheck(p, wrap);
+}
+
+function openTaxoCheck(p, root) {
+  const panel = root.querySelector("[data-checkpanel]");
+  const what = p.stage === "rubric" ? "the rubric's whole <b>JSON view</b> from the taxonomy"
+    : `the whole <b>${esc(STAGE_NAMES[p.stage] || p.stage)}</b> field from the taxonomy (Ctrl/⌘+A, copy)`;
+  panel.hidden = false;
+  panel.innerHTML = `<div class="k">Check my taxonomy</div>
+    <p>Paste ${what}. This checks it the same way the taxonomy's linter does.</p>
+    <textarea data-checktext rows="6" spellcheck="false" placeholder="Paste here"></textarea>
+    <div class="row"><button class="primary" data-runcheck>Check</button><button data-close>Close</button><span class="muted" data-checkresult></span></div>
+    <p class="muted">/${esc(p.stage)} pass · <span class="mono">${esc(shortFp(p.fingerprint))}</span></p>`;
+  panel.querySelector("textarea").focus();
+}
+
+async function runTaxoCheck(p, root) {
+  const panel = root.querySelector("[data-checkpanel]");
+  const text = panel.querySelector("[data-checktext]").value, out = panel.querySelector("[data-checkresult]");
+  if (!text.trim()) { out.textContent = "Paste the taxonomy text first."; return; }
+  out.className = "muted"; out.textContent = "Checking…";
+  try {
+    const r = await api(`/api/proofs/${encodeURIComponent(p.code)}/check-input`, { json: { text } });
+    if (r.match) {
+      out.className = "ok";
+      out.innerHTML = `✓ Matches this pass. The taxonomy's code will be <span class="mono">${esc(r.taxonomy)}</span>.`;
+      return;
+    }
+    const d = r.difference;
+    const mark = (s, at) => `${esc(s.slice(0, at))}<mark>${esc(s.slice(at, at + 1) || "∅")}</mark>${esc(s.slice(at + 1))}`;
+    out.className = "bad";
+    out.innerHTML = `✗ Doesn't match. Taxonomy: <span class="mono">${esc(r.taxonomy)}</span> · this pass: <span class="mono">${esc(r.passed)}</span>.
+      ${d ? `<br>First difference at character ${fmtInt(d.at)} (taxonomy ${fmtInt(d.taxonomy_chars)} chars, passed ${fmtInt(d.passed_chars)}):
+        <div class="diff"><div><b>Taxonomy</b> <span class="mono">…${mark(d.taxonomy_text, d.offset)}…</span></div>
+        <div><b>Passed</b> <span class="mono">…${mark(d.passed_text, d.offset)}…</span></div></div>` : ""}
+      ${COPYABLE.has(p.stage) ? "<br>Use <b>Copy what passed</b> and paste it over the whole taxonomy field." : "<br>Put the version that passed into the taxonomy, or run the review again on what's there."}`;
+  } catch (e) {
+    out.className = "bad"; out.textContent = e.message;
   }
 }
 
@@ -499,7 +554,7 @@ function messageHtml(m, opts = {}) {
   if (m.role === "proof") {
     const stale = meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "";
     return `<div class="msg system"><div class="bubble proofcard${meta.outdated ? " stale" : ""}"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? " (admin override)" : ""}</b>${meta.outdated ? ` <span class="pill OUTDATED">OUTDATED</span>` : ""}
-      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
+      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}${CHECKABLE.has(meta.stage) && meta.fingerprint ? `<button data-taxocheck="${m.id}">Check my taxonomy</button>` : ""}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
   }
   const warn = m.meta && (m.meta.spend_flag || m.meta.warn) ? " warnnote" : "";
   return `<div class="msg system"><div class="bubble${warn}">${md(m.content)}<div class="ts-row">${ts}</div></div></div>`;
@@ -524,6 +579,8 @@ function wireMessageClicks(container, getMessage, reportName) {
     } else if (t.dataset.download) {
       const m = getMessage(+t.dataset.download);
       download(reportName(m), m.content);
+    } else if (t.dataset.taxocheck) {
+      showTaxoCheck(getMessage(+t.dataset.taxocheck).meta);
     } else if (t.dataset.proof) {
       showProof(getMessage(+t.dataset.proof).meta);
     }
