@@ -424,8 +424,16 @@ function syncProofCards(proofs) {
 
 // A review that hit the time limit is paused (server/pause.py): continue it once, or start over. Hidden while a run is on.
 function renderPaused() {
-  const note = $("#paused-note"), p = state.me && state.me.paused_review;
-  if (!p || state.run) { note.classList.add("hidden"); note.innerHTML = ""; return; }
+  const note = $("#paused-note"), p = state.me && state.me.paused_review, waiting = state.me && state.me.pending_review;
+  if ((!p && !waiting) || state.run) { note.classList.add("hidden"); note.innerHTML = ""; return; }
+  if (!p) {  // a review that stopped to ask something: every plain message goes to it until it's answered or ended
+    note.innerHTML = `<div class="grow">💬 Your <b class="mono">/${esc(waiting)}</b> review is waiting for your answer:
+        your next message goes to the review. Want a normal chat reply instead? End it first.</div>
+       <div class="actions"><button class="primary" data-paused="answer">Answer the review</button>
+        <button data-paused="end">End it and chat normally</button></div>`;
+    note.classList.remove("hidden");
+    return;
+  }
   const cmd = esc(p.command);
   note.innerHTML = p.inputs_changed
     ? `<div class="grow">⏸ Your <b class="mono">/${cmd}</b> review was paused by the ${esc(p.minutes)}-minute limit, but your inputs
@@ -437,10 +445,17 @@ function renderPaused() {
         <button data-paused="restart">Start over</button></div>`;
   note.classList.remove("hidden");
 }
-document.addEventListener("click", e => {
+document.addEventListener("click", async e => {
   const b = e.target.closest("[data-paused]");
-  if (!b || !state.me || !state.me.paused_review) return;
-  input.value = b.dataset.paused === "continue" ? "continue" : `/${state.me.paused_review.command}`;
+  if (!b || !state.me) return;
+  const what = b.dataset.paused;
+  if (what === "answer") return input.focus();
+  if (what === "end") {
+    try { await api("/api/review/end", { method: "POST" }); } catch (err) { return uiAlert("Couldn't end it", err.message); }
+    return refreshSide();
+  }
+  if (!state.me.paused_review) return;
+  input.value = what === "continue" ? "continue" : `/${state.me.paused_review.command}`;
   send();
 });
 

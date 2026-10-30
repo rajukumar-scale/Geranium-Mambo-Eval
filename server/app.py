@@ -811,6 +811,24 @@ async def send(body: SendBody, request: Request):
     return for_viewer(session, {"ok": True, "run": run_view(db.get_run(run_id))})
 
 
+@app.post("/api/review/end")
+async def end_waiting_review(request: Request):
+    """The chat's "End it and chat normally" button: a review waiting for an answer (or paused by the time limit) stops
+    waiting, so the next message gets a normal chat reply."""
+    session = current_user(request)
+    attempt_id = session["attempt_id"]
+    chat = db.get_chat(attempt_id)
+    chat_writable(session, chat)
+    pending = db.get_run(chat["pending_review_run"]) if chat.get("pending_review_run") else None
+    db.update("chats", "attempt_id", attempt_id, pending_review_run=None)
+    pause.clear(attempt_id)
+    if pending:
+        msg = db.add_message(attempt_id, "system", f"Ended the waiting /{pending['command']} review: your messages get "
+                                                   f"normal chat replies now. Send `/{pending['command']}` to run it fresh.")
+        hub.publish(attempt_id, "message", msg)
+    return {"ok": True}
+
+
 @app.post("/api/runs/{run_id}/cancel")
 async def cancel_run(run_id: str, request: Request):
     attempt_id = current_user(request)["attempt_id"]

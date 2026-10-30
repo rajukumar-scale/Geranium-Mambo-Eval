@@ -38,8 +38,10 @@ class PauseTest(unittest.TestCase):
         db.ex("insert into runs(id, attempt_id, kind, command, status, session_id, continuation, created_at, started_at) "
               "values (?,?,?,?,?,?,?,?,?)", (rid, "a1", "review", "rubric", "running", "S-1", continuation, time.time(), time.time()))
 
-    def complete(self, rid, timeout=True, scratch=None):
+    def complete(self, rid, timeout=True, scratch=None, answered=False):
         outcome = {"events": 3, "result": None, "texts": ["Once R2 returns I'll save the report."], "reports": {}}
+        if answered:  # finished normally, with a reply but no report (e.g. it asked a question)
+            outcome["result"] = {"result": "Which date is this task on?", "is_error": False, "subtype": "success"}
         if timeout:
             outcome["timeout"] = True
         if scratch:
@@ -143,6 +145,42 @@ class ContinueMessageTest(PauseTest):
         self.assertEqual(run["kind"], "followup")
         self.assertIsNone(pause.load("a1"))
         self.assertTrue(any("can't continue" in m["content"] for m in self.messages()))
+
+    def post_end(self):
+        from fastapi.testclient import TestClient
+        from server import app as portal, auth
+        with mock.patch.object(portal.blocks, "chat_blocked", lambda *a: None), \
+                mock.patch.object(portal.blocks, "disabled", lambda *a: None):
+            client = TestClient(portal.app)
+            client.cookies.set(auth.USER_COOKIE, auth.sign({"attempt_id": "a1", "user_id": "u1", "iat": time.time()}))
+            res = client.post("/api/review/end")
+        self.assertEqual(res.status_code, 200, res.text)
+
+    def test_a_review_without_a_report_waits_for_an_answer_once(self):
+        self.run_row("r1")
+        self.complete("r1", timeout=False, answered=True)  # finished, no report: it asked something
+        self.assertEqual(db.get_chat("a1")["pending_review_run"], "r1")
+        db.ex("update runs set status='done' where id='r1'")
+        self.run_row("r2", continuation=1)
+        self.complete("r2", timeout=False, answered=True)  # the answer also ends without a report: stop waiting
+        self.assertIsNone(db.get_chat("a1")["pending_review_run"])
+        self.assertTrue(any("no longer waiting" in m["content"] for m in self.messages()))
+        self.assertEqual(self.send("can you help me write the SQL?")["kind"], "followup")
+
+    def test_end_it_and_chat_normally(self):
+        self.run_row("r1")
+        self.complete("r1", timeout=False, answered=True)
+        db.ex("update runs set status='done' where id='r1'")
+        self.post_end()
+        self.assertIsNone(db.get_chat("a1")["pending_review_run"])
+        self.assertTrue(any("Ended the waiting /rubric review" in m["content"] for m in self.messages()))
+        self.assertEqual(self.send("a normal question")["kind"], "followup")
+
+    def test_end_also_drops_a_paused_review(self):
+        self.paused()
+        self.post_end()
+        self.assertIsNone(pause.load("a1"))
+        self.assertIsNone(db.get_chat("a1")["pending_review_run"])
 
 
 if __name__ == "__main__":

@@ -868,9 +868,18 @@ class Runner:
                 oe_nonfail = True
         self._finish(run, status, error, **fields, **report_fields)
         # A review that ended without its report stopped to ask the user something:
-        # their next plain message continues it instead of starting a follow-up.
-        waiting = (run["kind"] == "review" and status == "done" and not report_fields) or paused
+        # their next plain message continues it instead of starting a follow-up. Once: if the continuation also ends
+        # without a report, stop waiting, or every message they send keeps going back into the review (2026-10-31: a
+        # /prompt that finished without saving its report caught 6 messages in a row, each a "/prompt running" run).
+        no_report = run["kind"] == "review" and status == "done" and not report_fields
+        waiting = (no_report and not run["continuation"]) or paused
         db.update("chats", "attempt_id", attempt, pending_review_run=run_id if waiting else None)
+        if no_report and run["continuation"]:
+            msg = db.add_message(attempt, "system",
+                                 f"Your /{run['command']} review still didn't save a report, so it's no longer waiting for "
+                                 f"an answer: your messages get normal chat replies again. Send `/{run['command']}` to "
+                                 "run it fresh.", {"run_id": run_id, "warn": True})
+            hub.publish(attempt, "message", msg)
         for info in sorted(passes, key=lambda i: i["stage"] != run["command"]):  # the typed command's pass first
             payload = proofs.create(db.get_run(run_id) | {"cost_estimate": cost}, chat, info,
                                     inputs=staleness.snapshot(attempt))
