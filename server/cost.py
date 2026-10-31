@@ -437,11 +437,18 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
     lost = pending = None
     if states is not None:
         claims = []
+        held_tasks = {x["task_id"] for x in pairs.values() if x["status"] == "in_progress"}
+        def task_now(t, s):  # where the task stands now, for the lost-per-task table (Evan, 2026-10-31)
+            if t in task_submitted:
+                return "Submitted"
+            if t in held_tasks or int(s.get("live_claim") or 0):
+                return "In progress"
+            return "Cancelled" if (s.get("task_status") or "") == "canceled" else "Not submitted"
         for x in pairs.values():
             if x["status"] != "lost" or x["total"] <= 0:
                 continue
             s = state.get(x["task_id"]) or {}
-            claims.append({"task_id": x["task_id"], "user_id": x["user_id"], "email": x["email"] or "unknown", "reason": x["reason"],
+            claims.append({"task_id": x["task_id"], "task_now": task_now(x["task_id"], s), "user_id": x["user_id"], "email": x["email"] or "unknown", "reason": x["reason"],
                            "reason_label": LOST_REASONS[x["reason"]], "cancel_reason": s.get("cancel_reason") or "",
                            "ended": x["ended"], "ended_how": x["ended_how"],
                            "agent_runs": round(x["agent_runs"], 2), "sandbox": round(x["sandbox"], 2), "portal": round(x["portal"], 2),

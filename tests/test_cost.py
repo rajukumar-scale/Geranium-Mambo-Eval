@@ -197,6 +197,8 @@ class LostByClaimTest(unittest.TestCase):
                          ("released", utc(2026, 10, 15) + 3600, 4))
         self.assertEqual((lost[("exp", "f@x.com")]["ended"], lost[("exp", "f@x.com")]["ended_how"]), (utc(2026, 10, 16), "expired"))
         self.assertEqual((lost[("cx", "a@x.com")]["reason_label"], lost[("cx", "a@x.com")]["cancel_reason"]), ("Task cancelled", "dup"))
+        # where each task stands now, for the lost-per-task table
+        self.assertEqual({k[0]: c["task_now"] for k, c in lost.items()}, {"sub2": "Submitted", "cx": "Cancelled", "exp": "Not submitted"})
         b = r["breakdown"]
         self.assertEqual(b["claims"], {"submitted": 2, "lost": 3, "in_progress": 2, "internal": 2})  # people x tasks; C's re-claim isn't lost
         self.assertEqual(b["submitted"], {"agent_runs": 11, "evals": 1})  # B + C (both of C's turns)

@@ -147,7 +147,8 @@ function render() {
   $("#lost-card").innerHTML = c.lost ? lostCard(c) : "";
   $("#lost-card").classList.toggle("hidden", !c.lost);
   $("#losttasks-card").classList.toggle("hidden", !c.lost);
-  if (c.lost) renderTable("losttasks");
+  $("#losttaskrows-card").classList.toggle("hidden", !c.lost);
+  if (c.lost) { renderTable("losttasks"); renderTable("losttaskrows"); }
   $("#pending-card").classList.toggle("hidden", !c.pending_multi);
   if (c.pending_multi) renderTable("pending");
   renderTable("tasks");
@@ -482,6 +483,21 @@ function perCbCard(c) {
   });
 }
 
+// Lost claims (already in the chosen view) added up per task.
+function lostPerTask(claims) {
+  const by = {};
+  for (const c of claims) {
+    const t = by[c.task_id] ||= { task_id: c.task_id, task_now: c.task_now || "", claims: 0, who: new Set(), whys: new Set(), ended: 0,
+                                  agent_runs: 0, sandbox: 0, portal: 0, total: 0 };
+    t.claims += 1;
+    t.who.add(c.email || "unknown");
+    t.whys.add(c.reason_label);
+    t.ended = Math.max(t.ended, c.ended || 0);
+    for (const k of ["agent_runs", "sandbox", "portal", "total"]) t[k] += c[k] || 0;
+  }
+  return Object.values(by).map(t => ({ ...t, people: [...t.who].sort().join(", "), why: [...t.whys].join(", ") }));
+}
+
 // ---- tables (click a header to sort; the first 25 rows, then "show all") ----
 const TABLES = {
   losttasks: {
@@ -497,6 +513,24 @@ const TABLES = {
       ["In-task sandbox", "sandbox", r => esc(usd(r.sandbox)), true, "sandbox"],
       ["Portal reviews", "portal", r => esc(usd(r.portal)), true, "portal"],
       ["Spend", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+    ],
+  },
+  // the same lost claims added up per task (Evan, 2026-10-31)
+  losttaskrows: {
+    title: "Lost spend per task",
+    sub: "The lost claims above, added up per task: how many claims ended on it without a submit, by whom, and where the task stands now.",
+    rows: () => lostPerTask(C.shown.lost.claims), key: "total",
+    cols: [
+      ["Task", "task_id", r => `<span class="mono" title="${esc(r.task_id)}">${esc(r.task_id.slice(-6))}</span>`],
+      ["Lost claims", "claims", r => fmtInt(r.claims), true],
+      ["People", "people", r => esc(r.people)],
+      ["Why", "why", r => esc(r.why)],
+      ["Last claim ended", "ended", r => (r.ended ? esc(longDay(r.ended)) : "–")],
+      ["Task now", "task_now", r => esc(r.task_now)],
+      ["Task runs", "agent_runs", r => esc(usd(r.agent_runs)), true, "runs"],
+      ["In-task sandbox", "sandbox", r => esc(usd(r.sandbox)), true, "sandbox"],
+      ["Portal reviews", "portal", r => esc(usd(r.portal)), true, "portal"],
+      ["Lost", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
     ],
   },
   pending: {
