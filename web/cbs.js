@@ -5,7 +5,7 @@
 // multiples plus direct labels at each line's end, a tooltip on hover and keyboard focus (textContent only), and the
 // same numbers in the tables. Group colours are validated in both modes (style.css, .cbs-app).
 
-const S = { data: null, status: "", group: "", search: "", open: new Set() };
+const S = { data: null, status: "", group: "", search: "", open: new Set(), sort: null };  // sort: {key, dir}
 const GROUPS = [{ key: "QMA", label: "QMA", cls: "g-qma" }, { key: "trusted", label: "Trusted", cls: "g-trusted" },
                 { key: "non-trusted", label: "Non-trusted", cls: "g-non" }];
 const STATUSES = {
@@ -223,13 +223,43 @@ function taskRows(p) {
     </tbody></table></td></tr>`;
 }
 
+// The contributor columns: click a header to sort highest first, again for lowest first. Unsorted = the server's
+// order (needs action first). Text columns sort A to Z first; empty values always go last.
+const PEOPLE_COLS = [
+  { key: "email", label: "Contributor", text: true }, { key: "group", label: "Group", text: true },
+  { key: "status", label: "Status", text: true, value: p => Object.keys(STATUSES).indexOf(p.status) },
+  { key: "claims", label: "Claims", num: true, tip: "Claims they worked on (a review or a submit), plus live claims" },
+  { key: "untouched", label: "Untouched", num: true, tip: "Closed claims with no review and no submit" },
+  { key: "submitted", label: "Submitted", num: true }, { key: "working", label: "Live", num: true },
+  { key: "hours_p50", label: "Hours", num: true }, { key: "cost_p50", label: "$ per task", num: true },
+  { key: "reviews_p50", label: "Reviews", num: true }, { key: "spend", label: "Portal spend", num: true },
+  { key: "last", label: "Last claim" }, { key: "trained", label: "Training", value: p => p.trained?.at ?? null },
+];
+function sortPeople(list) {
+  if (!S.sort) return list;
+  const col = PEOPLE_COLS.find(c => c.key === S.sort.key);
+  const val = col.value || (p => p[col.key]);
+  const sign = S.sort.dir === "asc" ? 1 : -1;
+  return list.slice().sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x == null || x === "") return y == null || y === "" ? 0 : 1;
+    if (y == null || y === "") return -1;
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * sign;
+  });
+}
+
 function renderPeople(d) {
   const q = S.search.trim().toLowerCase();
-  const list = d.people.filter(p => (!S.status || p.status === S.status) && (!S.group || p.group === S.group)
-    && (!q || p.email.toLowerCase().includes(q) || p.user.includes(q)));
+  const list = sortPeople(d.people.filter(p => (!S.status || p.status === S.status) && (!S.group || p.group === S.group)
+    && (!q || p.email.toLowerCase().includes(q) || p.user.includes(q))));
+  const head = PEOPLE_COLS.map(c => {
+    const on = S.sort?.key === c.key, arrow = on ? (S.sort.dir === "desc" ? " ↓" : " ↑") : "";
+    return `<th class="${c.num ? "num " : ""}sortable" scope="col" aria-sort="${on ? (S.sort.dir === "desc" ? "descending" : "ascending") : "none"}"
+      ${c.tip ? `title="${esc(c.tip)}"` : ""}><button type="button" class="th-sort" data-sort="${c.key}">${esc(c.label)}${arrow}</button></th>`;
+  }).join("");
   const g = Object.fromEntries(GROUPS.map(x => [x.key, x]));
   $("#people-card").innerHTML = `<div class="cc-head"><h2>4 · Contributors: training and offboarding</h2>
-    <p class="muted">Needs action first. Click a row for their tasks. Grace = their first 2 tasks; Needs training after that when the
+    <p class="muted">Needs action first; click a column name to sort by it (highest first, click again for lowest). Click a row for their tasks. Grace = their first 2 tasks; Needs training after that when the
       last 2 closed claims had no submit or the last 2 submitted tasks were over the Flag bar; Offboard only after training.</p></div>
     <div class="cost-filters">
       <div class="seg" id="status-pick" role="group" aria-label="Status"><button type="button" data-status="" class="${S.status ? "" : "on"}">All</button>${
@@ -239,10 +269,7 @@ function renderPeople(d) {
       <input type="search" id="search" placeholder="Search email or user ID" value="${esc(S.search)}">
       <span class="muted">${fmtInt(list.length)} of ${fmtInt(d.people.length)}</span>
     </div>
-    <div class="table-wrap"><table class="cost-table cbs-people"><thead><tr><th>Contributor</th><th>Group</th><th>Status</th>
-      <th class="num" title="Claims they worked on (a review or a submit), plus live claims">Claims</th><th class="num" title="Closed claims with no review and no submit">Untouched</th>
-      <th class="num">Submitted</th><th class="num">Live</th><th class="num">Hours</th><th class="num">$ per task</th><th class="num">Reviews</th>
-      <th class="num">Portal spend</th><th>Last claim</th><th>Training</th></tr></thead>
+    <div class="table-wrap"><table class="cost-table cbs-people"><thead><tr>${head}</tr></thead>
       <tbody>${list.map(p => {
         const s = STATUSES[p.status];
         const training = p.trained
@@ -279,6 +306,14 @@ async function unmarkTrained(uid) {
 }
 
 document.addEventListener("click", e => {
+  const sortBtn = e.target.closest("[data-sort]");
+  if (sortBtn) {  // highest first, then lowest first (text: A to Z, then Z to A), then back to the default order
+    const key = sortBtn.dataset.sort, text = PEOPLE_COLS.find(c => c.key === key).text;
+    const [first, second] = text ? ["asc", "desc"] : ["desc", "asc"];
+    S.sort = S.sort?.key !== key ? { key, dir: first } : S.sort.dir === first ? { key, dir: second } : null;
+    renderPeople(S.data);
+    return;
+  }
   const train = e.target.closest("[data-train]"), untrain = e.target.closest("[data-untrain]");
   if (train) return markTrained(train.dataset.train);
   if (untrain) return unmarkTrained(untrain.dataset.untrain);

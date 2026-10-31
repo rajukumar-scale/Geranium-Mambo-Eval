@@ -607,3 +607,7 @@ button.danger-solid:hover { border-color: var(--ink); }
 .cbs-app .cost-table thead th { font-weight: 500; color: var(--muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
 .cbs-app .cost-table tbody td, .cbs-app .cost-table tbody th { border-bottom: 1px solid var(--line); }
 .cbs-app .cost-table th[scope="row"] { text-align: left; font-weight: 500; white-space: nowrap; }
+.cbs-app .th-sort { all: unset; cursor: pointer; font: inherit; color: inherit; white-space: nowrap; }
+.cbs-app .th-sort:hover { color: var(--ink); text-decoration: underline; }
+.cbs-app .th-sort:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
+.cbs-people td.num, .cbs-people td:nth-child(2) { white-space: nowrap; }
