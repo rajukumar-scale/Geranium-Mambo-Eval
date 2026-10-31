@@ -12,7 +12,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, config, db, fingerprint, hostload, hub, pause, progress, proofs, proxy, spend, staleness, workspace
+from . import boatrun, config, db, fingerprint, hostload, hub, pause, progress, proofs, proxy, runner_image, spend, staleness, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -304,7 +304,8 @@ class Runner:
         if not (config.REVIEW_RUNNER == "boat" and run["kind"] == "review"):
             return "main"
         if (server_reviews_enabled() and run["command"] in config.SERVER_REVIEW_COMMANDS
-                and len(self.server_held) < config.SERVER_REVIEW_SLOTS and not deploy_pending()):
+                and len(self.server_held) < config.SERVER_REVIEW_SLOTS and not deploy_pending()
+                and runner_image.present()):  # missing image (10-31): boat until runner_image.loop() rebuilds it
             free = hostload.mem_available_gb()
             if free is not None and free >= config.SERVER_REVIEW_MIN_FREE_GB:
                 return "server"
@@ -436,6 +437,7 @@ class Runner:
         hub.publish(attempt, "run", {"id": run_id, "status": "running", "command": run["command"], "kind": run["kind"],
                                      "started_at": started, "continuation": bool(run.get("continuation")),
                                      "progress": progress.calibration(run["command"]) if run["kind"] == "review" else None})
+        await asyncio.to_thread(workspace.thaw, attempt)  # a cold-stored chat (housekeeping): unpack off the event loop
         workspace.ensure_attempt(attempt)
         self.activity[run_id] = []
         prompt = (workspace.attempt_dir(attempt) / "logs" / f"{run_id}.prompt.txt").read_text()

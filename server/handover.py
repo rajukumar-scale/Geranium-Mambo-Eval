@@ -65,6 +65,7 @@ def archive(attempt_id, before=None, owner=None):
     # The workspace: the archive gets a full copy; the live one keeps only files written since `before`.
     src, dst = workspace.attempt_dir(attempt_id), workspace.attempt_dir(aid)
     if src.exists():
+        workspace.thaw(attempt_id)  # the live chat keeps only its newer files below, so it needs them unpacked
         shutil.copytree(src, dst, symlinks=True)
         if before is None:
             shutil.rmtree(src, ignore_errors=True)

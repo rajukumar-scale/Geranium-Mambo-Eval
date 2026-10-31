@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from server import config, db, hostload, runner, status
+from server import config, db, hostload, runner, runner_image, status
 
 
 class PlacementTest(unittest.TestCase):
@@ -23,9 +23,11 @@ class PlacementTest(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         self.free = 9.0
-        p = mock.patch.object(hostload, "mem_available_gb", lambda: self.free)
-        p.start()
-        self.addCleanup(p.stop)
+        self.image = True
+        for p in (mock.patch.object(hostload, "mem_available_gb", lambda: self.free),
+                  mock.patch.object(runner_image, "present", lambda *a: self.image)):
+            p.start()
+            self.addCleanup(p.stop)
         self.r = runner.Runner()
 
     def place(self, command, kind="review"):
@@ -39,6 +41,10 @@ class PlacementTest(unittest.TestCase):
         self.assertEqual(self.place("prompt"), "boat")
         self.assertEqual(self.place("rubric"), "boat")
         self.assertEqual(self.place(None, kind="followup"), "main")
+
+    def test_missing_review_image_sends_reviews_to_boat(self):
+        self.image = False  # 2026-10-31: the image vanished and every server review ended at once
+        self.assertEqual(self.place("injection"), "boat")
 
     def test_full_slots_overflow_to_boat_instead_of_queueing(self):
         self.r.server_held.update({"a", "b"})

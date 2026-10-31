@@ -19,6 +19,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import threading
 import time
 from pathlib import Path
 
@@ -40,11 +42,73 @@ def attempt_dir(attempt_id):
     return config.DATA_DIR / "attempts" / attempt_id
 
 
-def ensure_attempt(attempt_id):
+def ensure_attempt(attempt_id, unpack=True):
+    """The attempt's folders. unpack=False for paths that never read home/ or cache/ (sign-in, writing a message's
+    prompt): unpacking a cold chat takes seconds, and those paths run on the event loop. Runs unpack in a thread first
+    (Runner._execute), so the unpack here is the backstop for anything else that uses home/ or cache/."""
     root = attempt_dir(attempt_id)
+    if unpack:
+        thaw(attempt_id)
     for sub in ("task_inputs/reports", "cache", "home/.claude", "logs"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     return root
+
+
+# ---- cold storage ---------------------------------------------------------------
+# An idle chat's home/ (Claude Code sessions, ~6.6 GB a day across chats on 2026-10-31) and cache/ are packed into
+# one cold.tgz (text, ~8x smaller) by housekeeping, and unpacked by ensure_attempt() before anything uses them, so a
+# chat picked up again weeks later resumes exactly as before. task_inputs/ and logs/ stay as they are (the pages read them).
+COLD = "cold.tgz"
+COLD_DIRS = ("home", "cache")
+_cold_locks = {}
+_cold_guard = threading.Lock()
+
+
+def _cold_lock(attempt_id):
+    with _cold_guard:
+        return _cold_locks.setdefault(attempt_id, threading.Lock())
+
+
+def is_cold(attempt_id):
+    return (attempt_dir(attempt_id) / COLD).is_file()
+
+
+def freeze(attempt_id, busy=lambda: False):
+    """Pack home/ and cache/ into cold.tgz and remove them. busy() is checked under the lock, so a run starting at the
+    same moment either waits for the pack to finish (and unpacks it) or keeps it from starting. Returns bytes freed."""
+    root = attempt_dir(attempt_id)
+    with _cold_lock(attempt_id):
+        dirs = [d for d in COLD_DIRS if (root / d).is_dir()]
+        if (root / COLD).exists() or not dirs or busy():
+            return 0
+        before = sum(f.lstat().st_size for d in dirs for f in (root / d).rglob("*") if f.is_file() or f.is_symlink())
+        tmp = root / (COLD + ".tmp")
+        try:
+            with tarfile.open(tmp, "w:gz", compresslevel=6) as tar:
+                for d in dirs:
+                    tar.add(str(root / d), d)
+            tmp.replace(root / COLD)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
+        for d in dirs:
+            shutil.rmtree(root / d)
+        return before - (root / COLD).stat().st_size
+
+
+def thaw(attempt_id):
+    """Unpack cold.tgz back into home/ and cache/ (a no-op for a chat that isn't cold)."""
+    root = attempt_dir(attempt_id)
+    if not (root / COLD).is_file():
+        return False
+    with _cold_lock(attempt_id):
+        packed = root / COLD
+        if not packed.is_file():
+            return False
+        with tarfile.open(packed, "r:gz") as tar:
+            tar.extractall(root, filter="tar")  # our own archive; "tar" also keeps symlinks Claude Code may leave
+        packed.unlink()
+        return True
 
 
 def task_inputs(attempt_id):

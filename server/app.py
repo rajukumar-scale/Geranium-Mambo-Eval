@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, housekeeping, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, housekeeping, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -73,6 +73,7 @@ async def startup():
     asyncio.create_task(cost.loop())
     asyncio.create_task(cbs.loop())
     asyncio.create_task(housekeeping.loop())
+    asyncio.create_task(runner_image.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
 
 
@@ -452,7 +453,7 @@ async def login(body: LoginBody, request: Request):
         existing = db.get_chat(attempt_id)
     chat = db.upsert_chat(attempt_id, row["TASK_ID"], row["PROJECT_ID"], row["USER_ID"], row["EMAIL_RAW"],
                           existing["session_id"] if existing else str(uuid.uuid4()))
-    workspace.ensure_attempt(attempt_id)
+    workspace.ensure_attempt(attempt_id, unpack=False)
     if not existing:
         db.add_message(attempt_id, "system", "Welcome! " + HELP)
     resp = JSONResponse({"ok": True, "attempt_id": attempt_id, **({"task_id": chat["task_id"]} if bypass else {})})
@@ -494,6 +495,7 @@ async def set_universe(body: UniverseBody, request: Request):
     chat_writable(session, db.get_chat(attempt_id))
     if body.date not in workspace.UNIVERSE_DATES:
         raise HTTPException(400, "Pick Oct 1, 2025 or Feb 14, 2026.")
+    await asyncio.to_thread(workspace.thaw, attempt_id)  # a cold chat: unpack off the event loop before docker mounts it
     if not workspace.dated_release():
         raise HTTPException(409, "This eval version has one date only; nothing to pick.")
     if config.RUNNER_MODE != "docker":
@@ -814,7 +816,7 @@ async def send(body: SendBody, request: Request):
         listing = "\n".join(f"- Evals/task_inputs/_uploads/{name}" for name in files)
         prompt += f"\n\n[Files attached to this message, already saved in the workspace:\n{listing}\n]"
     run_id = uuid.uuid4().hex
-    (workspace.ensure_attempt(attempt_id) / "logs" / f"{run_id}.prompt.txt").write_text(prompt)
+    (workspace.ensure_attempt(attempt_id, unpack=False) / "logs" / f"{run_id}.prompt.txt").write_text(prompt)
     if pending:
         db.ex("insert into runs(id, attempt_id, kind, command, continuation, session_id, status, created_at)"
               " values (?,?,?,?,?,?,?,?)", (run_id, attempt_id, "review", pending["command"], 1,

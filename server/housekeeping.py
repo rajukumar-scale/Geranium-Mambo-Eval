@@ -6,7 +6,11 @@ started, was cancelled or was cut off by a restart, and 18 GB was raw run logs. 
   PAYLOAD_MAX_AGE: they're only read while a review machine starts;
 - gzips run logs (logs/<run>.jsonl -> .jsonl.gz) of runs that finished more than LOG_GZIP_DAYS ago: the admin log
   link serves the .gz (app.admin_run_log); nothing else reads a finished run's log;
+- cold-stores chats idle for COLD_DAYS: their home/ (Claude Code sessions) and cache/ packed into cold.tgz, unpacked
+  again by workspace.ensure_attempt() the moment the chat runs anything (workspace.freeze / thaw);
 - tells Slack when free space drops under LOW_DISK_GB (at most every LOW_DISK_EVERY).
+The disk grew 14.7 GB on 10-30 alone (sessions 6.6, run logs ~4, eval cache 2.7), so under LOW_DISK_GB free it works
+harder: chats idle for COLD_HOURS_LOW_DISK and logs older than LOG_GZIP_DAYS_LOW_DISK.
 """
 
 import asyncio
@@ -15,13 +19,17 @@ import logging
 import shutil
 import time
 
-from . import config, db, notify
+from . import config, db, notify, workspace
 
 log = logging.getLogger("portal.housekeeping")
-EVERY = 3600
+EVERY = 900
 PAYLOAD_MAX_AGE = 6 * 3600  # far longer than a machine takes to start (MACHINE_TRIES boots)
 LOG_GZIP_DAYS = 3
+LOG_GZIP_DAYS_LOW_DISK = 1
 LOG_GZIP_BATCH = 2000  # logs per pass, so a backlog is worked through over a few hours
+COLD_DAYS = 2
+COLD_HOURS_LOW_DISK = 6
+FREEZE_BATCH = 60  # chats per pass (~125 MB each before packing)
 LOW_DISK_GB = 10
 LOW_DISK_EVERY = 6 * 3600
 _state = {"alerted": 0.0}
@@ -51,12 +59,12 @@ def sweep_payloads(now=None):
     return removed, freed
 
 
-def gzip_logs(now=None, batch=LOG_GZIP_BATCH):
-    """Compress the logs of runs that finished LOG_GZIP_DAYS ago or more. Returns (files, bytes) saved."""
+def gzip_logs(now=None, batch=LOG_GZIP_BATCH, days=LOG_GZIP_DAYS):
+    """Compress the logs of runs that finished `days` ago or more. Returns (files, bytes) saved."""
     now = now or time.time()
     done, saved = 0, 0
     runs = db.q("select id, attempt_id from runs where finished_at is not null and finished_at < ? "
-                "and status not in ('queued', 'running') order by finished_at", (now - LOG_GZIP_DAYS * 86400,))
+                "and status not in ('queued', 'running') order by finished_at", (now - days * 86400,))
     for run in runs:
         if done >= batch:
             break
@@ -80,6 +88,29 @@ def gzip_logs(now=None, batch=LOG_GZIP_BATCH):
     return done, saved
 
 
+def freeze_idle(now=None, idle=COLD_DAYS * 86400, batch=FREEZE_BATCH):
+    """Cold-store chats with no activity for `idle` seconds and no queued or running run. Returns (chats, bytes) freed."""
+    now = now or time.time()
+    done, freed = 0, 0
+    for chat in db.q("select attempt_id from chats where coalesce(last_activity, created_at, 0) < ? "
+                     "order by last_activity", (now - idle,)):
+        if done >= batch:
+            break
+        attempt = chat["attempt_id"]
+        root = workspace.attempt_dir(attempt)
+        if workspace.is_cold(attempt) or not any((root / d).is_dir() for d in workspace.COLD_DIRS):
+            continue
+        try:
+            got = workspace.freeze(attempt, busy=lambda: bool(db.active_run(attempt)))
+        except OSError as error:  # out of room for the archive: stop, the original files are untouched
+            log.warning("couldn't cold-store %s: %s", attempt, error)
+            break
+        if got:
+            done += 1
+            freed += got
+    return done, freed
+
+
 def free_gb():
     return shutil.disk_usage(config.DATA_DIR).free / 1e9
 
@@ -95,12 +126,14 @@ async def check_disk(now=None):
 
 
 async def run_once():
+    low = free_gb() < LOW_DISK_GB
     files, freed = await asyncio.to_thread(sweep_payloads)
-    logs, saved = await asyncio.to_thread(gzip_logs)
+    logs, saved = await asyncio.to_thread(gzip_logs, None, LOG_GZIP_BATCH, LOG_GZIP_DAYS_LOW_DISK if low else LOG_GZIP_DAYS)
+    chats, packed = await asyncio.to_thread(freeze_idle, None, COLD_HOURS_LOW_DISK * 3600 if low else COLD_DAYS * 86400)
     free = await check_disk()
-    if files or logs:
-        log.info("housekeeping: %d upload packages (%.1f GB), %d logs gzipped (%.1f GB saved), %.1f GB free",
-                 files, freed / 1e9, logs, saved / 1e9, free)
+    if files or logs or chats:
+        log.info("housekeeping%s: %d upload packages (%.1f GB), %d logs gzipped (%.1f GB), %d chats cold-stored (%.1f GB), "
+                 "%.1f GB free", " (low disk)" if low else "", files, freed / 1e9, logs, saved / 1e9, chats, packed / 1e9, free)
 
 
 async def loop():
