@@ -891,7 +891,12 @@ async function send() {
   if (review && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
   $("#send").disabled = true;
   try {
-    const res = await api("/api/send", { json: { text, files: state.attachments } });
+    let res = await api("/api/send", { json: { text, files: state.attachments } });
+    if (res.identical) {  // nothing changed since the last review of this command (server/rerun_guard.py)
+      if (!(await identicalRerun(res.identical))) return;
+      res = await api("/api/send", { json: { text, files: state.attachments, force: true } });
+      if (res.identical) return identicalRerun(res.identical);  // it was already run again once on these inputs
+    }
     input.value = ""; autosize();
     state.attachments = []; renderAttachments();
     if (res.run) setRun(res.run);
@@ -901,6 +906,21 @@ async function send() {
   } finally {
     updateSend();
   }
+}
+
+// A bare review command on exactly the inputs its last finished review graded (server/rerun_guard.py): it would get
+// the same result and cost another review, so it isn't started. They can run it once more anyway, as a second opinion.
+function identicalRerun(same) {
+  const cmd = `/${same.command}`, ago = same.minutes_ago < 60 ? `${same.minutes_ago} min ago`
+    : same.minutes_ago < 2880 ? `${Math.round(same.minutes_ago / 60)} h ago` : `${Math.round(same.minutes_ago / 1440)} days ago`;
+  const verdict = shownVerdict(same.command, same.verdict) || "no verdict";
+  const html = `<p style="margin-top:0">Your last <b class="mono">${esc(cmd)}</b> review (<b>${esc(verdict)}</b>, ${esc(ago)}) graded exactly
+      the inputs that are saved now. Running it again on the same inputs gives the same result${same.cost ? `, and costs about ${esc("$" + Math.round(same.cost))}` : ""}.</p>
+    <p>Fix what its report says first (send the corrected version here, or with the command), then run <b class="mono">${esc(cmd)}</b> again.</p>
+    <p style="margin-bottom:0">${same.forced ? "It was already run once more on these same inputs, so it won't run again until something changes."
+      : "If you think that review got it wrong, you can run it once more on the same inputs."}</p>`;
+  return same.forced ? uiDialog({ title: "Nothing changed since your last review", html, ok: "OK" }).then(() => false)
+    : uiDialog({ title: "Nothing changed since your last review", html, ok: "Run it anyway", cancel: "I'll fix it first" });
 }
 
 // The start-review dialog: what the review checks, what it needs, what is already saved.

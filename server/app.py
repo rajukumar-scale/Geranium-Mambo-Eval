@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, housekeeping, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -706,6 +706,7 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
 class SendBody(BaseModel):
     text: str = ""
     files: list[str] = []
+    force: bool = False  # "Run it anyway" on an identical re-run (rerun_guard)
 
 
 @app.post("/api/send")
@@ -784,6 +785,17 @@ async def send(body: SendBody, request: Request):
         raise HTTPException(429, f"You've reached today's limit of {limit} {'reviews' if kind == 'review' else 'messages'} "
                                  "for this attempt. Type /admin if you need more.")
 
+    # The same review on exactly the inputs its last finished review graded: not started; the page says so and can
+    # send it again with force, once per identical inputs (rerun_guard). Admins' runs always start.
+    forced = False
+    if command and not rest.strip() and not files and not session.get("admin"):
+        same = rerun_guard.same_as_last(attempt_id, command)
+        if same and (not body.force or same["forced"]):
+            log.info("identical re-run not started: %s /%s (last %s, %s min ago, $%.2f)%s", attempt_id, command,
+                     same["verdict"], same["minutes_ago"], same["cost"], " - already forced once" if body.force else "")
+            return {"ok": False, "identical": same}
+        forced = bool(same)
+
     # A review paused by the time limit (pause.py) continues only on the inputs it was graded on.
     paused = pause.load(attempt_id) if pending else None
     paused = paused if paused and paused.get("run_id") == pending["id"] else None
@@ -822,8 +834,10 @@ async def send(body: SendBody, request: Request):
               " values (?,?,?,?,?,?,?,?)", (run_id, attempt_id, "review", pending["command"], 1,
                                             pending["session_id"], "queued", time.time()))
     else:
-        db.ex("insert into runs(id, attempt_id, kind, command, status, created_at) values (?,?,?,?,?,?)",
-              (run_id, attempt_id, kind, command, "queued", time.time()))
+        db.ex("insert into runs(id, attempt_id, kind, command, status, created_at, rerun_forced) values (?,?,?,?,?,?,?)",
+              (run_id, attempt_id, kind, command, "queued", time.time(), int(forced)))
+        if forced:
+            log.info("identical re-run started anyway: %s /%s", attempt_id, command)
     admin = session.get("admin")
     db.update("runs", "id", run_id, task_id=chat["task_id"], actor_admin=int(bool(admin)),
               actor_email=admin or chat["email"], actor_user_id=None if admin else (session.get("user_id") or chat["user_id"]))

@@ -220,7 +220,8 @@ def migrate():
     have = {r["name"] for r in q("pragma table_info(runs)")}
     for col, decl in (("continuation", "integer default 0"), ("session_id", "text"), ("resumed", "integer default 0"),
                       ("runner_box", "text"), ("boat_phase", "text"), ("loadtest", "integer default 0"),
-                      ("milestones", "text"), ("box_ready_at", "real"), ("review_started_at", "real")):
+                      ("milestones", "text"), ("box_ready_at", "real"), ("review_started_at", "real"),
+                      ("inputs_after", "text"), ("rerun_forced", "integer default 0")):
         if col not in have:
             ex(f"alter table runs add column {col} {decl}")
     chat_cols = {r["name"] for r in q("pragma table_info(chats)")}

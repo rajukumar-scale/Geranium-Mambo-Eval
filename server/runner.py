@@ -12,7 +12,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, config, db, fingerprint, hostload, hub, pause, progress, proofs, proxy, runner_image, spend, staleness, workspace
+from . import boatrun, config, db, fingerprint, hostload, hub, pause, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -871,6 +871,11 @@ class Runner:
                   and info.get("exec_status") == "COMPLETE"):
                 oe_nonfail = True
         self._finish(run, status, error, **fields, **report_fields)
+        if run["kind"] == "review" and status == "done" and report_fields:
+            try:  # what it graded, so a re-run on the same inputs can be caught (rerun_guard)
+                rerun_guard.record(run_id, attempt, run["command"])
+            except Exception:  # noqa: BLE001 - never break finishing the run
+                log.exception("recording the graded inputs failed for %s", run_id)
         # A review that ended without its report stopped to ask the user something:
         # their next plain message continues it instead of starting a follow-up. Once: if the continuation also ends
         # without a report, stop waiting, or every message they send keeps going back into the review (2026-10-31: a
