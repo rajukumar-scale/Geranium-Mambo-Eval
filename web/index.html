@@ -89,6 +89,14 @@
           <h3><button type="button" class="sec-toggle" aria-expanded="true">Saved inputs<span class="chev" aria-hidden="true">▾</span></button></h3>
           <div class="sec-body"><div id="inputs" class="muted" style="font-size:14px">None yet</div></div>
         </section>
+        <section class="side-sec hidden" data-sec="known" id="known-sec">
+          <h3><button type="button" class="sec-toggle" aria-expanded="true"><span id="known-title">Known data issues</span><span class="chev" aria-hidden="true">▾</span></button></h3>
+          <div class="sec-body">
+            <p class="known-intro">Base data that contradicts itself. Tasks graded on these usually fail Cross-Service Coherence.
+              <span class="known-checked" id="known-checked"></span></p>
+            <div id="known" class="known-list"></div>
+          </div>
+        </section>
       </aside>
       <main class="main">
         <div class="messages" id="messages"></div>

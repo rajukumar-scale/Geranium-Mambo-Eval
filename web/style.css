@@ -260,6 +260,20 @@ button.danger-solid:hover { border-color: var(--ink); }
 .sec-toggle .chev { font-size: 11px; transition: transform .15s ease; }
 .side-sec.folded .chev { transform: rotate(-90deg); }
 .side-sec.folded .sec-body { display: none; }
+.sec-count { font-size: 11px; letter-spacing: 0; background: var(--grey-95); border: 1px solid var(--line); border-radius: 9999px; padding: 0 7px; margin-left: 4px; }
+/* known data issues (pilot): watch items are lighter */
+#known-title { flex: 1; min-width: 0; white-space: normal; }  /* buttons are nowrap; a long task date wraps to a second line: "(Feb 14, 2026) 33" stays together */
+#known-title .nowrap { white-space: nowrap; }
+.known-intro { font-size: 13px; line-height: 1.4; color: var(--muted); margin: 0 0 8px; }
+.known-checked { display: block; font-size: 11.5px; margin-top: 3px; }
+.known-hint { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+.known-list { max-height: 44vh; overflow: auto; margin: 0 -4px; padding: 0 4px; }
+.known-group { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 10px 0 2px; }
+.list-item.known-item { font-size: 13px; padding: 5px 9px; }
+.known-item.watch .grow { opacity: .6; }
+.known-tag { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 9999px; padding: 0 7px; }
+.known-fails { margin: 0 0 12px; font-weight: 500; }
+.known-watch { margin: 0; font-size: 13px; color: var(--muted); }
 .history-list { max-height: 44vh; overflow: auto; margin: 0 -4px; padding: 0 4px; }
 .history-list.god { max-height: 56vh; }
 .list-tools { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }

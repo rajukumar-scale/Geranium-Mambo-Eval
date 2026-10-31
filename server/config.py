@@ -185,6 +185,9 @@ STATUS_YELLOW_PCT = float(_get("STATUS_YELLOW_PCT", 10))
 STATUS_RED_PCT = float(_get("STATUS_RED_PCT", 30))
 # A chat counts as released (no claim, no submission) only after this long without work: claim data lags a little.
 RELEASE_GRACE_HOURS = float(_get("RELEASE_GRACE_HOURS", 2))
+# Who sees the chat page's "Known data issues" sidebar (server/known_issues.py): emails or Outlier IDs, matched to
+# the attempt's owner or the admin login. "*" = everyone; empty = nobody (off).
+KNOWN_ISSUES_PILOT = _list("KNOWN_ISSUES_PILOT", "")
 
 DEFAULT_MODEL = _get("DEFAULT_MODEL", "claude-opus-5-5")
 # Thinking effort for every run. The bundled skills pin xhigh; the portal rewrites that in its own copy.

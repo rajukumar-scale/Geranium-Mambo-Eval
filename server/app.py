@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -503,6 +503,16 @@ async def set_universe(body: UniverseBody, request: Request):
     hub.publish(attempt_id, "message", m)
     log.info("task date for %s set to %s", attempt_id, body.date)
     return for_viewer(session, {"ok": True, "universe": chat_state(attempt_id)["universe"]})
+
+
+@app.get("/api/known-issues")
+def known_data_issues(request: Request):
+    """The sidebar's "Known data issues" for this task's universe (both lists, grouped, until the task date is picked),
+    or enabled=false for anyone outside KNOWN_ISSUES_PILOT."""
+    session = current_user(request)
+    if not known_issues.in_pilot(session, db.get_chat(session["attempt_id"])):
+        return {"enabled": False}
+    return known_issues.view(workspace.universe_date(session["attempt_id"]))
 
 
 @app.get("/api/spend")

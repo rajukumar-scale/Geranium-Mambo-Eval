@@ -372,10 +372,50 @@ async function refreshSide() {
 // The task date (the eval reads one of two universes, picked per task): a chip in the top bar, asked with two buttons.
 function renderDate() {
   const u = state.me.universe || {}, chip = $("#chip-date");
+  loadKnown();  // the known data issues follow the task date
   chip.classList.toggle("hidden", !u.asks);
   if (!u.asks) return;
   chip.classList.toggle("flag", !u.date);
   chip.textContent = u.date ? `📅 ${u.choices[u.date]}` : "📅 Pick the task date";
+}
+
+// Known data issues (pilot, KNOWN_ISSUES_PILOT): base data that contradicts itself, for this task's universe.
+// Both universes' lists, grouped, until the date is picked. Fetched again only when the chat or the date changes.
+async function loadKnown() {
+  const key = state.me.attempt_id + "|" + ((state.me.universe || {}).date || "");
+  if (state.knownKey === key) return;
+  state.knownKey = key;
+  let res = null;
+  try { res = await api("/api/known-issues"); } catch (e) { /* stays hidden until the chat or date changes */ }
+  if (state.knownKey !== key) return;  // another chat or date came in meanwhile
+  state.known = res;
+  renderKnown();
+}
+function renderKnown() {
+  const k = state.known;
+  $("#known-sec").classList.toggle("hidden", !(k && k.enabled));
+  if (!k || !k.enabled) return;
+  const day = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const count = k.groups.reduce((n, g) => n + g.issues.length, 0);
+  // The header names the task's date (the universe the chip picked); the list's own check date goes in the intro.
+  const taskDate = k.universe ? day(k.groups[0].date) : "both dates";
+  $("#known-title").innerHTML = `Known data issues <span class="nowrap">(${esc(taskDate)})<span class="sec-count">${count}</span></span>`;
+  $("#known-checked").textContent = `Checked ${day(k.verified)}`;
+  const row = i => `<div class="list-item known-item${i.level === "watch" ? " watch" : ""}" data-known="${esc(i.id)}" title="${esc(i.title)}">
+      <span class="grow">⚠ ${esc(i.id)} · ${esc(i.title)}</span>${i.level === "watch" ? `<span class="known-tag">watch</span>` : ""}</div>`;
+  const hint = !k.universe && (state.me.universe || {}).asks ? `<p class="known-hint">Pick the task date (top bar) to see only your date's list.</p>` : "";
+  $("#known").innerHTML = hint + k.groups.map(g =>
+    (k.groups.length > 1 ? `<div class="known-group">${esc(g.label)}</div>` : "") + g.issues.map(row).join("")).join("");
+}
+function openKnown(id) {
+  const i = (state.known ? state.known.groups : []).flatMap(g => g.issues).find(x => x.id === id);
+  if (!i) return;
+  uiDialog({ title: `⚠ ${i.id} · ${i.title}`, ok: "Close", html: `<div class="review-confirm">
+      <p class="known-fails">${i.fails ? `Caused ${i.fails} FAIL${i.fails === 1 ? "" : "s"}` : "Caused no FAILs yet"}</p>
+      <div class="rc-row"><div class="k">Don't grade</div><div>${esc(i.dont)}</div></div>
+      <div class="rc-row"><div class="k">Why</div><div>${esc(i.why)}</div></div>
+      ${i.safer ? `<div class="rc-row"><div class="k">Safer</div><div>${esc(i.safer)}</div></div>` : ""}
+      ${i.level === "watch" ? `<p class="known-watch"><span class="known-tag">watch</span> Not always failed — check both sides before relying on it.</p>` : ""}</div>` });
 }
 function pickDate(why = "") {
   const u = state.me.universe || {};
@@ -722,6 +762,8 @@ $("#view-switch").addEventListener("click", async e => {
 $("#side").addEventListener("click", async e => {
   const inp = e.target.closest("[data-input]");
   if (inp) return openInput(inp.dataset.input);
+  const known = e.target.closest("[data-known]");
+  if (known) return openKnown(known.dataset.known);
   const sw = e.target.closest("[data-switch]");
   if (sw) return switchTo(sw.dataset.switch);
   const cmd = e.target.closest("[data-cmd]");
