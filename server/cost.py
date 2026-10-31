@@ -21,6 +21,12 @@ LOST_IDLE_DAYS (no task runs, no portal reviews) and that nobody holds a live cl
 task's platform state, which says why (cancelled, claim dropped or expired, paused). Only spend tied to a task can count: portal
 reviews, the in-task sandbox and runs launched from the task. Platform task runs that never made it into a submission
 can't be tied to any task, so they stay in the "not tied to a submission" figure rather than here.
+
+Tasks not submitted yet but still active (the "waiting" ones above), not cancelled, that 2 or more people have claimed
+are listed on their own with their spend so far (in the range, as above). Claimers are the distinct people on the task's
+L-1 claims and incomplete attempts in the CB tracker's cached facts (since 2026-10-01) plus the portal's chat holders
+on it (a re-served node overwrites its WORKER); internal accounts (@scale.com, queue_manager, Scale API) don't count.
+Until the CB tracker's facts have loaded, only the portal's chats count and the list says it's partial.
 """
 
 import asyncio
@@ -30,7 +36,7 @@ import logging
 import statistics
 import time
 
-from . import auth, config, db, spend
+from . import auth, cbs, config, db, spend
 
 log = logging.getLogger("portal.cost")
 DAY = 86400
@@ -97,7 +103,7 @@ def _period_end(start, period):
 def _lost(tcd, rows, task_runs, states, start, stop, now):
     """Spend in the range on tasks that were never submitted, have been quiet for LOST_IDLE_DAYS and aren't claimed, per day
     and per task, with why (from the task's platform state now); and the same for tasks not submitted yet but still active
-    (recent work or a live claim), which isn't counted.
+    (recent work or a live claim), which isn't counted: in total, and per task (cancelled ones left out).
     Tasks are classified as they stand now, so a past day's figure grows as its tasks go quiet."""
     num = lambda r, k: float(r.get(k) or 0)  # noqa: E731
     state = {r["task"]: r for r in _rows(states) if r.get("task")}
@@ -129,7 +135,7 @@ def _lost(tcd, rows, task_runs, states, start, stop, now):
                 p["portal"] += usd
                 if email:
                     p["who"].add(email)
-    per_day, tasks, waiting = {}, [], {"tasks": 0, "agent_runs": 0.0, "evals": 0.0}
+    per_day, tasks, waiting, waiting_tasks = {}, [], {"tasks": 0, "agent_runs": 0.0, "evals": 0.0}, []
     for t, p in per.items():
         if not p["days"]:
             continue
@@ -140,6 +146,11 @@ def _lost(tcd, rows, task_runs, states, start, stop, now):
             waiting["tasks"] += 1
             waiting["agent_runs"] += p["agent_runs"]
             waiting["evals"] += p["sandbox"] + p["portal"]
+            if (s.get("task_status") or "") != "canceled":
+                waiting_tasks.append({"task_id": t, "holder": s.get("last_worker_email") or "", "live_claim": bool(int(s.get("live_claim") or 0)),
+                                      "contributors": ", ".join(sorted(p["who"])), "last_activity": last,
+                                      "agent_runs": round(p["agent_runs"], 2), "sandbox": round(p["sandbox"], 2), "portal": round(p["portal"], 2),
+                                      "total": round(p["agent_runs"] + p["sandbox"] + p["portal"], 2)})
             continue
         reason = ("missing" if not s else "cancelled" if (s.get("task_status") or "") == "canceled" else "paused" if int(s.get("paused") or 0) and not int(s.get("pending") or 0) else "dropped")
         for d, (runs_usd, evals_usd) in p["days"].items():
@@ -158,7 +169,39 @@ def _lost(tcd, rows, task_runs, states, start, stop, now):
             reasons.append({"reason": key, "label": label, "tasks": len(mine), "agent_runs": round(sum(t["agent_runs"] for t in mine), 2),
                             "evals": round(sum(t["sandbox"] + t["portal"] for t in mine), 2)})
     waiting.update(agent_runs=round(waiting["agent_runs"], 2), evals=round(waiting["evals"], 2))
-    return per_day, tasks, reasons, waiting
+    return per_day, tasks, reasons, waiting, waiting_tasks
+
+
+def _claim_sources(task_ids):
+    """What _claimers counts from: the CB tracker's cached Snowflake facts (None until they've loaded) and the portal's
+    chats on these tasks."""
+    marks = ",".join("?" * len(task_ids))
+    return cbs._facts["rows"], db.q(f"select task_id, user_id, email from chats where task_id in ({marks}) and user_id is not null", tuple(task_ids))
+
+
+def _claimers(task_ids, facts, chats):
+    """The distinct people who claimed each task: WORKERs on its L-1 claims (node rows) and incomplete attempts, plus the
+    portal's chat holders (a re-served node overwrites its WORKER). Internal accounts are left out, as on the CB tracker.
+    {task: {user id: email}}; facts None (not loaded yet) leaves chats only."""
+    wanted, users, seen = set(task_ids), {}, {}
+    rows = [{k.lower(): v for k, v in f.items()} for f in facts or ()]
+    for f in rows:
+        if f["kind"] == "user" and f.get("worker"):
+            users[f["worker"]] = f
+        elif f["kind"] in ("node", "incomplete") and f.get("task") in wanted and f.get("worker"):
+            seen.setdefault(f["task"], {}).setdefault(f["worker"], "")
+    for c in chats:
+        if c["task_id"] in wanted and c["user_id"]:
+            who = seen.setdefault(c["task_id"], {})
+            who[c["user_id"]] = who.get(c["user_id"]) or c["email"] or ""
+    out = {}
+    for task, who in seen.items():
+        for uid, email in who.items():
+            u = users.get(uid) or {}
+            email = (u.get("email") or email or "").split("+outlier")[0]
+            if u.get("source") not in ("queue_manager", "Scale API") and "@scale.com" not in email.lower():
+                out.setdefault(task, {})[uid] = email
+    return out
 
 
 def build(facts, start, end, billed_rows=(), days=None, states=None):
@@ -178,8 +221,22 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
         d[0][r["task"]] = 1
         d[1].add(r["cb"])
     # lost spend needs each task's platform state (None = that query isn't set up, so the page leaves it out)
-    lost_day, lost_tasks, lost_reasons, lost_waiting = (_lost(tcd, rows, portal_runs, states, start, stop, time.time())
-                                                        if states is not None else ({}, None, None, None))
+    lost_day, lost_tasks, lost_reasons, lost_waiting, waiting_tasks = (_lost(tcd, rows, portal_runs, states, start, stop, time.time())
+                                                                       if states is not None else ({}, None, None, None, None))
+    # of the tasks still in progress, the ones 2+ people have claimed (Rafael, 2026-10-31)
+    pending = None
+    if waiting_tasks is not None:
+        ids = [t["task_id"] for t in waiting_tasks]
+        claim_facts, chats = _claim_sources(ids) if ids else (cbs._facts["rows"], [])
+        who = _claimers(ids, claim_facts, chats)
+        multi = []
+        for t in waiting_tasks:
+            people = who.get(t["task_id"]) or {}
+            if len(people) >= 2:
+                multi.append({**t, "claimers": len(people), "claimed_by": ", ".join(sorted(e or u for u, e in people.items()))})
+        multi.sort(key=lambda t: -t["total"])
+        pending = {"tasks": multi, "count": len(multi), "agent_runs": round(sum(t["agent_runs"] for t in multi), 2),
+                   "evals": round(sum(t["sandbox"] + t["portal"] for t in multi), 2), "partial": claim_facts is None}
 
     daily = []
     for d in range(start, stop, DAY):
@@ -297,6 +354,9 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
         # spend on tasks never submitted and quiet for LOST_IDLE_DAYS (None when the task-state query isn't set up)
         "lost": None if lost_tasks is None else {"idle_days": LOST_IDLE_DAYS, "agent_runs": add("lost_runs"), "evals": add("lost_evals"),
                                                  "tasks": lost_tasks, "reasons": lost_reasons, "waiting": lost_waiting},
+        # tasks not submitted yet, still in progress and claimed by 2+ people, with their spend in the range (None as above;
+        # partial = the CB tracker's claims haven't loaded, so only portal chats were counted)
+        "pending_multi": pending,
         "queries": {"facts": f"{config.REDASH_URL}/queries/{config.COST_FACTS_QUERY_ID}",
                     "states": f"{config.REDASH_URL}/queries/{config.COST_TASK_STATES_QUERY_ID}" if config.COST_TASK_STATES_QUERY_ID else ""},
     }

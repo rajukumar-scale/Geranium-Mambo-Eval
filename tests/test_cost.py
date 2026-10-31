@@ -96,7 +96,8 @@ class BuildTest(unittest.TestCase):
         # admins' runs never reach _lost (_portal leaves them out)
         portal = ({}, {}, {}, {}, {"billed": 0.0, "estimated": 0.0},
                   {"quiet": [(utc(2026, 10, 14) + 60, 6.0, "q@x.com")], "gone": []})
-        with mock.patch.object(cost, "_portal", lambda s, b, e: portal), mock.patch.object(cost.time, "time", lambda: now):
+        with mock.patch.object(cost, "_portal", lambda s, b, e: portal), mock.patch.object(cost.time, "time", lambda: now), \
+                mock.patch.object(cost, "_claim_sources", lambda ids: ([], [])):
             r = cost.build(facts, utc(2026, 10, 7), utc(2026, 10, 20), states=states)
             off = cost.build(facts, utc(2026, 10, 7), utc(2026, 10, 20))
         lost = r["lost"]
@@ -113,6 +114,8 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(day[utc(2026, 10, 14)]["lost_evals"], 6)
         self.assertAlmostEqual(sum(w["lost_runs"] + w["lost_evals"] for w in r["weeks"]), 11)
         self.assertIsNone(off["lost"])  # no task-state query: lost spend left out
+        self.assertEqual(r["pending_multi"]["tasks"], [])  # busy + held: nobody on record claimed them
+        self.assertIsNone(off["pending_multi"])
 
     def test_span(self):
         with mock.patch.object(cost.time, "time", lambda: utc(2026, 10, 28) + 100):

@@ -30,7 +30,9 @@ function viewOf(c) {
   const totals = tasks.map(t => t.total), cbDays = daily.reduce((n, d) => n + d.active_cbs, 0), total = daily.reduce((n, d) => n + d.total, 0);
   const lost = c.lost && { ...c.lost, total: lostOf(c.lost), tasks: c.lost.tasks.map(t => ({ ...t, total: rowTotal(t) })).filter(t => t.total > 0),
                            reasons: c.lost.reasons.map(r => ({ ...r, total: lostOf(r) })).filter(r => r.total > 0), waiting: { ...c.lost.waiting, total: lostOf(c.lost.waiting) } };
-  return { ...c, daily, tasks, people, lost, summary: { ...c.summary, total, per_task_median: median(totals),
+  const pendingTasks = c.pending_multi && c.pending_multi.tasks.map(t => ({ ...t, total: rowTotal(t) })).filter(t => t.total > 0);
+  const pending_multi = c.pending_multi && { ...c.pending_multi, tasks: pendingTasks, total: pendingTasks.reduce((n, t) => n + t.total, 0) };
+  return { ...c, daily, tasks, people, lost, pending_multi, summary: { ...c.summary, total, per_task_median: median(totals),
     per_task_mean: totals.length ? totals.reduce((a, b) => a + b, 0) / totals.length : null, per_cb_day: cbDays ? total / cbDays : null } };
 }
 // Lost spend (tasks never submitted, quiet for days) in the chosen view: task runs, evals (in-task sandbox + portal), or both.
@@ -119,6 +121,8 @@ function render() {
   $("#lost-card").classList.toggle("hidden", !c.lost);
   $("#losttasks-card").classList.toggle("hidden", !c.lost);
   if (c.lost) renderTable("losttasks");
+  $("#pending-card").classList.toggle("hidden", !c.pending_multi);
+  if (c.pending_multi) renderTable("pending");
   renderTable("tasks");
   renderTable("people");
   wireCharts();
@@ -132,7 +136,7 @@ function render() {
     submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is its task runs from when it started to the range's end, plus the portal reviews run on it.
     Contributors count only what falls inside the range. <b>Lost spend</b> is spend in the range on tasks that never got an L-1/L0 submission (by anyone) and have had
     no task runs or portal reviews for ${esc((c.lost || {}).idle_days || 3)} days and nobody holds a live claim on, split by where the task stands now (cancelled, claim dropped or expired, paused);
-    tasks still active (recent work or a live claim) aren't counted;
+    tasks still active (recent work or a live claim) aren't counted (the ones 2 or more people have claimed, not cancelled, are listed with their spend so far);
     contributors' work only (admin and @scale.com tests left out). Tasks are judged as they stand now, so a past day's figure can grow as its tasks go quiet. Platform task runs
     that never reached a submission can't be tied to a task, so they're not in it: they're the "not tied to a submission" share of task runs.
     ${q.states ? `Task states: <a href="${esc(q.states)}" target="_blank" rel="noopener">platform state per task</a>. ` : ""}Source: <a href="${esc(q.facts || "#")}" target="_blank" rel="noopener">every figure since Aug 1</a>,
@@ -451,6 +455,23 @@ const TABLES = {
       ["Total", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
     ],
   },
+  pending: {
+    title: "Not submitted yet, claimed by 2+ people",
+    sub: () => {
+      const p = C.shown.pending_multi;
+      return `${usd(p.total)} spent so far on ${fmtInt(p.tasks.length)} ${p.tasks.length === 1 ? "task" : "tasks"}. Tasks nobody has submitted yet that are still in progress `
+        + `(worked on in the last ${(C.shown.lost || {}).idle_days || 3} days or claimed now, not cancelled) and that 2 or more people have claimed. `
+        + `Spend so far = spend in the range.${p.partial ? " Claims data is still loading, so only portal chats are counted for now." : ""}`;
+    },
+    rows: () => C.shown.pending_multi.tasks, key: "total",
+    cols: [
+      ["Task", "task_id", r => `<span class="mono" title="${esc(r.task_id)}">${esc(r.task_id.slice(-6))}</span>`],
+      ["Claimed by", "claimers", r => `<span title="${esc(r.claimed_by)}">${fmtInt(r.claimers)}</span>`, true],
+      ["Spend so far", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+      ["Current holder", "holder", r => (r.live_claim ? esc(r.holder || "–") : `<span class="muted" title="Held last by ${esc(r.holder || "nobody")}">Nobody</span>`)],
+      ["Last activity", "last_activity", r => esc(longDay(r.last_activity))],
+    ],
+  },
   tasks: {
     title: "Cost per submitted task",
     sub: "Tasks a contributor submitted in the range, cost since each started. Task runs = runs whose IDs are in the task's submissions plus runs launched from the task itself (earlier sandbox-viewer runs can't be tied to a task); in-task sandbox and portal reviews are the evals.",
@@ -497,7 +518,7 @@ function renderTable(name, all = false) {
     sort.key === key ? (sort.dir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("");
   const body = shown.map(r => `<tr>${cols.map(([, , cell, num]) => `<td class="${num ? "num" : ""}">${cell(r)}</td>`).join("")}</tr>`).join("");
   $(`#${name}-card`).innerHTML = `<div class="cc-head"><div><div class="cc-title">${esc(t.title)} <span class="muted">· ${fmtInt(rows.length)}</span></div>
-    <div class="cc-sub">${esc(t.sub)}</div></div></div>
+    <div class="cc-sub">${esc(typeof t.sub === "function" ? t.sub() : t.sub)}</div></div></div>
     <div class="table-wrap"><table class="runs cost-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${cols.length}" class="muted">Nothing in this range.</td></tr>`}</tbody></table></div>
     ${rows.length > shown.length ? `<button class="ghost" data-all="${name}">Show all ${fmtInt(rows.length)}</button>` : ""}`;
   const card = $(`#${name}-card`);
