@@ -569,6 +569,7 @@ $("#logout").onclick = async () => { await api("/api/admin/logout", { method: "P
 $("#view-switch").addEventListener("click", async e => {
   const view = e.target.closest("[data-view]")?.dataset.view;
   if (view === "admin") location.href = "/admin";
+  if (view === "cbs") location.href = "/admin/cbs";
   if (view === "chat") {
     try { await api("/api/admin/open-chat", { json: {} }); location.href = "/"; }
     catch (err) { uiAlert("Couldn't open the chat view", err.message); }

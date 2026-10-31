@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Original Conference Eval Portal · CBs</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem("evp_theme") === "dark" ? "dark" : "light";</script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app" class="cost-app cbs-app">
+    <div class="topbar admin-top">
+      <div class="title">Original Conference Eval Portal</div>
+      <div class="view-switch" id="view-switch" role="group" aria-label="Switch page">
+        <button type="button" class="" data-view="chat">Chat view</button><button type="button" class="" data-view="admin">Admin</button><button type="button" class="hidden" data-view="cost">Cost</button><button type="button" class="on" data-view="cbs">CBs</button></div>
+      <div class="spacer"></div>
+      <button class="ghost" data-theme-toggle></button>
+      <button class="ghost" id="logout">Sign out</button>
+    </div>
+
+    <main class="cost-main">
+      <div class="cost-filters">
+        <h1 class="cbs-title">CB tracker <span class="muted">· Atlas Commercial L-1, tasks opened since Oct 13</span></h1>
+        <div class="spacer"></div>
+        <button id="refresh">Refresh now</button>
+        <span class="muted" id="asof"></span>
+      </div>
+      <div id="notes"></div>
+      <div class="tiles" id="tiles"></div>
+
+      <section class="cost-card" id="bench-card"></section>
+      <section class="cost-card" id="trend-card"></section>
+      <section class="cost-card" id="curve-card"></section>
+      <section class="cost-card" id="conv-card"></section>
+      <section class="cost-card" id="people-card"></section>
+
+      <p class="cost-foot muted" id="foot"></p>
+    </main>
+  </div>
+  <div class="sc-tip cbs-tip hidden" id="tip" role="status"></div>
+  <script src="/static/common.js"></script>
+  <script src="/static/cbs.js"></script>
+</body>
+</html>

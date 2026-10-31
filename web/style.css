@@ -548,3 +548,60 @@ button.danger-solid:hover { border-color: var(--ink); }
 .check-panel .ok { color: #1E6B34; } .check-panel .bad { color: #8A1C22; }
 .check-panel .diff { margin-top: 6px; display: grid; gap: 4px; font-size: 12px; overflow-wrap: anywhere; }
 .check-panel mark { background: #F6D365; }
+
+/* ---- CB tracker (/admin/cbs) ---- */
+/* Group colours: validated (dataviz validator) for adjacent-pair CVD and normal vision in both modes; the orange is
+   under 3:1 on the light surface, so every chart has direct labels and a table. */
+.cbs-app { --g-qma: #2e7d55; --g-trusted: #2a78d6; --g-non: #c98a2b; }
+:root[data-theme="dark"] .cbs-app { --g-qma: #45a674; --g-trusted: #3987e5; --g-non: #c0802a; }
+.cbs-app .sw.g-qma, .cbs-tip .sw.g-qma { background: var(--g-qma); } .cbs-app .line.g-qma { stroke: var(--g-qma); } .cbs-app .dot.g-qma { fill: var(--g-qma); }
+.cbs-app .sw.g-trusted, .cbs-tip .sw.g-trusted { background: var(--g-trusted); } .cbs-app .line.g-trusted { stroke: var(--g-trusted); } .cbs-app .dot.g-trusted { fill: var(--g-trusted); }
+.cbs-app .sw.g-non, .cbs-tip .sw.g-non { background: var(--g-non); } .cbs-app .line.g-non { stroke: var(--g-non); } .cbs-app .dot.g-non { fill: var(--g-non); }
+.cbs-tip { --g-qma: #2e7d55; --g-trusted: #2a78d6; --g-non: #c98a2b; position: absolute; z-index: 50; pointer-events: none; }
+:root[data-theme="dark"] .cbs-tip { --g-qma: #45a674; --g-trusted: #3987e5; --g-non: #c0802a; }
+.cbs-tip .tip-head { font-weight: 500; margin-bottom: 4px; }
+.cbs-app .sw, .cbs-tip .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: baseline; }
+.cbs-app .sw.refsw { background: none; border-top: 2px dashed var(--muted); border-radius: 0; height: 0; width: 14px; vertical-align: middle; }
+.cbs-title { font-size: 18px; font-weight: 500; margin: 0; }
+.cbs-title .muted { font-weight: 400; font-size: 14px; }
+.cbs-tile { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.cbs-tile.on { outline: 2px solid var(--ink); outline-offset: -2px; }
+.st { display: inline-block; font-size: 12px; line-height: 1.6; border-radius: 9999px; padding: 0 8px; border: 1px solid var(--line); white-space: nowrap; color: var(--ink); background: var(--grey-95); }
+.st-offboard { color: var(--error-ink); background: var(--fail-soft); border-color: rgba(217, 83, 88, .35); }
+.st-training { background: #fbefd2; border-color: #e6c46e; color: #6b4a00; }
+:root[data-theme="dark"] .st-training { background: #3d3216; border-color: #8a6d1f; color: #f0d48a; }
+.st-efficient { background: #e3f3e6; border-color: #9ccfa6; color: #1f5a33; }
+:root[data-theme="dark"] .st-efficient { background: #1d3524; border-color: #3f7a4f; color: #a8dcb3; }
+.cbs-bars { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; font-size: 13px; }
+.cbs-bars p { margin: 4px 0 0; font-size: 12px; }
+.cbs-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.cbs-chart { margin: 0; }
+.cbs-chart figcaption { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
+.cbs-chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.cbs-chart .grid { stroke: var(--line); stroke-width: 1; }
+.cbs-chart .refline { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.cbs-chart .axis { fill: var(--muted); font-size: 10px; }
+.cbs-chart .endlabel { fill: var(--ink); font-size: 11px; }
+.cbs-chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.cbs-chart .dot { stroke: var(--panel); stroke-width: 2; }
+.cbs-chart .hit { fill: transparent; cursor: crosshair; outline: none; }
+.cbs-chart .hit:focus-visible { fill: var(--grey-95); fill-opacity: .5; }
+.cbs-app .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.cbs-callout { font-size: 15px; margin: 4px 0 12px; }
+.funnel { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px; }
+.funnel-row { display: grid; grid-template-columns: 140px 1fr 260px; gap: 12px; align-items: center; font-size: 13px; }
+.funnel-track { background: var(--grey-95); border-radius: 4px; height: 18px; }
+.funnel-bar { background: var(--g-trusted); height: 100%; border-radius: 4px; }
+.cbs-people td { vertical-align: top; }
+.cbs-row { cursor: pointer; }
+.cbs-row:hover td { background: var(--grey-95); }
+.cbs-detail > td { background: var(--grey-95); padding: 8px 12px 14px; }
+.cbs-app .small { font-size: 12px; }
+.cbs-app button.small { padding: 3px 10px; font-size: 12px; }
+.cbs-app .nowrap { white-space: nowrap; }
+#search { min-width: 220px; }
+@media (max-width: 720px) { .funnel-row { grid-template-columns: 1fr; } }
+.cbs-app .cost-table th, .cbs-app .cost-table td { padding: 5px 10px; }
+.cbs-app .cost-table thead th { font-weight: 500; color: var(--muted); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.cbs-app .cost-table tbody td, .cbs-app .cost-table tbody th { border-bottom: 1px solid var(--line); }
+.cbs-app .cost-table th[scope="row"] { text-align: left; font-weight: 500; white-space: nowrap; }

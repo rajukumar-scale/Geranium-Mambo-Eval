@@ -49,6 +49,7 @@ $("#invite-form").addEventListener("submit", async e => {
 // ---- switch to the chat page (the selected chat, else the latest), signed in as this admin ----
 $("#view-switch").addEventListener("click", async e => {
   if (e.target.closest("[data-view]")?.dataset.view === "cost") { location.href = "/admin/cost"; return; }
+  if (e.target.closest("[data-view]")?.dataset.view === "cbs") { location.href = "/admin/cbs"; return; }
   if (e.target.closest("[data-view]")?.dataset.view !== "chat") return;
   try {
     await api("/api/admin/open-chat", { json: { attempt_id: S.selected || "" } });

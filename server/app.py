@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, config, cost, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -71,6 +71,7 @@ async def startup():
     asyncio.create_task(status.loop())
     asyncio.create_task(linter_alerts.loop())
     asyncio.create_task(cost.loop())
+    asyncio.create_task(cbs.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
 
 
@@ -288,6 +289,15 @@ def cost_page(request: Request):
     if not session or admin_role(session.get("email")) != "owner":
         return RedirectResponse("/admin", status_code=303)
     return FileResponse(WEB / "cost.html", headers=NO_CACHE)
+
+
+@app.get("/admin/cbs")
+def cbs_page(request: Request):
+    """The CB tracker: any admin."""
+    session = auth.unsign(request.cookies.get(auth.ADMIN_COOKIE, ""), 12 * 3600)
+    if not session or not admin_role(session.get("email")):
+        return RedirectResponse("/admin", status_code=303)
+    return FileResponse(WEB / "cbs.html", headers=NO_CACHE)
 
 
 # ---- status page (public, like status.claude.com; no names, emails or task IDs) ----
@@ -1536,6 +1546,34 @@ async def admin_cost(request: Request, days: int = 14, start: str = "", end: str
     current_admin(request, owner=True)
     key, report = await asyncio.gather(budget.status(force=bool(refresh)), cost.report(days, start, end, force=bool(refresh)))
     return {"budget": key, "cost": report}
+
+
+@app.get("/api/admin/cbs")
+async def admin_cbs(request: Request, refresh: int = 0):
+    """The CB tracker: benchmarks per group, learning curves, trusted conversion and each contributor's status."""
+    admin = current_admin(request)
+    return {**await cbs.get(force=bool(refresh)), "me": {"email": admin["email"], "role": admin["role"]}}
+
+
+class TrainedBody(BaseModel):
+    user_id: str
+    email: str = ""
+    note: str = ""
+    undo: bool = False
+
+
+@app.post("/api/admin/cbs/trained")
+def admin_cbs_trained(body: TrainedBody, request: Request):
+    """Record that a contributor was trained (or take it back). Offboarding only follows lagging after training."""
+    admin = current_admin(request)
+    if not re.fullmatch(r"[0-9a-f]{24}", body.user_id):
+        raise HTTPException(400, "That isn't an Outlier user ID.")
+    if body.undo:
+        cbs.unmark_trained(body.user_id)
+    else:
+        cbs.mark_trained(body.user_id, body.email, admin["email"], body.note)
+    log.info("%s %s CB %s as trained", admin["email"], "unmarked" if body.undo else "marked", body.user_id)
+    return {"ok": True}
 
 
 @app.get("/api/admin/budget")
