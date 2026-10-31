@@ -569,7 +569,7 @@ class Runner:
         db.update("runs", "id", run_id, proxy_token=token, boat_phase="setup")
         env = {k: v for k, v in self._env(token, "/home/runner").items() if k not in ("PATH", "HOME")}
         env["ANTHROPIC_BASE_URL"] = config.PROXY_PUBLIC_URL
-        box = None
+        box = payload = None
         try:
             outcome["before"] = workspace.report_snapshot(attempt)
             run = db.get_run(run_id)
@@ -622,6 +622,8 @@ class Runner:
             db.update("runs", "id", run_id, boat_phase="started", review_started_at=time.time())
             self._push_activity(run_id, attempt, "▶️ Review started")
         except Exception as error:  # noqa: BLE001 - surface as a failed run, never leak the box
+            if payload:  # a machine that never started or a cancel: the upload package is no use now (8.6 GB piled up by 10-31)
+                payload.unlink(missing_ok=True)
             if not self.cancel_requested(run_id):
                 log.exception("boat run %s failed", run_id)
                 outcome["stderr_tail"] = f"{outcome.get('stderr_tail', '')}\n{error}"

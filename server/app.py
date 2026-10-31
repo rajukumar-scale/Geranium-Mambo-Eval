@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, housekeeping, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -72,6 +72,7 @@ async def startup():
     asyncio.create_task(linter_alerts.loop())
     asyncio.create_task(cost.loop())
     asyncio.create_task(cbs.loop())
+    asyncio.create_task(housekeeping.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
 
 
@@ -1609,9 +1610,12 @@ def admin_run_log(run_id: str, request: Request):
     if not run:
         raise HTTPException(404, "No such run.")
     path = workspace.attempt_dir(run["attempt_id"]) / "logs" / f"{run_id}.jsonl"
-    if not path.is_file():
-        raise HTTPException(404, "No log for this run.")
-    return FileResponse(path, media_type="application/x-ndjson", filename=f"run-{run_id}.jsonl")
+    if path.is_file():
+        return FileResponse(path, media_type="application/x-ndjson", filename=f"run-{run_id}.jsonl")
+    packed = path.with_name(path.name + ".gz")  # gzipped by housekeeping LOG_GZIP_DAYS after the run
+    if packed.is_file():
+        return FileResponse(packed, media_type="application/gzip", filename=f"run-{run_id}.jsonl.gz")
+    raise HTTPException(404, "No log for this run.")
 
 
 @app.get("/api/admin/reports/{attempt_id}/{name}")
