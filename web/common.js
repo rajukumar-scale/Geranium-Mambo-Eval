@@ -212,6 +212,29 @@ function shortFp(fp) {
   const text = fp.match(/^(\d+) chars — (.*)$/s);
   return text ? `${text[1]} chars - ${cut(+text[1], text[2])}` : fp;
 }
+// The taxonomy's reader (GPT-4o) drops the hyphens a code starts with ("5446 chars - -- 1 ..." read as
+// "5446 chars - 1 ...": its own rule folds "- --" into one separator), drops the space in "}' )" and reads O as 0.
+// Spelling the first and last characters out under the code, by name and symbol, fixed most of it: on the 21
+// injection passes it misread (2026-10-30), the real reader read 39 of 41 right with these lines, 25 of 42 without.
+const CHAR_NAMES = { "-": "hyphen", "'": "apostrophe", '"': "double quote", "`": "backtick", "(": "left parenthesis",
+  ")": "right parenthesis", "{": "left brace", "}": "right brace", "[": "left bracket", "]": "right bracket",
+  "<": "less-than", ">": "greater-than", ",": "comma", ".": "period", ";": "semicolon", ":": "colon", "_": "underscore",
+  "/": "slash", "\\": "backslash", "|": "pipe", "=": "equals", "+": "plus", "*": "asterisk", "%": "percent",
+  "$": "dollar", "#": "hash", "@": "at sign", "&": "ampersand", "!": "exclamation mark", "?": "question mark",
+  "~": "tilde", "^": "caret" };
+function spellChars(text) {
+  return Array.from(text).map(ch => ch === " " ? "space" : CHAR_NAMES[ch] ? `${CHAR_NAMES[ch]} (${ch})`
+    : /[0-9]/.test(ch) ? `digit ${ch}` : /[A-Z]/.test(ch) ? `capital letter ${ch}` : /[a-z]/.test(ch) ? `small letter ${ch}`
+    : ch).join(", ");
+}
+function spelledCode(code) {
+  if (!code || code.startsWith("(empty")) return [];
+  const count = t => Array.from(t).length;
+  const cut = code.match(/^.*? - (.*?) \.\.\. (.*)$/s);
+  if (cut) return [`First ${count(cut[1])} characters: ${spellChars(cut[1])}`, `Last ${count(cut[2])} characters: ${spellChars(cut[2])}`];
+  const whole = code.match(/^.*? - (.*)$/s);
+  return [`${whole ? "Characters after the hyphen" : "Spelled out"}: ${spellChars(whole ? whole[1] : code)}`];
+}
 function rubricWeights(fp) {
   const rubric = (fp || "").match(RUBRIC_FP);
   return rubric ? rubric[3] : "";
@@ -249,7 +272,8 @@ function proofHtml(p, opts = {}) {
     </div>
     ${staleBand(p)}
     ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as the taxonomy shows it</div>
-      <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div></div>` : ""}
+      <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div>
+      ${spelledCode(shortFp(p.fingerprint)).map(l => `<div class="spell">${esc(l)}</div>`).join("")}</div>` : ""}
     <div class="grid ids">
       <div><div class="k">Attempt ID</div><div class="v">${esc(p.attempt_id)}</div></div>
       <div><div class="k">Outlier ID</div><div class="v">${esc(p.user_id)}</div></div>
@@ -327,7 +351,7 @@ function showProof(p) {
 // screen and the crop, and small text is where the taxonomy's GPT-4o reader misread the code (a zoomed-in
 // screenshot of the same pass went through, 2026-10-27). So the portal draws the pass itself: the green header the
 // reader looks for (verdict badge, "/stage · Stage review · COMPLETE"), then the 🔏 verification code large and in
-// plain characters, then the details. Before the download it's read with the taxonomy's own reader and prompt
+// plain characters with its first and last characters spelled out (spelledCode), then the details. Before the download it's read with the taxonomy's own reader and prompt
 // (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
 const COPYABLE = new Set(["injection", "prompt", "oe"]);
 const CHECKABLE = new Set(["injection", "prompt", "oe", "rubric"]);
@@ -364,11 +388,13 @@ async function passImage(p, codeSize) {
   const codeLines = wrapCanvasText(measure, code, inner);
   measure.font = `24px ${sans}`;
   const staleLines = p.outdated ? wrapCanvasText(measure, p.outdated.message || "", inner) : [];
+  const spellLines = spelledCode(code).flatMap(l => wrapCanvasText(measure, l, inner));
   const details = [["Attempt ID", p.attempt_id], ["Outlier ID", p.user_id], ["User", p.user_email],
     ["Completed", fmtUTC(p.finished_at)], ["Report SHA-256", p.report_sha256]].filter(d => d[1]);
   const headH = 250 + (p.checked_during ? 34 : 0) + (p.admin_override ? 34 : 0);
   const staleH = staleLines.length ? 70 + staleLines.length * 32 : 0;
-  const codeH = 96 + codeLines.length * Math.round(codeSize * 1.3);
+  const spellAt = 96 + codeLines.length * Math.round(codeSize * 1.3);
+  const codeH = spellAt + (spellLines.length ? spellLines.length * 34 + 8 : 0);
   const H = headH + staleH + codeH + 60 + details.length * 40 + 70;
   const canvas = document.createElement("canvas");
   canvas.width = W; canvas.height = H;
@@ -404,6 +430,8 @@ async function passImage(p, codeSize) {
   ctx.fillText(p.fingerprint ? `🔏 VERIFICATION CODE · THE ${stage.toUpperCase()} FINGERPRINT, AS THE TAXONOMY SHOWS IT` : "VERIFICATION CODE", pad, y + 52);
   ctx.fillStyle = "#000000"; ctx.font = codeFont;
   codeLines.forEach((l, i) => ctx.fillText(l, pad, y + 72 + codeSize + i * Math.round(codeSize * 1.3)));
+  ctx.fillStyle = "#333333"; ctx.font = `24px ${sans}`;
+  spellLines.forEach((l, i) => ctx.fillText(l, pad, y + spellAt + 4 + i * 34));
   y += codeH;
   ctx.fillStyle = "#EAEAEA"; ctx.fillRect(0, y, W, 2);
   // details

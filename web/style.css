@@ -233,6 +233,7 @@ button.danger-solid:hover { border-color: var(--ink); }
 .proof .fpband { padding: 16px 22px 18px; border-bottom: 1px solid var(--line); background: #F6FAF7; }
 .proof .fpband .k { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 5px; }
 .proof .fpband .fp { white-space: pre-wrap; font-family: var(--mono); font-size: 34px; line-height: 1.3; color: #000; overflow-wrap: break-word; letter-spacing: .01em; }
+.proof .fpband .spell { font-size: 14px; color: #333; margin-top: 2px; }
 .guide-sample .fpband { padding: 10px 14px; }
 .proof .wband { padding: 8px 16px; border-bottom: 1px solid var(--line); }
 .proof .wband .k { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 3px; }
