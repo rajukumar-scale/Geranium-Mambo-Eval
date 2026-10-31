@@ -441,6 +441,8 @@ button.danger-solid:hover { border-color: var(--ink); }
 .legend .sw.swl { height: 2px; width: 16px; border-radius: 1px; }
 .table-wrap { overflow-x: auto; }
 .cost-table { font-size: 13px; }
+.split-table .split-label { font-weight: 500; white-space: nowrap; }
+.split-table .split-total td { font-weight: 600; border-top: 1px solid var(--line); }
 .cost-table th.num, .cost-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .th-sort { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
 .th-sort:hover { color: var(--ink); border: 0; }

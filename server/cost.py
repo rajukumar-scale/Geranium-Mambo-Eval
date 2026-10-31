@@ -3,32 +3,45 @@
 Spend comes from LiteLLM's request log and SMIG's usage events (Snowflake, through saved Redash queries; since ~2026-10-16
 most calls are routed through SMIG and never reach LiteLLM), on every key, for requests tagged with the project. The platform's task runs (Agent Runner, pre-check and verifier runs on the HG4 env, run IDs
 task-snapshot-hg4-...) bill pub-mcp-commercial and the agent-env keys; a run counts for a task and contributor when its
-run ID appears in one of their submitted attempts (re-runs and unsubmitted work can't be attributed). The old in-task
+run ID appears in one of their submitted attempts, or when it was launched from the task's pipeline node (aect-<node>,
+counted for the node's current worker); re-runs and other unsubmitted work can't be attributed. The old in-task
 sandbox (chat-lite-sandbox, on this portal's key) is tagged with task and contributor. The hint pipeline (autohint-...)
 is shown on its own. Other teams' work that carries the project tag (coopbench, ckpteval...) is left out. This portal's
 reviews come from its own run records, at SMIG's billed cost for runs the proxy tagged with their runId (from 2026-10-26
 20:00 UTC) and at the list-price estimate before that; the page reports how many recent task runs have no logged spend.
+A portal review counts for whoever ran it (its actor), or the chat's holder when the run has no actor.
 
 A "submitted task" is a contributor's submission at review level -1 or 0 in the Atlas Commercial project (the bot
-and @scale.com accounts excluded). Its cost is its attributable task runs since it started, plus the portal reviews.
+and @scale.com accounts excluded). Its cost is what the people who submitted it spent on it since it started, up to the
+range's end (their task runs, in-task sandbox and portal reviews); what earlier holders spent is shown next to it as
+"lost before".
 
 The queries take about a minute, longer than a proxy waits, so one query returns every fact since 2026-08-01 (per day,
 per task x contributor x day, and each submission). It's refreshed in the background every 15 minutes and kept on disk
 across restarts; any date range is then cut from it at once.
 
-Lost spend is what went into tasks that never reached an L-1/L0 submission (by anyone) and have had no activity for
-LOST_IDLE_DAYS (no task runs, no portal reviews) and that nobody holds a live claim on. A second, small query gives each
-task's platform state, which says why (cancelled, claim dropped or expired, paused). Only spend tied to a task can count: portal
-reviews, the in-task sandbox and runs launched from the task. Platform task runs that never made it into a submission
-can't be tied to any task, so they stay in the "not tied to a submission" figure rather than here.
+Lost spend is counted per person and task (Evan, 2026-10-31). Each person's spend on a task is:
+- submitted: they submitted that task at L-1/L0 at some point (also if they claimed it again later and submitted then,
+  so their earlier spend fed the submission);
+- in progress: they hold a live claim on it now (a pending L-1 node of theirs that hasn't run out, or a paused one);
+- internal: an @scale.com account, an internal worker source (queue_manager, Scale API) or an admin's portal run;
+- lost: anything else - their claim ended (released, expired, taken away, task cancelled) without them submitting,
+  counted at once and even if someone else submits the task later. Why: "Task cancelled" when the task is cancelled,
+  otherwise "Claim released or expired".
+Claims come from the CB tracker's cached facts (L-1 nodes and incomplete attempts since 2026-10-01). With no node of
+that person on the task (older work), a second, small query's task state stands in: they're in progress if the task
+has a live claim, or is paused, and they're its last worker. Until the CB tracker's facts have loaded only that
+fallback is used and the figures say they're partial. Lost spend is kept by the day it was spent.
 
-Tasks not submitted yet but still active (the "waiting" ones above), not cancelled, that 2 or more people have claimed
-are listed on their own with their spend so far (in the range, as above). Claimers are the distinct people on the task's
-L-1 claims and incomplete attempts in the CB tracker's cached facts (since 2026-10-01) plus the portal's chat holders
-on it (a re-served node overwrites its WORKER); internal accounts (@scale.com, queue_manager, Scale API) don't count.
-Until the CB tracker's facts have loaded, only the portal's chats count and the list says it's partial.
+The range's total splits into parts that add up to it exactly, in each view (task runs vs evals): spent by people who
+submitted, lost, in progress, internal tests, and what can't be tied to a task (task runs never seen in a submitted
+attempt, the hint pipeline, untagged in-task sandbox calls and portal runs with no task).
+
+Tasks not submitted yet (by anyone), not cancelled, with spend in the range that 2 or more people have claimed are
+listed on their own with their spend in the range, how much of it is lost and what the current holder spent. Claimers
+are the distinct people on the task's L-1 claims and incomplete attempts in the CB tracker's cached facts (since
+2026-10-01) plus the portal's chat holders on it (a re-served node overwrites its WORKER); internal accounts don't count.
 """
-
 import asyncio
 import calendar
 import json
@@ -45,8 +58,9 @@ REFRESH_SEC = 900
 RETRY_SEC = 120  # after a failed refresh, wait this long before trying again
 LOOKUP_TIMEOUT = 300  # the query scans LiteLLM + SMIG; Redash can also queue it behind other work
 COVERAGE_DAYS = 5  # how far back from the range's end the "task runs not logged" check looks
-LOST_IDLE_DAYS = 3  # a task never submitted and quiet this long is lost (Evan, 2026-10-29); newer ones are still in progress
-LOST_REASONS = {"cancelled": "Task cancelled", "dropped": "Claim dropped or expired", "paused": "Paused", "missing": "Not found on the platform"}
+LOST_REASONS = {"cancelled": "Task cancelled", "released": "Claim released or expired"}
+INTERNAL_SOURCES = ("queue_manager", "Scale API")
+PARTS = ("submitted", "lost", "in_progress", "internal", "untied")  # the total, split (see the module docstring)
 CACHE_FILE = config.DATA_DIR / "cost_facts.json"
 _facts = {"at": 0.0, "rows": None, "billed": [], "states": [], "task": None, "error": None, "failed_at": 0.0}
 
@@ -56,30 +70,32 @@ def _rows(rows):
 
 
 def _portal(days_start, billed=None, days_end=None):
-    """This portal's run costs: per UTC day in the range (and who ran them), per task (up to the range's end) and per
-    contributor (in the range). A run SMIG billed (tagged with its runId) counts at that cost; older runs at the list-price
+    """This portal's run costs: per UTC day in the range and per contributor in it (and who was active each day), plus
+    every run up to the range's end with its task and person (the actor, or the chat's holder when there's no actor;
+    admins' runs are marked). A run SMIG billed (tagged with its runId) counts at that cost; older runs at the list-price
     estimate, which runs ~40% above what's billed. Also returns how much of the range is billed vs estimated."""
     stop = (days_end + DAY) if days_end is not None else float("inf")
     billed = billed or {}
-    per_day, per_task, per_person, people_day, task_runs = {}, {}, {}, {}, {}
+    per_day, per_person, people_day, runs = {}, {}, {}, []
     basis = {"billed": 0.0, "estimated": 0.0}
-    for run in db.q("select r.id, r.cost_estimate, r.models, r.created_at, coalesce(r.actor_admin, 0) by_admin, r.actor_user_id, r.actor_email, c.task_id "
+    for run in db.q("select r.id, r.cost_estimate, r.models, r.created_at, coalesce(r.actor_admin, 0) by_admin, r.actor_user_id, r.actor_email, "
+                    "c.task_id, c.user_id chat_user, c.email chat_email "
                     "from runs r left join chats c on c.attempt_id = r.attempt_id where coalesce(r.loadtest, 0) = 0"):
         usd = billed[run["id"]] if run["id"] in billed else spend.run_spend(run)
         if not usd or run["created_at"] >= stop:
             continue
+        admin = bool(run["by_admin"])
+        user = None if admin else (run["actor_user_id"] or run["chat_user"])
+        email = ((run["actor_email"] if run["actor_user_id"] or admin else run["chat_email"]) or "").split("+outlier")[0].lower()
+        runs.append({"at": run["created_at"], "usd": usd, "task": run["task_id"], "user": user, "email": email, "admin": admin})
         if run["created_at"] >= days_start:
             basis["billed" if run["id"] in billed else "estimated"] += usd
-        per_task[run["task_id"]] = per_task.get(run["task_id"], 0) + usd
-        if run["created_at"] >= days_start:
             day = int(run["created_at"] // DAY * DAY)
             per_day[day] = per_day.get(day, 0) + usd
-            if not run["by_admin"] and run["actor_user_id"]:
-                per_person[run["actor_user_id"]] = per_person.get(run["actor_user_id"], 0) + usd
-                people_day.setdefault(day, set()).add(run["actor_user_id"])
-        if not run["by_admin"] and run["task_id"]:  # contributors' reviews, for lost spend (admins' tests aren't lost work)
-            task_runs.setdefault(run["task_id"], []).append((run["created_at"], usd, (run["actor_email"] or "").split("+outlier")[0]))
-    return per_day, per_task, per_person, people_day, basis, task_runs
+            if user:
+                per_person[user] = per_person.get(user, 0) + usd
+                people_day.setdefault(day, set()).add(user)
+    return per_day, per_person, people_day, basis, runs
 
 
 def _period_start(day, period):
@@ -100,76 +116,108 @@ def _period_end(start, period):
     return calendar.timegm((t.tm_year + t.tm_mon // 12, t.tm_mon % 12 + 1, 1, 0, 0, 0))
 
 
-def _lost(tcd, rows, task_runs, states, start, stop, now):
-    """Spend in the range on tasks that were never submitted, have been quiet for LOST_IDLE_DAYS and aren't claimed, per day
-    and per task, with why (from the task's platform state now); and the same for tasks not submitted yet but still active
-    (recent work or a live claim), which isn't counted: in total, and per task (cancelled ones left out).
-    Tasks are classified as they stand now, so a past day's figure grows as its tasks go quiet."""
+def _claims(facts):
+    """From the CB tracker's facts: people {id: user row}, L-1 nodes per (task, person), when each person's incomplete
+    attempts on a task were made, and their L-1 submits."""
+    users, nodes, incomplete, submits = {}, {}, {}, set()
+    for f in facts or ():
+        f = {k.lower(): v for k, v in f.items()}
+        key = (f.get("task"), f.get("worker"))
+        if f["kind"] == "user" and f.get("worker"):
+            users[f["worker"]] = f
+        elif f["kind"] == "node" and f.get("worker"):
+            nodes.setdefault(key, []).append(f)
+        elif f["kind"] == "incomplete" and f.get("worker"):
+            incomplete[key] = max(incomplete.get(key, 0), int(f.get("t1") or 0))
+        elif f["kind"] == "submit" and f.get("worker"):
+            submits.add(key)
+    return users, nodes, incomplete, submits
+
+
+def _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop, now):
+    """Each person's spend on each task, classified (see the module docstring): {(task, person id): row}, plus what
+    can't be tied to a task or is an admin's test (in the range). A row has the range's spend (agent_runs / sandbox /
+    portal, and per day), everything up to the range's end ("upto"), its status and, when lost, why and when the claim
+    ended. Person id "" = a portal run on a task with no actor and no chat holder."""
     num = lambda r, k: float(r.get(k) or 0)  # noqa: E731
-    state = {r["task"]: r for r in _rows(states) if r.get("task")}
-    submitted = {r["task"] for r in rows if r["kind"] == "sub"} | {t for t, r in state.items() if int(r.get("submitted") or 0)}
-    per = {}
-    def task(t):
-        return per.setdefault(t, {"days": {}, "last": 0, "who": set(), "agent_runs": 0.0, "sandbox": 0.0, "portal": 0.0})
-    for r in tcd:  # contributors' task runs and in-task sandbox (@scale.com accounts' tests left out)
-        if not r.get("task") or r["task"] in submitted or "@scale.com" in (r.get("email") or ""):
+    state = {r["task"]: r for r in _rows(states or ()) if r.get("task")}
+    users, nodes, incomplete, cb_submits = _claims(claim_facts)
+    submitted = {(r["task"], r["cb"]) for r in all_subs} | cb_submits
+    pairs, emails = {}, {}
+    other = {"untied_runs": 0.0, "untied_sandbox": 0.0, "untied_portal": 0.0, "admin_portal": 0.0}
+
+    def pair(task, uid, email):
+        p = pairs.setdefault((task, uid), {"task_id": task, "user_id": uid, "agent_runs": 0.0, "sandbox": 0.0, "portal": 0.0,
+                                            "upto": [0.0, 0.0, 0.0], "days": {}, "last": 0, "seen": 0})
+        if email:
+            emails.setdefault(uid, set()).add(email.lower())
+        return p
+    for r in tcd:
+        t = int(r["t"])
+        if t >= stop:
             continue
-        p, t = task(r["task"]), int(r["t"])
-        p["last"] = max(p["last"], t + DAY)  # a day's spend could be as late as its end
-        if start <= t < stop:
+        runs, sandbox = num(r, "runs"), num(r, "sandbox")
+        if not r.get("task"):  # a contributor's sandbox call with no task on it
+            if t >= start:
+                other["untied_runs"] += runs
+                other["untied_sandbox"] += sandbox
+            continue
+        p = pair(r["task"], r.get("cb") or "", r.get("email"))
+        p["upto"][0] += runs
+        p["upto"][1] += sandbox
+        p["last"] = max(p["last"], min(t + DAY, int(now)))  # a day's spend could be as late as its end
+        p["seen"] = max(p["seen"], t)  # the day itself, for "last seen"
+        if t >= start:
+            p["agent_runs"] += runs
+            p["sandbox"] += sandbox
             day = p["days"].setdefault(t, [0.0, 0.0])
-            day[0] += num(r, "runs")
-            day[1] += num(r, "sandbox")
-            p["agent_runs"] += num(r, "runs")
-            p["sandbox"] += num(r, "sandbox")
-            if r.get("email"):
-                p["who"].add(r["email"])
-    for t, runs in task_runs.items():
-        if t in submitted:
+            day[0] += runs
+            day[1] += sandbox
+    for run in portal_runs:
+        at, usd = run["at"], run["usd"]
+        if run["admin"] or not run["task"]:
+            if at >= start:
+                other["admin_portal" if run["admin"] else "untied_portal"] += usd
             continue
-        for at, usd, email in runs:
-            p = task(t)
-            p["last"] = max(p["last"], at)
-            if start <= at < stop:
-                p["days"].setdefault(int(at // DAY * DAY), [0.0, 0.0])[1] += usd
-                p["portal"] += usd
-                if email:
-                    p["who"].add(email)
-    per_day, tasks, waiting, waiting_tasks = {}, [], {"tasks": 0, "agent_runs": 0.0, "evals": 0.0}, []
-    for t, p in per.items():
-        if not p["days"]:
-            continue
-        s = state.get(t) or {}
-        last = max(p["last"], int(s.get("last_activity") or 0))
-        # still active: worked on lately, or someone still holds the claim (they may yet submit) - not counted (Evan, 10-30)
-        if now - last < LOST_IDLE_DAYS * DAY or int(s.get("live_claim") or 0):
-            waiting["tasks"] += 1
-            waiting["agent_runs"] += p["agent_runs"]
-            waiting["evals"] += p["sandbox"] + p["portal"]
-            if (s.get("task_status") or "") != "canceled":
-                waiting_tasks.append({"task_id": t, "holder": s.get("last_worker_email") or "", "live_claim": bool(int(s.get("live_claim") or 0)),
-                                      "contributors": ", ".join(sorted(p["who"])), "last_activity": last,
-                                      "agent_runs": round(p["agent_runs"], 2), "sandbox": round(p["sandbox"], 2), "portal": round(p["portal"], 2),
-                                      "total": round(p["agent_runs"] + p["sandbox"] + p["portal"], 2)})
-            continue
-        reason = ("missing" if not s else "cancelled" if (s.get("task_status") or "") == "canceled" else "paused" if int(s.get("paused") or 0) and not int(s.get("pending") or 0) else "dropped")
-        for d, (runs_usd, evals_usd) in p["days"].items():
-            day = per_day.setdefault(d, [0.0, 0.0])
-            day[0] += runs_usd
-            day[1] += evals_usd
-        tasks.append({"task_id": t, "reason": reason, "reason_label": LOST_REASONS[reason], "cancel_reason": s.get("cancel_reason") or "",
-                      "holder": s.get("last_worker_email") or "", "contributors": ", ".join(sorted(p["who"])), "last_activity": last,
-                      "agent_runs": round(p["agent_runs"], 2), "sandbox": round(p["sandbox"], 2), "portal": round(p["portal"], 2),
-                      "total": round(p["agent_runs"] + p["sandbox"] + p["portal"], 2)})
-    tasks.sort(key=lambda t: -t["total"])
-    reasons = []
-    for key, label in LOST_REASONS.items():
-        mine = [t for t in tasks if t["reason"] == key]
-        if mine:
-            reasons.append({"reason": key, "label": label, "tasks": len(mine), "agent_runs": round(sum(t["agent_runs"] for t in mine), 2),
-                            "evals": round(sum(t["sandbox"] + t["portal"] for t in mine), 2)})
-    waiting.update(agent_runs=round(waiting["agent_runs"], 2), evals=round(waiting["evals"], 2))
-    return per_day, tasks, reasons, waiting, waiting_tasks
+        p = pair(run["task"], run["user"] or "", run["email"])
+        p["upto"][2] += usd
+        p["last"] = max(p["last"], int(at))
+        p["seen"] = max(p["seen"], int(at))
+        if at >= start:
+            p["portal"] += usd
+            p["days"].setdefault(int(at // DAY * DAY), [0.0, 0.0])[1] += usd
+
+    def live(task, uid, email):
+        mine = nodes.get((task, uid))
+        if mine:  # their L-1 nodes on it: a pending one that hasn't run out, or a paused one
+            return any(n.get("status") == "paused" or (n.get("status") == "pending" and int(n.get("t2") or 0) > now) for n in mine)
+        s = state.get(task) or {}  # no node of theirs on record: the task's state, if they're its last worker
+        held = int(s.get("live_claim") or 0) or (int(s.get("paused") or 0) and not int(s.get("pending") or 0))
+        return bool(held) and (not uid or s.get("last_worker") == uid or bool(email and s.get("last_worker_email") == email))
+
+    for (task, uid), p in pairs.items():
+        u = users.get(uid) or {}
+        mine = emails.get(uid, set()) | ({u["email"].split("+outlier")[0].lower()} if u.get("email") else set())
+        email = sorted(mine, key=lambda e: ("+" in e, e))[0] if mine else ""
+        s = state.get(task) or {}
+        p["email"] = email
+        if uid and (u.get("source") in INTERNAL_SOURCES or any("@scale.com" in e for e in mine)):
+            p["status"] = "internal"
+        elif uid and (task, uid) in submitted:
+            p["status"] = "submitted"
+        elif live(task, uid, email):
+            p["status"] = "in_progress"
+        else:
+            p["status"] = "lost"
+            p["reason"] = "cancelled" if (s.get("task_status") or "") == "canceled" else "released"
+            expired = [int(n["t2"]) for n in nodes.get((task, uid), ()) if n.get("t2") and int(n["t2"]) <= now]
+            if incomplete.get((task, uid)):
+                p["ended"], p["ended_how"] = incomplete[(task, uid)], "ended"
+            elif expired:
+                p["ended"], p["ended_how"] = max(expired), "expired"
+            else:
+                p["ended"], p["ended_how"] = p["seen"], "last seen"
+    return pairs, other
 
 
 def _claim_sources(task_ids):
@@ -206,37 +254,47 @@ def _claimers(task_ids, facts, chats):
 
 def build(facts, start, end, billed_rows=(), days=None, states=None):
     """The report for UTC days start..end (epoch seconds of each day's midnight), cut from the facts query's rows."""
-    today = int(time.time() // DAY * DAY)
+    now = time.time()
+    today = int(now // DAY * DAY)
     billed = {r["run_id"]: float(r.get("cost_usd") or 0) for r in _rows(billed_rows) if r.get("run_id")}
-    portal_day, portal_task, portal_person, portal_people, portal_basis, portal_runs = _portal(start, billed, end)
+    portal_day, portal_person, portal_people, portal_basis, portal_runs = _portal(start, billed, end)
     rows = _rows(facts)
     num = lambda r, k: float(r.get(k) or 0)  # noqa: E731
     stop = end + DAY
     logged = {int(r["t"]): r for r in rows if r["kind"] == "day"}
     tcd = [r for r in rows if r["kind"] == "tcd"]
-    subs = [r for r in rows if r["kind"] == "sub" and start <= int(r["t"]) < stop]
+    all_subs = [r for r in rows if r["kind"] == "sub"]
+    subs = [r for r in all_subs if start <= int(r["t"]) < stop]
     sub_day = {}
     for r in subs:
         d = sub_day.setdefault(int(r["t"]) // DAY * DAY, ({}, set()))
         d[0][r["task"]] = 1
         d[1].add(r["cb"])
-    # lost spend needs each task's platform state (None = that query isn't set up, so the page leaves it out)
-    lost_day, lost_tasks, lost_reasons, lost_waiting, waiting_tasks = (_lost(tcd, rows, portal_runs, states, start, stop, time.time())
-                                                                       if states is not None else ({}, None, None, None, None))
-    # of the tasks still in progress, the ones 2+ people have claimed (Rafael, 2026-10-31)
-    pending = None
-    if waiting_tasks is not None:
-        ids = [t["task_id"] for t in waiting_tasks]
-        claim_facts, chats = _claim_sources(ids) if ids else (cbs._facts["rows"], [])
-        who = _claimers(ids, claim_facts, chats)
-        multi = []
-        for t in waiting_tasks:
-            people = who.get(t["task_id"]) or {}
-            if len(people) >= 2:
-                multi.append({**t, "claimers": len(people), "claimed_by": ", ".join(sorted(e or u for u, e in people.items()))})
-        multi.sort(key=lambda t: -t["total"])
-        pending = {"tasks": multi, "count": len(multi), "agent_runs": round(sum(t["agent_runs"] for t in multi), 2),
-                   "evals": round(sum(t["sandbox"] + t["portal"] for t in multi), 2), "partial": claim_facts is None}
+
+    # Each person's spend on each task, classified (module docstring). Lost spend, the breakdown and the "2+ claimers"
+    # list need each task's platform state: None = that query isn't set up, so the page leaves them out.
+    state = {r["task"]: r for r in _rows(states or ()) if r.get("task")}
+    task_submitted = {r["task"] for r in all_subs} | {t for t, r in state.items() if int(r.get("submitted") or 0)}
+    cancelled = {t for t, r in state.items() if (r.get("task_status") or "") == "canceled"}
+    spent_on = ({r["task"] for r in tcd if r.get("task") and start <= int(r["t"]) < stop}
+                | {x["task"] for x in portal_runs if x["task"] and not x["admin"] and start <= x["at"] < stop})
+    candidates = sorted(spent_on - task_submitted - cancelled) if states is not None else []
+    claim_facts, chats = _claim_sources(candidates) if candidates else (cbs._facts["rows"], [])
+    pairs, other = _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop, now)
+    by_task_pairs = {}
+    for p in pairs.values():
+        p["evals"] = p["sandbox"] + p["portal"]
+        p["total"] = p["agent_runs"] + p["evals"]
+        by_task_pairs.setdefault(p["task_id"], []).append(p)
+    lost_day = {}
+    for p in pairs.values():
+        if p["status"] == "lost":
+            for d, (runs_usd, evals_usd) in p["days"].items():
+                day = lost_day.setdefault(d, [0.0, 0.0])
+                day[0] += runs_usd
+                day[1] += evals_usd
+    if states is None:
+        lost_day = {}
 
     daily = []
     for d in range(start, stop, DAY):
@@ -252,7 +310,8 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                       "submitters": len(day_submitters), "sub_runs": int(r.get("sub_runs") or 0), "sub_runs_logged": int(r.get("sub_runs_logged") or 0),
                       "lost_runs": round(lost_runs, 2), "lost_evals": round(lost_evals, 2)})
 
-    # tasks submitted in the range; their cost is everything tied to them up to the range's end
+    # tasks submitted in the range; their cost is what the people who submitted them spent on them up to the range's end,
+    # and what earlier holders spent that's now lost is shown next to it (Evan, 2026-10-31)
     by_task = {}
     for r in subs:
         t = by_task.setdefault(r["task"], {"last": 0, "n": 0, "who": set(), "ids": set()})
@@ -262,20 +321,24 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
     task_spend = {}
     for r in tcd:
         if r.get("task") in by_task and int(r["t"]) < stop:
-            p = task_spend.setdefault(r["task"], {"runs": 0.0, "sandbox": 0.0, "requests": 0, "cbs": set(), "first": None})
-            p["runs"] += num(r, "runs")
-            p["sandbox"] += num(r, "sandbox")
+            p = task_spend.setdefault(r["task"], {"requests": 0, "cbs": set(), "first": None})
             p["requests"] += int(r.get("requests") or 0)
             if r.get("cb"):
                 p["cbs"].add(r["cb"])
             p["first"] = min(p["first"] or int(r["t"]), int(r["t"]))
     tasks = []
     for task_id, t in by_task.items():
-        p = task_spend.get(task_id, {"runs": 0.0, "sandbox": 0.0, "requests": 0, "cbs": set(), "first": None})
-        runs_usd, reviews_usd = round(p["runs"] + p["sandbox"], 2), round(portal_task.get(task_id, 0), 2)
+        p = task_spend.get(task_id, {"requests": 0, "cbs": set(), "first": None})
+        mine = by_task_pairs.get(task_id, [])
+        upto = lambda status, i: sum(x["upto"][i] for x in mine if x["status"] == status)  # noqa: E731
+        runs_usd, sandbox_usd, reviews_usd = upto("submitted", 0), upto("submitted", 1), upto("submitted", 2)
+        lost_runs, lost_evals = upto("lost", 0), upto("lost", 1) + upto("lost", 2)
         tasks.append({"task_id": task_id, "last_submitted": t["last"], "submissions": t["n"], "submitters": ", ".join(sorted(t["who"])),
-                      "task_runs": runs_usd, "agent_runs": round(p["runs"], 2), "sandbox": round(p["sandbox"], 2), "portal": reviews_usd,
-                      "total": round(runs_usd + reviews_usd, 2), "requests": p["requests"], "contributors": len(p["cbs"]), "first_run": p["first"]})
+                      "task_runs": round(runs_usd + sandbox_usd, 2), "agent_runs": round(runs_usd, 2), "sandbox": round(sandbox_usd, 2),
+                      "portal": round(reviews_usd, 2), "total": round(runs_usd + sandbox_usd + reviews_usd, 2),
+                      "lost_before_agent_runs": round(lost_runs, 2), "lost_before_evals": round(lost_evals, 2),
+                      "lost_before": round(lost_runs + lost_evals, 2),
+                      "requests": p["requests"], "contributors": len(p["cbs"]), "first_run": p["first"]})
     tasks.sort(key=lambda t: -t["total"])
 
     # contributors: what's tied to them in the range, and the tasks they submitted in it
@@ -293,15 +356,26 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                 p["tasks"].add(r["task"])
     for r in subs:
         person(r["cb"], r.get("email"))["submitted"].add(r["task"])
+    for x in pairs.values():  # people who only ran portal reviews in the range
+        if x["user_id"] and x["user_id"] in portal_person and x["user_id"] not in by_person:
+            person(x["user_id"], x["email"])
+    lost_person = {}
+    for x in pairs.values():
+        if x["status"] == "lost" and x["user_id"]:
+            mine = lost_person.setdefault(x["user_id"], [0.0, 0.0])
+            mine[0] += x["agent_runs"]
+            mine[1] += x["evals"]
     people = []
     for cb, p in by_person.items():
         if "@scale.com" in p["email"]:
             continue
         runs_usd, reviews_usd = round(p["runs"] + p["sandbox"], 2), round(portal_person.get(cb, 0), 2)
         submitted, active = len(p["submitted"]), len(p["days"])
+        lost_runs, lost_evals = lost_person.get(cb, (0.0, 0.0)) if states is not None else (0.0, 0.0)
         people.append({"user_id": cb, "email": p["email"], "task_runs": runs_usd, "agent_runs": round(p["runs"], 2), "sandbox": round(p["sandbox"], 2),
                        "portal": reviews_usd, "total": round(runs_usd + reviews_usd, 2), "active_days": active, "tasks_touched": len(p["tasks"]),
                        "tasks_submitted": submitted, "requests": p["requests"],
+                       "lost_agent_runs": round(lost_runs, 2), "lost_evals": round(lost_evals, 2), "lost": round(lost_runs + lost_evals, 2),
                        "per_task": round((runs_usd + reviews_usd) / submitted, 2) if submitted else None,
                        "per_active_day": round(runs_usd / active, 2) if active else None})
     people.sort(key=lambda p: -p["total"])
@@ -335,15 +409,94 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
     task_totals = [t["total"] for t in tasks]
     recent = [d for d in daily if d["day"] > end - COVERAGE_DAYS * DAY]
     sub_runs, sub_logged = sum(d["sub_runs"] for d in recent), sum(d["sub_runs_logged"] for d in recent)
+    # The total, split so the parts add up to it exactly in each view: task runs = runs + hint pipeline, evals = in-task
+    # sandbox + portal reviews. "Can't be tied to a task" takes what's left on each side (task runs never seen in a
+    # submitted attempt, the hint pipeline, untagged sandbox calls, portal runs with no task, and rounding).
+    runs_total = round(sum(d["runs"] + d["hint"] for d in daily), 2)
+    evals_total = round(sum(d["sandbox"] + d["portal"] for d in daily), 2)
+    total = round(runs_total + evals_total, 2)
+    breakdown = None
+    if states is not None:
+        acc = {k: [0.0, 0.0] for k in PARTS}
+        counts = {k: 0 for k in PARTS[:-1]}
+        for x in pairs.values():
+            acc[x["status"]][0] += x["agent_runs"]
+            acc[x["status"]][1] += x["evals"]
+            if x["total"] > 0:
+                counts[x["status"]] += 1
+        acc["internal"][1] += other["admin_portal"]
+        breakdown = {k: {"agent_runs": round(acc[k][0], 2), "evals": round(acc[k][1], 2)} for k in PARTS[:-1]}
+        breakdown["untied"] = {"agent_runs": round(runs_total - sum(breakdown[k]["agent_runs"] for k in PARTS[:-1]), 2),
+                               "evals": round(evals_total - sum(breakdown[k]["evals"] for k in PARTS[:-1]), 2),
+                               "hint": add("hint"), "portal_no_task": round(other["untied_portal"], 2)}
+        breakdown["internal"]["admin_portal"] = round(other["admin_portal"], 2)
+        breakdown["total"] = {"agent_runs": runs_total, "evals": evals_total, "all": total}
+        breakdown["claims"] = counts  # people x tasks with spend in the range, per part
+        breakdown["partial"] = claim_facts is None
+
+    lost = pending = None
+    if states is not None:
+        claims = []
+        for x in pairs.values():
+            if x["status"] != "lost" or x["total"] <= 0:
+                continue
+            s = state.get(x["task_id"]) or {}
+            claims.append({"task_id": x["task_id"], "user_id": x["user_id"], "email": x["email"] or "unknown", "reason": x["reason"],
+                           "reason_label": LOST_REASONS[x["reason"]], "cancel_reason": s.get("cancel_reason") or "",
+                           "ended": x["ended"], "ended_how": x["ended_how"],
+                           "agent_runs": round(x["agent_runs"], 2), "sandbox": round(x["sandbox"], 2), "portal": round(x["portal"], 2),
+                           "evals": round(x["evals"], 2), "total": round(x["total"], 2)})
+        claims.sort(key=lambda c: -c["total"])
+        reasons = []
+        for key, label in LOST_REASONS.items():
+            mine = [c for c in claims if c["reason"] == key]
+            if mine:
+                reasons.append({"reason": key, "label": label, "claims": len(mine), "tasks": len({c["task_id"] for c in mine}),
+                                "agent_runs": round(sum(c["agent_runs"] for c in mine), 2), "evals": round(sum(c["evals"] for c in mine), 2)})
+        held = [x for x in pairs.values() if x["status"] == "in_progress" and x["total"] > 0]
+        in_progress = {"claims": len(held), "tasks": len({x["task_id"] for x in held}), "agent_runs": breakdown["in_progress"]["agent_runs"],
+                       "evals": breakdown["in_progress"]["evals"]}
+        lost = {"agent_runs": breakdown["lost"]["agent_runs"], "evals": breakdown["lost"]["evals"], "claims": claims, "reasons": reasons,
+                "in_progress": in_progress, "partial": claim_facts is None}
+
+        # tasks nobody has submitted yet, not cancelled, that 2+ people have claimed (Rafael, 2026-10-31), with what's lost
+        # on them so far and what the current holder spent (in the range)
+        who = _claimers(candidates, claim_facts, chats)
+        multi = []
+        for task_id in candidates:
+            mine = [x for x in by_task_pairs.get(task_id, []) if x["status"] != "internal" and x["total"] > 0]
+            people_on = who.get(task_id) or {}
+            if not mine or len(people_on) < 2:
+                continue
+            s = state.get(task_id) or {}
+            part = lambda status, k: sum(x[k] for x in mine if x["status"] == status)  # noqa: E731
+            holders = sorted({x["email"] or "unknown" for x in mine if x["status"] == "in_progress"})
+            runs_usd, sandbox_usd, portal_usd = (sum(x[k] for x in mine) for k in ("agent_runs", "sandbox", "portal"))
+            multi.append({"task_id": task_id, "holder": ", ".join(holders) or s.get("last_worker_email") or "",
+                          "live_claim": bool(holders) or bool(int(s.get("live_claim") or 0)),
+                          "contributors": ", ".join(sorted({x["email"] for x in mine if x["email"]})),
+                          "last_activity": max([x["last"] for x in mine] + [int(s.get("last_activity") or 0)]),
+                          "agent_runs": round(runs_usd, 2), "sandbox": round(sandbox_usd, 2), "portal": round(portal_usd, 2),
+                          "total": round(runs_usd + sandbox_usd + portal_usd, 2),
+                          "lost_agent_runs": round(part("lost", "agent_runs"), 2), "lost_evals": round(part("lost", "evals"), 2),
+                          "lost": round(part("lost", "total"), 2),
+                          "holder_agent_runs": round(part("in_progress", "agent_runs"), 2), "holder_evals": round(part("in_progress", "evals"), 2),
+                          "holder_spend": round(part("in_progress", "total"), 2),
+                          "claimers": len(people_on), "claimed_by": ", ".join(sorted(e or u for u, e in people_on.items()))})
+        multi.sort(key=lambda t: -t["total"])
+        pending = {"tasks": multi, "count": len(multi), "agent_runs": round(sum(t["agent_runs"] for t in multi), 2),
+                   "evals": round(sum(t["sandbox"] + t["portal"] for t in multi), 2), "partial": claim_facts is None}
+
     return {
         "days": days, "start": start, "end": end, "today": today,
         "summary": {
-            "total": add("total"), "task_runs": add("task_runs"), "runs": add("runs"), "runs_linked": add("runs_linked"),
+            "total": total, "task_runs": add("task_runs"), "runs": add("runs"), "runs_linked": add("runs_linked"),
             "unlinked": round(add("runs") - add("runs_linked"), 2), "sandbox": add("sandbox"), "hint": add("hint"), "portal": add("portal"),
             "per_cb_day": round((add("task_runs") + add("portal")) / cb_days, 2) if cb_days else None,
             "tasks_submitted": len(tasks), "submitters": len({s for t in tasks for s in t["submitters"].split(", ") if s}),
             "per_task_median": round(statistics.median(task_totals), 2) if task_totals else None,
             "per_task_mean": round(statistics.fmean(task_totals), 2) if task_totals else None,
+            "per_task_all_in": round(total / len(tasks), 2) if tasks else None,
             "active_cbs": sum(1 for p in people if p["task_runs"] > 0),
             "portal_billed": round(portal_basis["billed"], 2), "portal_estimated": round(portal_basis["estimated"], 2),
         },
@@ -351,10 +504,13 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
         "coverage": {"days": COVERAGE_DAYS, "runs": sub_runs, "logged": sub_logged,
                      "pct": round(100 * sub_logged / sub_runs) if sub_runs else None},
         "daily": daily, "weeks": periods["week"], "months": periods["month"], "tasks": tasks, "people": people,
-        # spend on tasks never submitted and quiet for LOST_IDLE_DAYS (None when the task-state query isn't set up)
-        "lost": None if lost_tasks is None else {"idle_days": LOST_IDLE_DAYS, "agent_runs": add("lost_runs"), "evals": add("lost_evals"),
-                                                 "tasks": lost_tasks, "reasons": lost_reasons, "waiting": lost_waiting},
-        # tasks not submitted yet, still in progress and claimed by 2+ people, with their spend in the range (None as above;
+        # the total in five parts that add up to it (None when the task-state query isn't set up; partial = the CB
+        # tracker's claims haven't loaded, so only the task-state fallback was used)
+        "breakdown": breakdown,
+        # spend whose person's claim ended without them submitting: totals, per person x task, why, and the in-progress
+        # total (None as above)
+        "lost": lost,
+        # tasks not submitted yet, not cancelled, claimed by 2+ people, with their spend in the range (None as above;
         # partial = the CB tracker's claims haven't loaded, so only portal chats were counted)
         "pending_multi": pending,
         "queries": {"facts": f"{config.REDASH_URL}/queries/{config.COST_FACTS_QUERY_ID}",
