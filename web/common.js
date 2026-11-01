@@ -19,7 +19,19 @@ async function api(path, options = {}) {
     opts.body = JSON.stringify(opts.json);
     delete opts.json;
   }
-  const resp = await fetch(path, opts);
+  // A read that hits a blip on boat's public link ("Failed to fetch", or a 502/503/504 from its edge while the portal
+  // answered fine, 2026-11-01) is tried again twice before it's an error. Only reads: a POST could run twice.
+  const read = !opts.method || ["GET", "HEAD"].includes(opts.method.toUpperCase());
+  let resp;
+  for (const wait of read ? [1000, 3000, null] : [null]) {
+    try {
+      resp = await fetch(path, opts);
+      if (!(read && wait !== null && [502, 503, 504].includes(resp.status))) break;
+    } catch (err) {
+      if (wait === null || !(err instanceof TypeError)) throw err;
+    }
+    await new Promise(r => setTimeout(r, wait));
+  }
   const type = resp.headers.get("content-type") || "";
   const body = type.includes("application/json") ? await resp.json() : await resp.text();
   if (!resp.ok) {
