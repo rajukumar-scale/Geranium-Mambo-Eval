@@ -533,6 +533,19 @@ function openTaxoCheck(p, root) {
   panel.querySelector("textarea").focus();
 }
 
+// Which rubric rows differ (server taxo_check.rubric_rows): formatting, escapes and links already ignored.
+function rubricRowsHtml(d) {
+  const t = s => `<span class="mono">“${esc(s || "")}”</span>`;
+  const line = r => r.kind === "changed" ? `<li><b>Row ${r.taxonomy_row}</b> in the taxonomy differs from row ${r.passed_row} that passed:
+        <div>Taxonomy: ${t(r.taxonomy_title)}</div><div>Passed: ${t(r.passed_title)}</div></li>`
+    : r.kind === "extra" ? `<li><b>Row ${r.taxonomy_row}</b> is in the taxonomy but not in what passed: ${t(r.taxonomy_title)}</li>`
+    : r.kind === "missing" ? `<li>Row ${r.passed_row} that passed is <b>missing from the taxonomy</b>: ${t(r.passed_title)}</li>`
+    : `<li><b>Row ${r.taxonomy_row}</b>: weight ${esc(r.taxonomy_weight)} in the taxonomy, ${esc(r.passed_weight)} in what passed: ${t(r.taxonomy_title)}</li>`;
+  return `<br>Rows: ${fmtInt(d.taxonomy_count)} in the taxonomy, ${fmtInt(d.passed_count)} passed.
+    ${d.total ? `<ul class="rows">${d.rows.map(line).join("")}</ul>${d.total > d.rows.length ? `<div>…and ${fmtInt(d.total - d.rows.length)} more.</div>` : ""}`
+      : "<br>Every row's title matches; the difference is in the weights."}`;
+}
+
 async function runTaxoCheck(p, root) {
   const panel = root.querySelector("[data-checkpanel]");
   const text = panel.querySelector("[data-checktext]").value, out = panel.querySelector("[data-checkresult]");
@@ -552,7 +565,8 @@ async function runTaxoCheck(p, root) {
       ${d ? `<br>First difference at character ${fmtInt(d.at)} (taxonomy ${fmtInt(d.taxonomy_chars)} chars, passed ${fmtInt(d.passed_chars)}):
         <div class="diff"><div><b>Taxonomy</b> <span class="mono">…${mark(d.taxonomy_text, d.offset)}…</span></div>
         <div><b>Passed</b> <span class="mono">…${mark(d.passed_text, d.offset)}…</span></div></div>` : ""}
-      ${COPYABLE.has(p.stage) ? "<br>Use <b>Copy what passed</b> and paste it over the whole taxonomy field." : "<br>Put the version that passed into the taxonomy, or run the review again on what's there."}`;
+      ${r.rubric_rows ? rubricRowsHtml(r.rubric_rows) : p.stage === "rubric" ? "<br>Your saved rubric here has changed since this pass, so the rows can't be listed." : ""}
+      ${COPYABLE.has(p.stage) ? "<br>Use <b>Copy what passed</b> and paste it over the whole taxonomy field." : "<br>Fix those rows in the taxonomy so they match what passed, or run the review again on what's there."}`;
   } catch (e) {
     out.className = "bad"; out.textContent = e.message;
   }
