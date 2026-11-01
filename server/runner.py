@@ -483,7 +483,10 @@ class Runner:
             stale = staleness.prompt_note(attempt) if run["kind"] == "followup" else ""
             full = admin_block(attempt, since, key) + (recap(attempt, run["created_at"], key, since) if new_chat_session else "") + stale + prompt
             outcome = await spawn(run_id, chat, full, ["--resume" if resume else "--session-id", session_id])
-            if outcome.get("resume_missing") and try_number == 0:
+            # resume_missing: the session to continue is gone. session_taken: a new session's ID already has a transcript
+            # (a reply cut off by a restart before session_started was saved; 60 chats were stuck on "Session ID ... is
+            # already in use", every message failing at once, 2026-11-01). Either way: a fresh session, once.
+            if (outcome.get("resume_missing") or outcome.get("session_taken")) and try_number == 0:
                 session_id, resume = str(uuid.uuid4()), False
                 if run["kind"] == "followup":
                     db.update("chats", "attempt_id", attempt, session_id=session_id, session_started=0)
@@ -560,6 +563,8 @@ class Runner:
                 self.local_lock.release()
         stderr_tail = err_path.read_text(errors="replace")[-2000:] if err_path.exists() else ""
         outcome["stderr_tail"] = stderr_tail
+        if not outcome["init"] and "is already in use" in stderr_tail:
+            outcome["session_taken"] = True
         if not outcome["init"] and "No conversation found" in stderr_tail:
             outcome["resume_missing"] = True
         return outcome
@@ -734,6 +739,8 @@ class Runner:
         for name, mtime in outcome["after"].items():
             if outcome["before"].get(name) != mtime:
                 outcome["reports"][name] = workspace.read_report(attempt, name)
+        if not outcome["init"] and "is already in use" in outcome["stderr_tail"]:
+            outcome["session_taken"] = True
         if not outcome["init"] and "No conversation found" in outcome["stderr_tail"]:
             outcome["resume_missing"] = True
         return outcome
