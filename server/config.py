@@ -47,6 +47,9 @@ DATA_DIR = Path(_get("PORTAL_DATA_DIR", ROOT / "data")).resolve()
 # Not resolved on purpose: on the VM this is a symlink to the current bundle version,
 # so updating the eval swaps it for new runs without touching runs in progress.
 EVAL_BASE_DIR = Path(os.path.abspath(_get("EVAL_BASE_DIR", ROOT.parent / "New_Evals")))
+# Contributor guidelines the chat assistant reads (hardness, tool-call minimum). Portal-owned, not part of the eval
+# release: every review workspace gets them at work/guidelines (boat bundle, docker mount, local workspace).
+GUIDELINES_DIR = ROOT / "server" / "guidelines"
 UNIVERSE_DIRS = _list("UNIVERSE_DIRS", "HarmonyGames_GitHub,HarmonyGames_Gmail,HarmonyGames_Other_Services")
 DATED_UNIVERSES = ("Universe_Normal", "Universe_SynthCut")
 

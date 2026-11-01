@@ -186,7 +186,8 @@ def proxy_host():
 
 
 def _bundle():
-    """Evals/ + claude/ + .claude/ of the current release, packed under work/. Cached per release."""
+    """Evals/ + claude/ + .claude/ of the current release, plus the portal's guidelines/, packed under work/.
+    Cached per release and guideline version."""
     with _bundle_lock:
         return _pack_bundle()
 
@@ -196,7 +197,9 @@ def _pack_bundle():
     # In-place edits (skill effort, refreshed hash pins) don't touch the top folders' mtimes, so include them.
     watched = [base / "Evals", base / "claude", *(base / "Evals" / "references").glob("*.json"),
                *(base / "claude" / "skills").glob("*/SKILL.md")]
-    key = f"{base}|{max(int(p.stat().st_mtime_ns) for p in watched)}"
+    guides = sorted(config.GUIDELINES_DIR.glob("*.md"))  # portal-owned, so a guideline change is a portal deploy
+    key = f"{base}|{max(int(p.stat().st_mtime_ns) for p in watched)}|" + hashlib.sha256(
+        b"".join(g.name.encode() + g.read_bytes() for g in guides)).hexdigest()[:12]
     path = _bundle_cache.get(key)
     if path and path.is_file():
         return path
@@ -216,6 +219,8 @@ def _pack_bundle():
     with tarfile.open(tmp, "w:gz") as tar:
         for top in ("Evals", "claude", ".claude"):
             tar.add(str(base / top), f"work/{top}", filter=skip)
+        for g in guides:
+            tar.add(str(g), f"work/guidelines/{g.name}")
     tmp.rename(path)
     _bundle_cache[key] = path
     log.info("packed eval bundle %s (%.1f MB)", path.name, path.stat().st_size / 1e6)
