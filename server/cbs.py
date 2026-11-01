@@ -19,6 +19,8 @@ The bars are fixed at the analysis's numbers (Evan, 2026-10-30: a target for tra
 the page also shows what the same cut (p50 / p75 / p90 of QMA + trusted submitted tasks) gives on recent data.
 
 Statuses (Evan, 2026-10-30), checked in this order:
+- Offboarded: carries the mcp_ac_temp_block tag on the latest daily tag snapshot (Evan, 2026-11-01: that tag is how
+  people are offboarded). Done, so listed last; removing the tag gives them their usual status back.
 - Offboard: trained, and the last 2 claims closed since the training date both went badly.
 - Needs training: not trained, past the first 2 claims (grace), and the last 2 closed claims ended with no submit, or
   the last 2 submitted tasks were both over the Flag bar (hours, $ or reviews).
@@ -137,6 +139,11 @@ def build_rows(facts, chats, runs, now=None):
             return "internal"
         return "trusted" if u.get("tr_first") and u["tr_first"] <= day <= (u.get("tr_last") or "") else "non-trusted"
 
+    # The tag snapshot is daily, so "tagged now" = tagged on the newest day any tag row reached.
+    tag_day = max([u.get("tr_last") or "" for u in users.values()] + [u.get("blk_last") or "" for u in users.values()],
+                  default="")
+    offboarded = {uid: u["blk_first"] for uid, u in users.items() if tag_day and u.get("blk_last") == tag_day}
+
     rows = []
     for key in set(nodes) | set(submits) | set(incompletes) | set(first_chat):
         task, uid = key
@@ -171,7 +178,7 @@ def build_rows(facts, chats, runs, now=None):
             "first_open": first_open, "outcome": outcome, "submitted_at": subs[0] if subs else None,
             "portal": bool(mine or key in first_chat), "hours": _r(hours, 2),
             "cost": round(sum(r["cost_estimate"] or 0 for r in mine), 2), "reviews": reviews, "tries": tries,
-            "runs_per_stage": dict(count)})
+            "runs_per_stage": dict(count), "offboarded": offboarded.get(uid)})
     return rows
 
 
@@ -192,6 +199,8 @@ def went_badly(row):
 
 def status_of(claims, trained_at=None):
     """claims: one person's rows, oldest first. Returns (status, reason)."""
+    if claims and claims[-1].get("offboarded"):
+        return "offboarded", f"Tagged mcp_ac_temp_block since {claims[-1]['offboarded']}"
     closed = [r for r in claims if r["outcome"] != "working"]
     if trained_at:
         since = [r for r in closed if r["first_open"] >= trained_at]
@@ -303,7 +312,7 @@ def report(rows, training, now=None):
     for p in people:
         statuses[p["status"]][p["group"]] += 1
         statuses[p["status"]]["spend"] += p["spend"]
-    order = {"offboard": 0, "needs_training": 1, "trained": 2, "grace": 3, "ok": 4, "efficient": 5}
+    order = {"offboard": 0, "needs_training": 1, "trained": 2, "grace": 3, "ok": 4, "efficient": 5, "offboarded": 6}
     people.sort(key=lambda p: (order[p["status"]], -p["last"]))
     return {"start": START, "bars": BARS, "recent_bars": recent_bars, "recent_days": RECENT_DAYS, "recent_n": len(recent),
             "groups": groups, "weeks": weeks, "curve": curve, "paired": paired, "conversion": conversion,

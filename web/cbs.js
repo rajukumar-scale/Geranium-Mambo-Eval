@@ -15,6 +15,7 @@ const STATUSES = {
   grace: { label: "Grace", icon: "🌱", cls: "st-grace", tip: "Their first 2 tasks: no flags yet" },
   efficient: { label: "Efficient", icon: "✓", cls: "st-efficient", tip: "Submitted a task within the Acceptable bar (hours and $)" },
   ok: { label: "No flag", icon: "·", cls: "st-ok", tip: "Past grace, no flag, no task within the Acceptable bar yet" },
+  offboarded: { label: "Offboarded", icon: "🚫", cls: "st-ok", tip: "Tagged mcp_ac_temp_block (already offboarded); the tag syncs daily" },
 };
 const usd = v => (v == null ? "–" : "$" + Math.round(v).toLocaleString("en-US"));
 const hrs = v => (v == null ? "–" : `${(+v).toFixed(1)} h`);
@@ -260,7 +261,7 @@ function renderPeople(d) {
   const g = Object.fromEntries(GROUPS.map(x => [x.key, x]));
   $("#people-card").innerHTML = `<div class="cc-head"><h2>4 · Contributors: training and offboarding</h2>
     <p class="muted">Needs action first; click a column name to sort by it (highest first, click again for lowest). Click a row for their tasks. Grace = their first 2 tasks; Needs training after that when the
-      last 2 closed claims had no submit or the last 2 submitted tasks were over the Flag bar; Offboard only after training.</p></div>
+      last 2 closed claims had no submit or the last 2 submitted tasks were over the Flag bar; Offboard only after training. Offboarded = tagged mcp_ac_temp_block (synced daily), listed last.</p></div>
     <div class="cost-filters">
       <div class="seg" id="status-pick" role="group" aria-label="Status"><button type="button" data-status="" class="${S.status ? "" : "on"}">All</button>${
         Object.entries(STATUSES).map(([k, s]) => `<button type="button" data-status="${k}" class="${S.status === k ? "on" : ""}">${esc(s.label)}</button>`).join("")}</div>
