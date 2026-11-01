@@ -30,7 +30,7 @@ SCRUB_SH = r"""#!/bin/bash
 pkill -f /tmp/payload/memguard.sh 2>/dev/null || true
 for i in 1 2 3; do pkill -9 -u runner 2>/dev/null || true; pgrep -u runner >/dev/null || break; sleep 1; done
 crontab -r -u runner 2>/dev/null || true
-rm -rf /tmp/payload /tmp/payload.tgz /tmp/out.jsonl /tmp/err.txt /tmp/claude.pid /tmp/claude.exit /tmp/state_out.tgz \
+rm -rf /tmp/payload /tmp/payload.tgz /tmp/evp_bundle.tgz /tmp/out.jsonl /tmp/err.txt /tmp/claude.pid /tmp/claude.exit /tmp/state_out.tgz \
        /tmp/scratch_out.tgz /tmp/memguard.log /work/Evals /work/claude /work/.claude /work/guidelines
 for d in /tmp /var/tmp /dev/shm; do find "$d" -mindepth 1 -maxdepth 1 -user runner -exec rm -rf {} + 2>/dev/null || true; done
 rm -rf /home/runner && mkdir -p /home/runner && cp -a /etc/skel/. /home/runner/ 2>/dev/null || true
@@ -41,7 +41,7 @@ fi
 echo CLEAN
 """
 
-_boxes = {}  # box id -> {"created": t, "snapshot": name, "reviews": n, "idle_since": t or None}
+_boxes = {}  # box id -> {"created": t, "snapshot": name, "reviews": n, "idle_since": t or None, "bundle": name}
 _idle = []  # idle box ids, most recently released last
 _lock = None
 _stats = {"reused": 0, "created": 0, "retired": 0}
@@ -69,11 +69,11 @@ async def _usable(box):
         return False
     if time.time() - info.get("created", 0) > config.BOX_MAX_AGE_H * 3600:
         return False
-    rc, out = await boatrun.ssh(box, "test -e /tmp/evp_clean && echo READY", timeout=60)
-    if rc != 0 or "READY" not in out:
-        return False
-    rc, out, err = await boatrun.cli("extend", box, "--ttl", str(config.RUN_TIMEOUT_MIN * 60 + 1800), "--json", timeout=60)
-    return rc == 0
+    # One ssh (claim the wiped box) alongside the extend: each boat CLI call is a few seconds a review waits for.
+    (rc, out), (ext_rc, _, _) = await asyncio.gather(
+        boatrun.ssh(box, "test -e /tmp/evp_clean && sudo rm -f /tmp/evp_clean && echo READY", timeout=60),
+        boatrun.cli("extend", box, "--ttl", str(config.RUN_TIMEOUT_MIN * 60 + 1800), "--json", timeout=60))
+    return rc == 0 and "READY" in out and ext_rc == 0
 
 
 async def acquire():
@@ -86,7 +86,6 @@ async def acquire():
                 break
             if await _usable(box):
                 _boxes[box]["idle_since"] = None
-                await boatrun.ssh(box, "sudo rm -f /tmp/evp_clean", timeout=60)
                 _stats["reused"] += 1
                 log.info("reusing review box %s (review %d)", box, _boxes[box]["reviews"] + 1)
                 return box
@@ -131,6 +130,16 @@ def scrub_command():
     "/tmp/payload/memguard.sh", so its `pkill -f` killed the wipe itself (ssh exit 255, 2026-11-01)."""
     script = (SCRUB_SH + "touch /tmp/evp_clean\n").encode()
     return f"echo {base64.b64encode(script).decode()} | base64 -d | sudo bash"
+
+
+def has_bundle(box, name):
+    """Whether this pool box already holds that eval bundle (RUN_SH keeps the last one in /var/cache/evp)."""
+    return (_boxes.get(box) or {}).get("bundle") == name
+
+
+def note_bundle(box, name):
+    if box in _boxes:
+        _boxes[box]["bundle"] = name
 
 
 def stats():

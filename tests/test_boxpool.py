@@ -96,6 +96,27 @@ class BoxPoolTest(unittest.TestCase):
         self.assertNotEqual(self.run_(boxpool.acquire()), box)
         self.assertIn(box, self.deleted)
 
+    def test_a_reused_box_is_claimed_in_one_ssh_and_keeps_its_bundle(self):
+        box = self.run_(boxpool.acquire())
+        self.assertFalse(boxpool.has_bundle(box, "bundle-a.tgz"))
+        boxpool.note_bundle(box, "bundle-a.tgz")
+        self.run_(boxpool.release(box, clean=True))
+        self.ssh_calls.clear()
+        self.assertEqual(self.run_(boxpool.acquire()), box)
+        self.assertEqual([c for _, c in self.ssh_calls],
+                         ["test -e /tmp/evp_clean && sudo rm -f /tmp/evp_clean && echo READY"])
+        self.assertTrue(boxpool.has_bundle(box, "bundle-a.tgz"))
+        self.assertFalse(boxpool.has_bundle(box, "bundle-b.tgz"))  # an eval update: send the new one
+        self.run_(boxpool.release(box, clean=False))
+        self.assertFalse(boxpool.has_bundle(box, "bundle-a.tgz"))  # deleted boxes hold nothing
+
+    def test_the_wipe_removes_an_unused_bundle_upload(self):
+        box = self.run_(boxpool.acquire())
+        self.run_(boxpool.release(box, clean=True))
+        wipe = [c for b, c in self.ssh_calls if "pkill -9 -u runner" in c][0]
+        self.assertIn("/tmp/evp_bundle.tgz", wipe)
+        self.assertNotIn("/var/cache/evp", wipe)  # the cached bundle stays for the next review
+
     def test_reuse_off_means_a_new_box_every_time(self):
         with mock.patch.object(config, "BOX_REUSE_MAX", 0):
             box = self.run_(boxpool.acquire())
