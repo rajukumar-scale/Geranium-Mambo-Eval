@@ -46,6 +46,12 @@ class PlacementTest(unittest.TestCase):
         self.image = False  # 2026-10-31: the image vanished and every server review ended at once
         self.assertEqual(self.place("injection"), "boat")
 
+    def test_a_waiting_deploy_holds_follow_ups_and_server_reviews_not_boat(self):
+        with mock.patch.object(runner, "draining", lambda: True):
+            self.assertEqual([runner.held(p) for p in ("main", "server", "boat")], [True, True, False])
+        with mock.patch.object(runner, "draining", lambda: False):
+            self.assertFalse(runner.held("main"))
+
     def test_full_slots_overflow_to_boat_instead_of_queueing(self):
         self.r.server_held.update({"a", "b"})
         self.assertEqual(self.place("injection"), "boat")

@@ -177,6 +177,12 @@ def draining():
         return False
 
 
+def held(pool):
+    """A deploy is about to restart: hold new follow-ups and server reviews (they'd be cut off). Boat reviews keep
+    starting; one still setting up its box at the restart is started again (start())."""
+    return pool != "boat" and draining()
+
+
 def deploy_pending():
     """True while a deploy waits for the reviews running on this server to finish (remote_deploy.sh): new reviews then
     go to boat, so the deploy never cuts one off and never holds anyone back. A stale file stops counting after 30 min."""
@@ -375,7 +381,7 @@ class Runner:
     async def _worker(self, pool):
         while True:
             run_id = await self.queues[pool].get()
-            while draining():  # a deploy is waiting to restart: leave new runs queued (they survive it)
+            while held(pool):  # a deploy is waiting to restart: leave new runs queued (they survive it)
                 await asyncio.sleep(1)
             if run_id not in self.pending[pool]:
                 continue  # cancelled while queued

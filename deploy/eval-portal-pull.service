@@ -6,4 +6,5 @@ After=network-online.target
 Type=oneshot
 ExecStart=/bin/bash /opt/eval-portal/deploy/pull_deploy.sh
 # remote_deploy.sh waits up to 5 minutes for runs to finish setting up, plus the tests and the restart.
-TimeoutStartSec=20min
+# Up to 20 min waiting for server reviews + 5 min for the rest + the restart (it was 20 min and killed busy deploys).
+TimeoutStartSec=40min

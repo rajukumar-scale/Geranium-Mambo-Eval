@@ -25,13 +25,15 @@ if q "select boat_phase from runs limit 0" 2>/dev/null; then
   done
 fi
 
-# Hold new runs (they stay queued and survive the restart), then wait for what can't be re-attached:
-# follow-ups running in Docker here, and reviews still setting up their box.
+# Hold new follow-ups (they stay queued and survive the restart), then wait for what can't be re-attached: follow-ups
+# and reviews running in Docker here. Reviews on boat keep starting: one still setting up its box when the portal
+# restarts is simply started again (Runner.start), so waiting for those made busy-hour deploys give up again and again
+# while every new run was held (2026-11-01: 80 minutes, 3 tries).
 touch "$DATA/DRAIN"; chown "$OWNER" "$DATA/DRAIN"
 trap 'rm -f "$DATA/DRAIN" "$DATA/DEPLOY_PENDING"' EXIT
 # (Before the first deploy of re-attach support there is no boat_phase column: then every running run counts.)
 if q "select boat_phase from runs limit 0" 2>/dev/null; then
-  BUSY_SQL="select count(*) from runs where status='running' and coalesce(boat_phase,'')!='started'"
+  BUSY_SQL="select count(*) from runs where status='running' and (kind='followup' or boat_phase='server')"
   LIVE_SQL="select count(*) from runs where status='running' and boat_phase='started'"
 else
   BUSY_SQL="select count(*) from runs where status='running'"
@@ -40,7 +42,7 @@ fi
 for i in $(seq 1 300); do
   BUSY=$(q "$BUSY_SQL")
   [ "$BUSY" = 0 ] && break
-  [ $((i % 15)) = 1 ] && echo "waiting for $BUSY run(s) to finish or start before restarting…"
+  [ $((i % 15)) = 1 ] && echo "waiting for $BUSY run(s) running on this server to finish before restarting…"
   sleep 1
 done
 if [ "$BUSY" != 0 ]; then echo "still $BUSY busy after 5 min; deploy aborted, nothing changed"; exit 1; fi

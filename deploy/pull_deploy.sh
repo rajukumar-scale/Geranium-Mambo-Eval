@@ -21,6 +21,9 @@ NEW=$(git -C $SRC rev-parse origin/main)
 OLD=$(cat $DATA/deployed_commit 2>/dev/null || true)
 [ "$NEW" = "$OLD" ] && exit 0
 [ "$NEW" = "$(cat $DATA/failed_commit 2>/dev/null || true)" ] && exit 0  # already reported
+# After a deploy gave up because the portal was busy, wait before trying again: each try holds new chat replies for up
+# to 5 minutes, and retrying every minute meant CBs waited again and again (2026-11-01).
+[ "$(date +%s)" -lt "$(cat $DATA/deploy_backoff 2>/dev/null || echo 0)" ] && exit 0
 
 git -C $SRC checkout -q --force --detach "$NEW"
 WEB=$(git -C $SRC remote get-url origin | sed -E 's#^git@github.com:#https://github.com/#; s#\.git$##')
@@ -48,11 +51,12 @@ set -e
 cat $DATA/pull_deploy.log
 if [ $rc = 0 ]; then
   echo "$NEW" > $DATA/deployed_commit
-  rm -f $DATA/failed_commit
+  rm -f $DATA/failed_commit $DATA/deploy_backoff
   REVIEWS=$(grep -oE '[0-9]+ running review\(s\) re-attached' $DATA/pull_deploy.log | grep -oE '^[0-9]+' || echo 0)
   notify "✅ Portal updated: $WHAT. $REVIEWS running review(s) kept going."
 elif grep -q "deploy aborted, nothing changed" $DATA/pull_deploy.log; then
-  exit 0  # runs were still setting up; nothing changed, try again next minute
+  echo $(( $(date +%s) + ${EVP_BACKOFF_SEC:-1800} )) > $DATA/deploy_backoff
+  exit 0  # still busy on this server; nothing changed, try again in 30 minutes
 elif grep -q "rolling back" $DATA/pull_deploy.log; then
   fail "⚠️ Portal update rolled back: $WHAT failed its health check after restart, so the previous version ($LIVE) was put back. Live is fine; the change needs a fix."
 else

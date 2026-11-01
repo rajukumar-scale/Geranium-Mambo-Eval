@@ -113,13 +113,17 @@ class PullDeployTest(unittest.TestCase):
         self.assertTrue(msg.startswith(f'⚠️ Portal update rolled back: {new[:7]} "bad restart"'), msg)
         self.assertIn(f"previous version ({self.first[:7]}) was put back", msg)
 
-    def test_busy_waits_quietly_and_retries(self):
+    def test_busy_waits_quietly_and_retries_after_a_backoff(self):
         new = self.commit("while busy")
         self.assertEqual(self.pull(deploy="busy").returncode, 0)
         self.assertEqual((self.deployed(), self.slack()), (self.first, []))
         self.assertFalse((self.data / "failed_commit").exists())
+        self.pull()  # within the 30 minutes: not tried again, so CBs aren't held every minute
+        self.assertEqual(self.deployed(), self.first)
+        (self.data / "deploy_backoff").write_text("0\n")  # the 30 minutes are up
         self.pull()
         self.assertEqual(self.deployed(), new)
+        self.assertFalse((self.data / "deploy_backoff").exists())
 
 
 if __name__ == "__main__":
