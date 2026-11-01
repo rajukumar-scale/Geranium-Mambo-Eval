@@ -19,7 +19,7 @@ from pathlib import Path
 
 import httpx
 
-from . import config
+from . import config, proxy
 
 PROMPTS = json.loads((Path(__file__).with_name("taxo_reader_prompts.json")).read_text())
 
@@ -86,18 +86,23 @@ async def read(stage, png):
             {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()}},
         ]}],
     }
-    headers = {"Authorization": f"Bearer {config.READER_API_KEY}", "User-Agent": "eval-portal"}
     # The taxonomy's own endpoint first; the portal's LiteLLM endpoint if this server can't reach or use that one.
     urls = list(dict.fromkeys([config.READER_URL, f"{config.LITELLM_BASE_URL}/v1/chat/completions"]))
+    # The backup key only after the main one answers "budget exceeded" (proxy.over_budget, 2026-11-01).
+    keys = [config.READER_API_KEY] + ([config.LITELLM_FALLBACK_API_KEY] if config.LITELLM_FALLBACK_API_KEY else [])
     error = None
     async with httpx.AsyncClient(timeout=60) as client:
         for url in urls:
-            try:
-                resp = await client.post(url, json=body, headers=headers)
-                resp.raise_for_status()
-                return _parse(resp.json()["choices"][0]["message"]["content"])
-            except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
-                error = exc
+            for key in keys:
+                try:
+                    resp = await client.post(url, json=body, headers={"Authorization": f"Bearer {key}", "User-Agent": "eval-portal"})
+                    if key != keys[-1] and proxy.over_budget(resp.status_code, resp.content):
+                        continue
+                    resp.raise_for_status()
+                    return _parse(resp.json()["choices"][0]["message"]["content"])
+                except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
+                    error = exc
+                    break
     raise error
 
 

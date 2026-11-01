@@ -8,18 +8,24 @@ forwards the request, and records the token usage of every model call
 It runs as its own service (eval-portal-meter), so a portal restart never cuts a running review's model calls. A token
 is checked against the runs table (runs.proxy_token, kept while the run lives), so the two processes share nothing in
 memory; ACTIVE_TOKENS is only a shortcut when both run in one process (local development).
+
+Budget fallback (2026-11-01): when the main key answers "budget exceeded" and LITELLM_FALLBACK_API_KEY is set, the same
+call is sent again with the backup key, so the review never sees the error. Calls then go straight to the backup and
+the main key is tried again every PRIMARY_RECHECK seconds; Slack hears about the switch and the switch back.
 """
 
 import asyncio
 import json
 import logging
 import random
+import re
+import time
 
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from . import config, db
+from . import config, db, notify
 
 log = logging.getLogger("portal.proxy")
 
@@ -30,6 +36,10 @@ CANCELLED = "cancelled by user"  # runner.CANCELLED: a cancelled run's calls sto
 HOP_HEADERS = {"host", "content-length", "authorization", "x-api-key", "connection", "accept-encoding", "x-litellm-tags",
                "transfer-encoding", "keep-alive", "proxy-authorization", "te", "trailer", "upgrade"}
 DROP_RESPONSE = {"content-length", "content-encoding", "transfer-encoding", "connection", "keep-alive"}
+
+PRIMARY_RECHECK = 600
+OVER_BUDGET = re.compile(rb"budget[_ ]?exceeded|exceeded[^\"]{0,40}budget|over (the )?budget|max[_ ]budget", re.I)
+KEY_STATE = {"primary_out_until": 0.0, "on_fallback": False}
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 _client = None
@@ -117,6 +127,36 @@ def run_for(token):
     return row["id"] if row else None
 
 
+def over_budget(status, body):
+    """LiteLLM's answer when a key's budget is spent (400 budget_exceeded, or a 4xx naming the budget)."""
+    return 400 <= status < 500 and bool(OVER_BUDGET.search(body or b""))
+
+
+def _keys():
+    """Keys to try, in order: the backup alone while the main key is known to be over budget, else main then backup."""
+    fallback = config.LITELLM_FALLBACK_API_KEY
+    if fallback and time.time() < KEY_STATE["primary_out_until"]:
+        return [fallback]
+    return [config.LITELLM_API_KEY] + ([fallback] if fallback else [])
+
+
+def _primary_out(body):
+    KEY_STATE["primary_out_until"] = time.time() + PRIMARY_RECHECK
+    if not KEY_STATE["on_fallback"]:
+        KEY_STATE["on_fallback"] = True
+        log.warning("main LiteLLM key is over budget; using %s: %s", config.LITELLM_FALLBACK_ALIAS, body[:200])
+        asyncio.create_task(notify.slack(f"⚠️ Eval portal: the main LiteLLM key is over budget, so reviews now use "
+                                         f"{config.LITELLM_FALLBACK_ALIAS}. The main key is tried again every "
+                                         f"{PRIMARY_RECHECK // 60} minutes."))
+
+
+def _primary_ok():
+    if KEY_STATE["on_fallback"]:
+        KEY_STATE["on_fallback"] = False
+        log.warning("main LiteLLM key works again; back on it")
+        asyncio.create_task(notify.slack("✅ Eval portal: the main LiteLLM key works again; reviews are back on it."))
+
+
 @app.get("/__meter_health")
 def meter_health():
     return {"ok": True}
@@ -148,18 +188,33 @@ async def forward(path: str, request: Request):
                                                             "message": "per-run model call limit reached"}}, status_code=429)
 
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_HEADERS}
-    headers["authorization"] = f"Bearer {config.LITELLM_API_KEY}"
     headers["accept-encoding"] = "identity"
     headers["x-litellm-tags"] = _tags(run_id)
     url = f"{config.LITELLM_BASE_URL}/{path}"
     if request.url.query:
         url += "?" + request.url.query
-    upstream = await client().send(client().build_request(request.method, url, headers=headers, content=body),
-                                   stream=True)
+    keys, data = _keys(), None
+    for i, key in enumerate(keys):
+        headers["authorization"] = f"Bearer {key}"
+        upstream = await client().send(client().build_request(request.method, url, headers=headers, content=body),
+                                       stream=True)
+        primary = key == config.LITELLM_API_KEY
+        if upstream.status_code < 400:
+            if primary:
+                _primary_ok()
+            break
+        if primary and i + 1 < len(keys) and 400 <= upstream.status_code < 500:
+            data = await upstream.aread()
+            await upstream.aclose()
+            if over_budget(upstream.status_code, data):
+                _primary_out(data.decode(errors="replace"))
+                data = None
+                continue  # the same call again with the backup key
+        break
     out_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in DROP_RESPONSE}
     content_type = upstream.headers.get("content-type", "")
 
-    if is_message and "text/event-stream" in content_type:
+    if is_message and "text/event-stream" in content_type and data is None:
         meter = SSEUsage()
 
         async def stream():
@@ -174,8 +229,9 @@ async def forward(path: str, request: Request):
 
         return StreamingResponse(stream(), status_code=upstream.status_code, headers=out_headers)
 
-    data = await upstream.aread()
-    await upstream.aclose()
+    if data is None:  # not already read while checking for "budget exceeded"
+        data = await upstream.aread()
+        await upstream.aclose()
     if is_message:
         usage = {}
         try:
