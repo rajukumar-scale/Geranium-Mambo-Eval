@@ -603,12 +603,20 @@ class Runner:
             else:
                 args, extra = self._command(chat, session_args, followup=self._is_followup(run_id)), None
             scratch = pause.scratch(attempt) if run.get("continuation") and pause.load(attempt) else None
-            payload = await asyncio.to_thread(boatrun.build_payload, run_id, attempt, prompt, args, env, extra, scratch)
+            bundle = await asyncio.to_thread(boatrun.current_bundle)
+            payload = await asyncio.to_thread(boatrun.build_payload, run_id, attempt, prompt, args, env, extra, scratch,
+                                              bundle)
             self._push_activity(run_id, attempt, "🚤 Starting a fresh review machine")
+
+            async def upload_bundle():
+                await boatrun.retrying("bundle upload", lambda: boatrun.scp_to(box, bundle, "/tmp/evp_bundle.tgz"), tries=3)
 
             async def start_review():
                 rc, out = await boatrun.ssh(box, "sudo mkdir -p /tmp/payload && sudo tar xzf /tmp/payload.tgz -C /tmp/payload "
                                                  "&& sudo bash /tmp/payload/run.sh")
+                if "BUNDLE_MISSING" in out:  # the pool thought this box held the bundle: send it, then try again
+                    await upload_bundle()
+                    raise RuntimeError("the review machine didn't hold the eval bundle; sent it")
                 if "CLAUDE_NOT_READY" in out:
                     raise boatrun.MachineNotReady(f"review machine setup failed: {out[-300:]}")
                 if "STARTED" not in out:
@@ -629,8 +637,12 @@ class Runner:
                 if self.cancel_requested(run_id):  # cancelled while the machine was starting: don't start the review
                     raise RuntimeError(CANCELLED)
                 try:
-                    await boatrun.retrying("upload", lambda: boatrun.scp_to(box, payload, "/tmp/payload.tgz"), tries=3)
+                    uploads = [boatrun.retrying("upload", lambda: boatrun.scp_to(box, payload, "/tmp/payload.tgz"), tries=3)]
+                    if not boxpool.has_bundle(box, bundle.name):  # a reused box keeps the bundle of its last review
+                        uploads.append(upload_bundle())
+                    await asyncio.gather(*uploads)
                     await boatrun.retrying("review start", start_review)
+                    boxpool.note_bundle(box, bundle.name)
                     break
                 except RuntimeError as error:
                     if machine == MACHINE_TRIES:

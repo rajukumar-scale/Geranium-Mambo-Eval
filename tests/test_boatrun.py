@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -32,6 +33,13 @@ class PayloadTest(unittest.TestCase):
         with tarfile.open(payload) as tar:
             return {name: tar.extractfile(name).read().decode() for name in tar.getnames()
                     if not name.endswith(".tgz")}  # bundle.tgz / state.tgz are binary
+
+    def test_the_payload_names_the_bundle_instead_of_carrying_it(self):
+        payload = boatrun.build_payload("run1", "att1", "do /prompt", ["claude", "-p"], {})
+        with tarfile.open(payload) as tar:
+            names = tar.getnames()
+            self.assertNotIn("bundle.tgz", names)
+            self.assertEqual(tar.extractfile("bundle_name").read().decode(), "bundle.tgz")
 
     def test_review_resumes_the_same_session_with_the_same_settings(self):
         files = self.files(["claude", "-p", "--append-system-prompt", "guard text", "--session-id", "S-1"])
@@ -113,6 +121,69 @@ class PayloadTest(unittest.TestCase):
         self.assertFalse((self.root / "task_inputs/old.txt").exists())
         self.assertTrue((self.root / "task_inputs/new.txt").exists())
         self.assertFalse((self.root / "cache/old.idx").exists())
+
+
+class BundleCacheTest(unittest.TestCase):
+    """The RUN_SH block that keeps the eval bundle on the box and takes a new upload only when one was sent."""
+
+    def setUp(self):
+        self.d = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.d, ignore_errors=True)
+        (self.d / "payload").mkdir()
+        (self.d / "root").mkdir()
+
+    def bundle(self, path, marker):
+        src = self.d / "src" / marker
+        src.mkdir(parents=True)
+        (src / "file").write_text(marker)
+        with tarfile.open(path, "w:gz") as tar:
+            tar.add(str(src / "file"), "work/file")
+
+    def run_block(self, name, runner_uid="99999"):
+        (self.d / "payload" / "bundle_name").write_text(name)
+        block = "P=/tmp/payload\n" + boatrun.RUN_SH.split("P=/tmp/payload\n")[1].split("mkdir -p /work/Evals")[0]
+        block = (block.replace("P=/tmp/payload", f"P={self.d}/payload").replace("/var/cache/evp", f"{self.d}/cache")
+                 .replace("/tmp/evp_bundle.tgz", f"{self.d}/up.tgz").replace("$(id -u runner)", runner_uid)
+                 .replace("stat -c %u", "statu").replace('-C /\n', f"-C {self.d}/root\n"))
+        script = ('set -euo pipefail\nstatu() { stat -c %u "$1" 2>/dev/null || stat -f %u "$1"; }\n'
+                  f"{block}echo UNPACKED\n")
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+
+    def unpacked(self):
+        return (self.d / "root" / "work" / "file").read_text()
+
+    def test_an_upload_is_cached_and_unpacked(self):
+        self.bundle(self.d / "up.tgz", "v1")
+        self.assertIn("UNPACKED", self.run_block("bundle-v1.tgz"))
+        self.assertEqual(self.unpacked(), "v1")
+        self.assertTrue((self.d / "cache" / "bundle-v1.tgz").is_file())
+        self.assertFalse((self.d / "up.tgz").exists())
+
+    def test_a_reused_box_unpacks_its_cached_bundle(self):
+        self.bundle(self.d / "up.tgz", "v1")
+        self.run_block("bundle-v1.tgz")
+        shutil.rmtree(self.d / "root" / "work")
+        self.assertIn("UNPACKED", self.run_block("bundle-v1.tgz"))  # nothing uploaded this time
+        self.assertEqual(self.unpacked(), "v1")
+
+    def test_a_new_version_replaces_the_old_one(self):
+        self.bundle(self.d / "up.tgz", "v1")
+        self.run_block("bundle-v1.tgz")
+        self.bundle(self.d / "up.tgz", "v2")
+        self.assertIn("UNPACKED", self.run_block("bundle-v2.tgz"))
+        self.assertEqual(self.unpacked(), "v2")
+        self.assertEqual(sorted(p.name for p in (self.d / "cache").iterdir()), ["bundle-v2.tgz"])
+
+    def test_missing_bundle_is_reported(self):
+        out = self.run_block("bundle-v1.tgz")
+        self.assertIn("BUNDLE_MISSING", out)
+        self.assertNotIn("UNPACKED", out)
+
+    def test_an_upload_planted_by_the_runner_user_is_ignored(self):
+        self.bundle(self.d / "up.tgz", "evil")
+        out = self.run_block("bundle-v1.tgz", runner_uid=str(os.getuid()))
+        self.assertIn("BUNDLE_MISSING", out)
+        self.assertFalse((self.d / "up.tgz").exists())
 
 
 class WaitForClaudeTest(unittest.TestCase):

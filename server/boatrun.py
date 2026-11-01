@@ -52,7 +52,17 @@ if [ -s /tmp/claude.pid ] && { [ -e /tmp/claude.exit ] || kill -0 "$(cat /tmp/cl
   echo STARTED; exit 0
 fi
 P=/tmp/payload
-tar xzf $P/bundle.tgz -C /
+# The eval bundle stays on the box (root only) between reviews; the server uploads it, as /tmp/evp_bundle.tgz, only
+# when this box doesn't hold that version yet. A reused box then skips ~9 MB of upload per review (2026-11-01).
+C=/var/cache/evp; B="$C/$(cat $P/bundle_name)"
+mkdir -p $C; chmod 700 $C
+if [ -s /tmp/evp_bundle.tgz ] && [ "$(stat -c %u /tmp/evp_bundle.tgz)" != "$(id -u runner)" ]; then
+  mv /tmp/evp_bundle.tgz "$B.tmp" && mv "$B.tmp" "$B"
+fi
+rm -f /tmp/evp_bundle.tgz
+find $C -maxdepth 1 -type f ! -name "$(basename "$B")" -delete
+if [ ! -s "$B" ]; then echo "BUNDLE_MISSING"; exit 0; fi
+tar xzf "$B" -C /
 mkdir -p /work/Evals/task_inputs /work/Evals/.cache /home/runner
 tar xzf $P/state.tgz -C /
 chown -R root:root /work/Evals /work/claude /work/.claude
@@ -63,7 +73,7 @@ if [ -s $P/scratch.tgz ]; then  # continuing a review paused by the time limit: 
   tar xzf $P/scratch.tgz -C /tmp --no-same-owner
   for n in $(tar tzf $P/scratch.tgz | cut -d/ -f1 | sort -u); do chown -R runner:runner "/tmp/$n"; done
 fi
-chmod 711 $P; chmod 600 $P/bundle.tgz $P/state.tgz
+chmod 711 $P; chmod 600 $P/state.tgz
 chown runner:runner $P/run.env $P/cmd.sh $P/prompt.txt; chmod 600 $P/run.env $P/prompt.txt
 if [ -e $P/resume.sh ]; then chown runner:runner $P/resume.sh $P/resume_prompt.txt; chmod 600 $P/resume_prompt.txt; fi
 
@@ -192,6 +202,10 @@ def _bundle():
         return _pack_bundle()
 
 
+def current_bundle():
+    return _bundle()
+
+
 def _pack_bundle():
     base = Path(os.path.realpath(config.EVAL_BASE_DIR))
     # In-place edits (skill effort, refreshed hash pins) don't touch the top folders' mtimes, so include them.
@@ -242,14 +256,15 @@ def _only_session(info, keep):
     return info
 
 
-def build_payload(run_id, attempt_id, prompt, args, env, extra=None, scratch=None):
+def build_payload(run_id, attempt_id, prompt, args, env, extra=None, scratch=None, bundle=None):
     """Write payload.tgz for one run and return its path. `extra`: more files for /tmp/payload.
-    `scratch`: a paused review's /tmp scratch files (scratch.tgz), put back by RUN_SH."""
+    `scratch`: a paused review's /tmp scratch files (scratch.tgz), put back by RUN_SH. The eval bundle isn't in it,
+    only its name: the runner uploads the bundle separately when the box lacks it (`bundle`, default the current one)."""
     root = workspace.attempt_dir(attempt_id)
     work = root / "logs" / f"{run_id}.payload"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-    shutil.copy(_bundle(), work / "bundle.tgz")
+    (work / "bundle_name").write_text((bundle or _bundle()).name)
     if scratch:
         shutil.copy(scratch, work / "scratch.tgz")
     resumed = args[args.index("--resume") + 1] if "--resume" in args[:-1] else None
