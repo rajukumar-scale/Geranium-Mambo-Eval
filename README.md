@@ -289,6 +289,8 @@ run, so it runs one run at a time.
 - `server/workspace.py`: attempt folders, mounts and the report parser.
 - `server/proofs.py`: verification codes.
 - `server/notify.py`: Slack.
+- `server/plan.py` + `server/prompts/`: the "plan your task" kickoff (pilot `PLAN_PILOT`): one card per attempt
+  before the first /prompt, and the early guard added to the assistant's rules (checks an idea against the guides).
 - `web/`: the chat, admin and verify pages (plain HTML/JS, marked + DOMPurify from a CDN).
 - `runner/Dockerfile`: the sandbox image (Ubuntu, Python 3, Claude Code 2.1.296).
 - `deploy/`: the VM setup and update scripts, systemd unit and Caddyfile.

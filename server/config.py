@@ -50,6 +50,9 @@ EVAL_BASE_DIR = Path(os.path.abspath(_get("EVAL_BASE_DIR", ROOT.parent / "New_Ev
 # Contributor guidelines the chat assistant reads (hardness, tool-call minimum). Portal-owned, not part of the eval
 # release: every review workspace gets them at work/guidelines (boat bundle, docker mount, local workspace).
 GUIDELINES_DIR = ROOT / "server" / "guidelines"
+# Portal-owned text for the "plan your task" kickoff (server/plan.py): the card, the hidden note behind its button and
+# the early guard appended to the assistant's rules. Read by the portal itself; not copied into review workspaces.
+PROMPTS_DIR = ROOT / "server" / "prompts"
 UNIVERSE_DIRS = _list("UNIVERSE_DIRS", "HarmonyGames_GitHub,HarmonyGames_Gmail,HarmonyGames_Other_Services")
 DATED_UNIVERSES = ("Universe_Normal", "Universe_SynthCut")
 
@@ -194,6 +197,9 @@ RELEASE_GRACE_HOURS = float(_get("RELEASE_GRACE_HOURS", 2))
 # Who sees the chat page's "Known data issues" sidebar (server/known_issues.py): emails or Outlier IDs, matched to
 # the attempt's owner or the admin login. "*" = everyone; empty = nobody (off).
 KNOWN_ISSUES_PILOT = _list("KNOWN_ISSUES_PILOT", "")
+# Who gets the "plan your task" kickoff card (server/plan.py): emails or Outlier IDs, matched to the attempt's owner
+# (never an admin viewing the chat). "*" = everyone; empty = nobody (off).
+PLAN_PILOT = _list("PLAN_PILOT", "")
 
 DEFAULT_MODEL = _get("DEFAULT_MODEL", "claude-opus-5-5")
 # Thinking effort for every run. The bundled skills pin xhigh; the portal rewrites that in its own copy.

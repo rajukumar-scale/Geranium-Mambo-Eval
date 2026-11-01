@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Build server/known_issues.json, the chat page's "Known data issues" list, from the base-data review files.
+"""Build server/known_issues.json, the chat page's "Known data issues" list, from the base-data review files, and
+server/guidelines/known_data_issues.md, the same list (same ids) in plain language for the chat assistant, which every
+review workspace gets at guidelines/known_data_issues.md (the plan note and the early guard read it).
 
     python3 deploy/build_known_issues.py ~/Downloads/known_broken_data_2026-10-30
 
@@ -13,7 +15,7 @@ universe exports):
 
 FAIL counts and levels always come from the cluster files; the short titles and plain-language fixes are written here.
 A new review: point this at its folder, add titles for new ids (the script stops and names any it lacks), run it,
-and commit the JSON. The date in the folder name becomes the sidebar header's date (or pass --verified).
+and commit the JSON and the Markdown. The date in the folder name becomes the sidebar header's date (or pass --verified).
 """
 
 import argparse
@@ -23,6 +25,9 @@ import sys
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "server" / "known_issues.json"
+MD_OUT = Path(__file__).resolve().parent.parent / "server" / "guidelines" / "known_data_issues.md"
+# Universe -> task date label, in the order listed; the same labels as server/workspace.py UNIVERSE_DATES (a test checks).
+UNIVERSE_LABELS = {"synthcut": "Oct 1, 2025 (synth-cut)", "normal": "Feb 14, 2026 (normal)"}
 MAX_TITLE_WORDS = 8
 
 # ---- synth-cut (Oct 1, 2025) ------------------------------------------------------------------------------------
@@ -347,11 +352,36 @@ def check(issues):
         assert len(i["title"].split()) <= MAX_TITLE_WORDS, f"{i['id']}: title over {MAX_TITLE_WORDS} words: {i['title']}"
 
 
+def markdown(data):
+    """The list as plain-language Markdown for the chat assistant, grouped by task date, in the JSON's order."""
+    lines = ["# Known data issues", "",
+             f"Base-data records in the HarmonyGames universes that contradict each other, checked on both sides in the "
+             f"universe exports (checked {data['verified']}). A task graded on one of these usually fails Cross-Service "
+             "Coherence: the agent can't tell which side is right, so no answer clearly wins. They are the same ids as "
+             "the chat page's \"Known data issues\" sidebar, so the contributor can look them up there.", "",
+             "- **avoid**: confirmed. Don't build a graded answer, an OE or a rubric row on it, and never use it as the trap.",
+             "- **watch**: only partly confirmed, or seen in a single report. Check both sides before relying on it.", "",
+             "Built by deploy/build_known_issues.py together with server/known_issues.json; edit the script, not this file."]
+    for universe, label in UNIVERSE_LABELS.items():
+        issues = [i for i in data["issues"] if i["universe"] == universe]
+        lines += ["", f"## Task date {label}: {len(issues)} issues", ""]
+        for i in issues:
+            fails = f"caused {i['fails']} FAIL{'' if i['fails'] == 1 else 's'}" if i["fails"] else "caused no FAILs yet"
+            lines.append(f"### {i['id']} · {i['title']} ({i['level']}, {fails})")
+            lines.append(f"- Don't grade: {i['dont']}")
+            lines.append(f"- Why: {i['why']}")
+            if i.get("safer"):
+                lines.append(f"- Safer: {i['safer']}")
+            lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("src", type=Path, help="folder with cb_list_*.md, clusters_*.json, known_base_issues_*.md")
     parser.add_argument("--verified", help="date the list was checked (default: the date in the folder name)")
     parser.add_argument("--out", type=Path, default=OUT)
+    parser.add_argument("--md-out", type=Path, default=MD_OUT)
     args = parser.parse_args()
     verified = args.verified or (re.search(r"\d{4}-\d{2}-\d{2}", args.src.name) or [None])[0]
     if not verified:
@@ -368,9 +398,11 @@ def main():
                      "Built by deploy/build_known_issues.py; edit there, not here.",
             "issues": issues}
     args.out.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+    args.md_out.write_text(markdown(data))
     counts = {u: sum(i["universe"] == u for i in issues) for u in ("synthcut", "normal")}
     watch = sum(i["level"] == "watch" for i in issues)
-    print(f"wrote {args.out}: {counts['synthcut']} synth-cut + {counts['normal']} normal issues ({watch} watch)")
+    print(f"wrote {args.out} and {args.md_out}: {counts['synthcut']} synth-cut + {counts['normal']} normal issues "
+          f"({watch} watch)")
 
 
 if __name__ == "__main__":

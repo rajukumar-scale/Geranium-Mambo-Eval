@@ -3,6 +3,7 @@
 
 import importlib.util
 import json
+import re
 import tempfile
 import time
 import unittest
@@ -78,6 +79,30 @@ class WatchRuleTest(unittest.TestCase):
         self.assertEqual(watch_level(partial=False, reports=40), "avoid")
         self.assertEqual(watch_level(partial=True, reports=40), "watch")
         self.assertEqual(watch_level(partial=False, reports=1), "watch")
+
+
+class MarkdownTest(unittest.TestCase):
+    """server/guidelines/known_data_issues.md: the same list for the chat assistant (every workspace gets it at
+    guidelines/), built with the JSON by deploy/build_known_issues.py."""
+
+    def setUp(self):
+        self.data = json.loads(known_issues.PATH.read_text())
+        self.md = (config.GUIDELINES_DIR / "known_data_issues.md").read_text()
+
+    def test_same_ids_in_the_same_order(self):
+        ids = re.findall(r"^### ((?:SC|NB)-\d+) · ", self.md, re.M)
+        self.assertEqual(ids, [i["id"] for i in self.data["issues"]])
+
+    def test_matches_a_fresh_build_from_the_json(self):
+        self.assertEqual(self.md, converter().markdown(self.data), "rerun deploy/build_known_issues.py")
+
+    def test_grouped_by_task_date_with_the_portal_labels(self):
+        labels = converter().UNIVERSE_LABELS
+        self.assertEqual(labels, {u: workspace.UNIVERSE_DATES[u][1] for u in known_issues.UNIVERSES})
+        self.assertEqual(list(labels), list(known_issues.UNIVERSES))
+        for label in labels.values():
+            self.assertIn(f"## Task date {label}", self.md)
+        self.assertIn(self.data["verified"], self.md)
 
 
 class PilotTest(unittest.TestCase):

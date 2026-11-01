@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -75,6 +75,9 @@ async def startup():
     asyncio.create_task(housekeeping.loop())
     asyncio.create_task(runner_image.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
+    if config.PLAN_PILOT and plan.placeholders():
+        log.warning("PLAN_PILOT is on but these server/prompts files still hold placeholder text: %s",
+                    ", ".join(plan.placeholders()))
 
 
 # ---- helpers ------------------------------------------------------------------
@@ -476,6 +479,10 @@ def logout():
 @app.get("/api/me")
 def me(request: Request):
     session = current_user(request)
+    try:  # the chat page calls this whenever it opens a chat: the first time, before any /prompt, post the kickoff card
+        plan.maybe_kickoff(session, db.get_chat(session["attempt_id"]))
+    except Exception:  # noqa: BLE001 - the card must never stop the chat from opening
+        log.exception("plan kickoff failed for %s", session["attempt_id"])
     return for_viewer(session, {**chat_state(session["attempt_id"]), "admin": session.get("admin"),
                                 "cost_access": bool(session.get("admin")) and admin_role(session["admin"]) == "owner",
                                 "spend": spend.status(db.get_chat(session["attempt_id"])),

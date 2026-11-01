@@ -610,8 +610,9 @@ function messageHtml(m, opts = {}) {
     return `<div class="msg system"><div class="bubble proofcard${meta.outdated ? " stale" : ""}"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? " (admin override)" : ""}</b>${meta.outdated ? ` <span class="pill OUTDATED">OUTDATED</span>` : ""}
       <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}${CHECKABLE.has(meta.stage) && meta.fingerprint ? `<button data-taxocheck="${m.id}">Check my taxonomy</button>` : ""}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
   }
+  const kickoff = meta.kickoff ? " kickoff" : "";  // the plan-your-task card (server/plan.py): solid, not a dashed note
   const warn = m.meta && (m.meta.spend_flag || m.meta.warn) ? " warnnote" : "";
-  return `<div class="msg system"><div class="bubble${warn}">${md(m.content)}<div class="ts-row">${ts}</div></div></div>`;
+  return `<div class="msg system"><div class="bubble${warn}${kickoff}">${md(m.content)}<div class="ts-row">${ts}</div></div></div>`;
 }
 
 function wireMessageClicks(container, getMessage, reportName) {
