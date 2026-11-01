@@ -27,7 +27,9 @@ def _runs_out(left, per_hour, now, reset):
             "before_reset": bool(reset) and at < reset}
 
 
-def summarize(row):
+def summarize(row, query_id=None, portal_share=True):
+    """One key's figures. portal_share=False for the backup key: the portal's own spend estimate covers all its runs,
+    whichever key carried them, so it is shown once, on the main key."""
     r = {k.lower(): v for k, v in row.items()}
     cap, spent = float(r.get("max_budget") or 0), float(r.get("spend") or 0)
     now, reset = float(r.get("checked_at") or time.time()), r.get("budget_reset_at")
@@ -39,10 +41,12 @@ def summarize(row):
     pace_3h = _runs_out(left, (r.get("spend_3h") or 0) / 3, now, reset)
     # The portal's own share, from its runs' costs (LiteLLM sends no per-call cost header to the proxy).
     day_ago = time.time() - 86400
-    runs = db.q("select cost_estimate, models, created_at from runs where created_at>=? and coalesce(loadtest,0)=0",
-                (min(cycle_start or day_ago, day_ago),))
-    portal = {"cycle": sum(spend.run_spend(x) for x in runs if x["created_at"] >= (cycle_start or day_ago)),
-              "day": sum(spend.run_spend(x) for x in runs if x["created_at"] >= day_ago)}
+    portal = None
+    if portal_share:
+        runs = db.q("select cost_estimate, models, created_at from runs where created_at>=? and coalesce(loadtest,0)=0",
+                    (min(cycle_start or day_ago, day_ago),))
+        portal = {"cycle": sum(spend.run_spend(x) for x in runs if x["created_at"] >= (cycle_start or day_ago)),
+                  "day": sum(spend.run_spend(x) for x in runs if x["created_at"] >= day_ago)}
     # Only LiteLLM's own counter can trip its block; SMIG spend counts toward the shown total, not the block.
     litellm_spent = float(r["litellm_spend"]) if r.get("litellm_spend") is not None else spent
     blocked = bool(r.get("blocked")) or (cap and litellm_spent >= cap)
@@ -53,9 +57,10 @@ def summarize(row):
             "cycle": r.get("budget_duration"), "cycle_start": cycle_start, "resets_at": reset,
             "spend_1h": r.get("spend_1h"), "spend_3h": r.get("spend_3h"), "spend_24h": r.get("spend_24h"),
             "pace_24h": pace_24h, "pace_3h": pace_3h, "blocked": blocked, "level": level,
-            "portal_cycle": round(portal["cycle"], 2), "portal_24h": round(portal["day"], 2),
+            "portal_cycle": round(portal["cycle"], 2) if portal else None,
+            "portal_24h": round(portal["day"], 2) if portal else None,
             "synced_at": r.get("key_synced_at"), "last_request_at": r.get("last_request_at"), "checked_at": now,
-            "query_url": f"{config.REDASH_URL}/queries/{config.BUDGET_QUERY_ID}"}
+            "query_url": f"{config.REDASH_URL}/queries/{query_id or config.BUDGET_QUERY_ID}"}
 
 
 DAY = 86400
@@ -96,11 +101,15 @@ async def status(force=False):
     if not force and _cache["data"] and time.time() - _cache["at"] < CACHE_SEC:
         return _cache["data"]
     age = 0 if force else CACHE_SEC
-    lookups = [auth.redash_rows(config.BUDGET_QUERY_ID, max_age=age)]
-    if config.BUDGET_DAILY_QUERY_ID:
-        lookups.append(auth.redash_rows(config.BUDGET_DAILY_QUERY_ID, max_age=age))
-    results = await asyncio.gather(*lookups, return_exceptions=True)
-    rows, day_rows = results[0], (results[1] if len(results) > 1 else [])
+    async def none():
+        return []
+
+    results = await asyncio.gather(
+        auth.redash_rows(config.BUDGET_QUERY_ID, max_age=age),
+        auth.redash_rows(config.BUDGET_DAILY_QUERY_ID, max_age=age) if config.BUDGET_DAILY_QUERY_ID else none(),
+        auth.redash_rows(config.BACKUP_BUDGET_QUERY_ID, max_age=age) if config.BACKUP_BUDGET_QUERY_ID else none(),
+        return_exceptions=True)
+    rows, day_rows, backup_rows = results
     if isinstance(day_rows, Exception):  # the chart is optional: keep the rest of the panel
         log.warning("daily budget lookup failed: %s", day_rows)
         day_rows = None
@@ -117,5 +126,26 @@ async def status(force=False):
     if rows:
         data["daily"] = daily(day_rows, data) if day_rows is not None else None
         data["log_gap"] = log_gap(data)
+    if config.BACKUP_BUDGET_QUERY_ID:
+        data["backup"] = backup(backup_rows)
+        data["active"] = active_key(data)
     _cache.update(at=time.time(), data=data)
     return data
+
+
+def backup(rows):
+    """The backup key's figures, or an error the panel shows in its place."""
+    if isinstance(rows, Exception):
+        log.warning("backup key budget lookup failed: %s", rows)
+        return {"error": f"Couldn't read the backup key's budget: {str(rows)[:200]}"}
+    if not rows:
+        return {"error": "The backup key wasn't found in LiteLLM's tables."}
+    return summarize(rows[0], query_id=config.BACKUP_BUDGET_QUERY_ID, portal_share=False)
+
+
+def active_key(data):
+    """Which key the meter is on: the backup once the main key is at its cap (proxy.py switches on LiteLLM's
+    "budget exceeded", which counts SMIG spend too, so the shown total reaching the cap is the sign)."""
+    if data.get("error") or (data.get("backup") or {}).get("error"):
+        return "main"
+    return "backup" if data.get("blocked") or (data.get("pct") or 0) >= 100 else "main"

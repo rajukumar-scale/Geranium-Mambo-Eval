@@ -93,6 +93,8 @@ REDASH_LOGIN_QUERY_ID = _int("REDASH_LOGIN_QUERY_ID", 387117)
 # Budget of the LiteLLM key, for the admin page: a saved query on the LiteLLM tables (0 = no budget panel).
 BUDGET_QUERY_ID = _int("BUDGET_QUERY_ID", 388350)
 BUDGET_DAILY_QUERY_ID = _int("BUDGET_DAILY_QUERY_ID", 389171)  # the key's spend per UTC day, for the bar chart (0 = none)
+# The same for the backup key the meter falls back to (LITELLM_FALLBACK_API_KEY): 388350 with the alias swapped (0 = none).
+BACKUP_BUDGET_QUERY_ID = _int("BACKUP_BUDGET_QUERY_ID", 397844)
 # The admin Cost page: one saved Redash query with every fact since 2026-08-01 (per day, per task x contributor x day,
 # each submission), refreshed in the background; the page cuts any date range from it. v4 (2026-10-28) replaces the
 # per-range queries 390879 / 390881 / 390882, with the same rules (Atlas Commercial spend on every key, LiteLLM + SMIG).

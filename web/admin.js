@@ -67,12 +67,20 @@ async function loadBudget(refresh = false) {
   const b = S.budget, chip = $("#budget-btn");
   chip.classList.toggle("hidden", !!b.off);
   if (b.off) return;
-  chip.className = "budget-chip " + (b.error ? "warn" : b.level);
   const soon = t => new Date(t * 1000).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
-  const out = b.pace_24h && b.pace_24h.before_reset ? ` · runs out ~${soon(b.pace_24h.at)}` : "";
+  const meter = k => `<span class="bmeter"><span style="width:${Math.min(100, k.pct || 0)}%"></span></span>`;
+  const out = k => (k.pace_24h && k.pace_24h.before_reset ? ` · runs out ~${soon(k.pace_24h.at)}` : "");
+  if (b.active === "backup") {  // the main key is at its cap and the meter carries every call on the backup key
+    const k = b.backup;
+    chip.className = "budget-chip " + (k.blocked ? "blocked" : k.level === "ok" ? "warn" : k.level);
+    chip.innerHTML = k.blocked ? "⛔ Both keys used up" : `${meter(k)}On backup key ${k.pct}%${out(k)}`;
+    chip.title = `The main key is at its cap, so reviews use the backup key ${k.key_alias}: ${usd(k.spend)} of ${usd(k.max_budget)} this ${k.cycle} cycle. Click for details.`;
+    return;
+  }
+  chip.className = "budget-chip " + (b.error ? "warn" : b.level);
   chip.innerHTML = b.error ? "Key budget: unknown"
     : b.blocked ? "⛔ Key budget used up"
-    : `<span class="bmeter"><span style="width:${Math.min(100, b.pct || 0)}%"></span></span>Key budget ${b.pct}%${out}${b.log_gap ? " ⚠ undercounted" : ""}`;
+    : `${meter(b)}Key budget ${b.pct}%${out(b)}${b.log_gap ? " ⚠ undercounted" : ""}`;
   chip.title = b.error || `${b.key_alias}: ${usd(b.spend)} of ${usd(b.max_budget)} this ${b.cycle} cycle.`
     + (b.log_gap ? " May be too low: neither LiteLLM nor SMIG has recorded the key lately." : "") + " Click for details.";
 }
@@ -152,8 +160,23 @@ function openBudget() {
     : `<div>${label} (${usd(p.per_hour)}/h): runs out in ~${hoursText(p.hours)}, ${esc(when(p.at))}
         ${p.before_reset ? `<span class="chip flag">before the reset</span>` : `<span class="chip">after the reset</span>`}</div>`;
   const ago = t => t ? `${esc(when(t))} (${fmtAgo(t)})` : "–";
-  const body = b.error ? `<div class="error">${esc(b.error)}</div>` : `
+  const k = b.backup;
+  const inUse = !k ? "" : b.active === "backup"
+    ? `<div class="error" style="margin:0 0 10px">The main key is at its cap, so every review call now goes through the backup key (below). The meter tries the main key again every 10 minutes and moves back once it works.</div>`
+    : `<p class="muted" style="margin-top:0">In use: the main key. The backup key (below) takes over if the main key reaches its cap.</p>`;
+  const backupSection = !k ? "" : k.error ? `<h3>Backup key</h3><div class="error">${esc(k.error)}</div>` : `
+    <h3>Backup key${b.active === "backup" ? ` <span class="chip flag">in use</span>` : ""}</h3>
+    <p style="margin-top:0"><b style="font-size:18px">${usd(k.spend)}</b> <span class="muted">of ${usd(k.max_budget)} · ${k.pct}% used · ${usd(k.left)} left</span></p>
+    <div class="spend-meter budget-meter ${esc(k.level)}"><span style="width:${Math.min(100, k.pct || 0)}%"></span></div>
+    <div class="rc-row"><div class="k">Key</div><div class="mono">${esc(k.key_alias)} · ${esc(k.cycle || "")} cycle${k.blocked ? ` <span class="chip flag">used up</span>` : ""}</div></div>
+    <div class="rc-row"><div class="k">Resets</div><div>${k.resets_at ? `${esc(when(k.resets_at))} (in ${hoursText((k.resets_at - k.checked_at) / 3600)})` : "–"}</div></div>
+    <div class="rc-row"><div class="k">Burn</div><div>${usd(k.spend_1h)} in the last hour · ${usd(k.spend_3h)} in 3 h · ${usd(k.spend_24h)} in 24 h</div></div>
+    <div class="rc-row"><div class="k">Runs out</div><div>${k.blocked ? "Already at the cap." : pace(k.pace_24h, "At the 24 h pace") + pace(k.pace_3h, "At the 3 h pace")}</div></div>
+    <div class="rc-row"><div class="k">Data as of</div><div>${ago(k.synced_at)} · last request ${ago(k.last_request_at)}</div></div>
+    ${k.query_url ? `<p style="margin-bottom:0"><a href="${esc(k.query_url)}" target="_blank" rel="noopener">Backup key query in Redash</a></p>` : ""}`;
+  const body = b.error ? `<div class="error">${esc(b.error)}</div>${backupSection}` : `
     ${b.stale ? `<div class="error">Couldn't refresh just now (${esc(b.stale)}); showing the last figures.</div>` : ""}
+    ${inUse}${k ? "<h3 style=\"margin-top:0\">Main key</h3>" : ""}
     <p style="margin-top:0"><b style="font-size:22px">${usd(b.spend)}</b> <span class="muted">of ${usd(b.max_budget)} · ${b.pct}% used · ${usd(b.left)} left</span></p>
     <div class="spend-meter budget-meter ${esc(b.level)}"><span style="width:${Math.min(100, b.pct || 0)}%"></span></div>
     ${spendChart(b)}
@@ -166,7 +189,8 @@ function openBudget() {
     <div class="rc-row"><div class="k">Data as of</div><div>${ago(b.synced_at)} · last request ${ago(b.last_request_at)}</div></div>
     <p class="muted" style="margin-bottom:0">The key is shared with the platform's own task traffic. The cap is set on the LiteLLM key, and LiteLLM
       stopped the key at the cap on Oct 11 (reviews here fail until the cycle resets or the cap is raised); since Oct 16 most calls go through SMIG.
-      Figures are LiteLLM's tables plus SMIG's usage records in Snowflake (a few minutes behind).</p>`;
+      Figures are LiteLLM's tables plus SMIG's usage records in Snowflake (a few minutes behind).</p>
+    ${backupSection}`;
   const w = openModal("LiteLLM key budget", body, `${S.owner ? `<a class="button" href="/admin/cost">Cost page</a>` : ""}<button data-refresh>Refresh now</button>${b.query_url ? `<a class="button" href="${esc(b.query_url)}" target="_blank" rel="noopener">Open in Redash</a>` : ""}`);
   wireSpendChart(w, b);
   const btn = w.querySelector("[data-refresh]");
