@@ -966,7 +966,7 @@ def proof_check_input(code: str, body: CheckInputBody, request: Request):
     if len(body.text) > 30_000_000:
         raise HTTPException(413, "That's too long to check here.")
     saved = None
-    if stage in taxo_check.TEXT_STAGES and fingerprint.for_attempt(payload["attempt_id"], stage) == payload["fingerprint"]:
+    if fingerprint.for_attempt(payload["attempt_id"], stage) == payload["fingerprint"]:
         entry = workspace.read_input(payload["attempt_id"], stage, limit=200_000_000)
         saved = "\n".join(f["text"] for f in (entry or {}).get("files", []) if f.get("text") is not None)
     try:
