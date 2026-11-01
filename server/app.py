@@ -21,7 +21,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -35,13 +35,33 @@ app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)  # boat's
 # Changes whenever the web files do: an open chat tab compares it on every reconnect and reloads after a deploy.
 WEB_BUILD = hashlib.sha256(b"".join(p.read_bytes() for p in sorted(WEB.glob("*")) if p.is_file())).hexdigest()[:12]
 NO_CACHE = {"Cache-Control": "no-cache"}  # browsers revalidate (cheap 304s), so a deploy shows up on the next load
+# Each revalidation is still a round trip over boat's slow link (0.2-2 s, 2026-11-01). The pages link their assets as
+# /static/x?v=WEB_BUILD, and a deploy changes WEB_BUILD and so every URL: browsers keep those without asking again.
+IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+FONTS = {"Cache-Control": "public, max-age=604800"}  # not in WEB_BUILD; a changed font gets a new file name
 
 
 class Static(StaticFiles):
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
-        response.headers.update(NO_CACHE)
+        if response.status_code in (200, 304) and b"v=" + WEB_BUILD.encode() in scope.get("query_string", b""):
+            response.headers.update(IMMUTABLE)
+        elif response.status_code in (200, 304) and path.startswith("fonts/"):
+            response.headers.update(FONTS)
+        else:
+            response.headers.update(NO_CACHE)
         return response
+
+
+def _versioned(html):
+    return re.sub(r'((?:src|href)="/static/[^"?]+)"', rf'\1?v={WEB_BUILD}"', html)
+
+
+PAGES = {p.name: _versioned(p.read_text()) for p in WEB.glob("*.html")}
+
+
+def page(name):
+    return HTMLResponse(PAGES[name], headers=NO_CACHE)
 
 
 app.mount("/static", Static(directory=WEB), name="static")
@@ -281,12 +301,12 @@ SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 @app.get("/")
 def index():
-    return FileResponse(WEB / "index.html", headers=NO_CACHE)
+    return page("index.html")
 
 
 @app.get("/admin")
 def admin_page():
-    return FileResponse(WEB / "admin.html", headers=NO_CACHE)
+    return page("admin.html")
 
 
 @app.get("/admin/cost")
@@ -295,7 +315,7 @@ def cost_page(request: Request):
     session = auth.unsign(request.cookies.get(auth.ADMIN_COOKIE, ""), 12 * 3600)
     if not session or admin_role(session.get("email")) != "owner":
         return RedirectResponse("/admin", status_code=303)
-    return FileResponse(WEB / "cost.html", headers=NO_CACHE)
+    return page("cost.html")
 
 
 @app.get("/admin/cbs")
@@ -304,7 +324,7 @@ def cbs_page(request: Request):
     session = auth.unsign(request.cookies.get(auth.ADMIN_COOKIE, ""), 12 * 3600)
     if not session or not admin_role(session.get("email")):
         return RedirectResponse("/admin", status_code=303)
-    return FileResponse(WEB / "cbs.html", headers=NO_CACHE)
+    return page("cbs.html")
 
 
 # ---- status page (public, like status.claude.com; no names, emails or task IDs) ----
@@ -312,7 +332,7 @@ def cbs_page(request: Request):
 @app.get("/status")
 @app.get("/status/history")
 def status_page():
-    return FileResponse(WEB / "status.html", headers=NO_CACHE)
+    return page("status.html")
 
 
 @app.get("/api/status")
@@ -385,7 +405,7 @@ async def admin_update_incident(iid: int, body: IncidentBody, request: Request):
 @app.get("/verify")
 @app.get("/verify/{code}")
 def verify_page(code: str = ""):
-    return FileResponse(WEB / "verify.html", headers=NO_CACHE)
+    return page("verify.html")
 
 
 @app.get("/healthz")
@@ -1880,7 +1900,7 @@ async def evalfiles_update(body: EvalUpdateBody, request: Request):
 
 @app.get("/admin/invite/{token}")
 def invite_page(token: str):
-    return FileResponse(WEB / "admin.html", headers=NO_CACHE)
+    return page("admin.html")
 
 
 @app.get("/api/admin/admins")

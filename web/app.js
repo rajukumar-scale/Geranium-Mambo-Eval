@@ -4,12 +4,14 @@ const state = { me: null, messages: [], lastId: 0, run: null, attachments: [], e
 const REPORT_FILE = { injection: "0_injection.md", prompt: "1_prompt.md", oe: "2_oe.md", rubric: "3_rubric.md", hardness: "1a_hardness.md" };
 
 async function boot() {
+  // Asked alongside /api/me rather than after it: one round trip less over boat's slow link before the chat shows.
+  const messages = api("/api/messages").catch(() => null);
   try {
     state.me = await api("/api/me");
   } catch (e) {
     return e.body && e.body.disabled ? undefined : showLogin();
   }
-  showApp();
+  showApp(messages);
 }
 
 // An admin disabled this contributor: every call answers 403 with disabled=true (api() calls this).
@@ -79,7 +81,7 @@ $("#menu").onclick = () => {
   localStorage.setItem("evp_side", hidden ? "hidden" : "shown");
 };
 
-async function showApp() {
+async function showApp(prefetched = null) {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#chip-attempt").textContent = "attempt " + state.me.attempt_id + (state.me.admin ? " · admin" : "");
@@ -90,7 +92,7 @@ async function showApp() {
   document.querySelector('#view-switch [data-view="cost"]').classList.toggle("hidden", !state.me.cost_access);  // owners only
   renderSide();
   loadHistory();
-  state.messages = await api("/api/messages");
+  state.messages = (await prefetched) || await api("/api/messages");
   state.lastId = state.messages.length ? state.messages[state.messages.length - 1].id : 0;
   renderMessages();
   setRun(state.me.active_run);
