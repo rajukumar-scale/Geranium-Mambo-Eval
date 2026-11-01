@@ -174,6 +174,8 @@ MAX_CALLS_PER_RUN = _int("MAX_CALLS_PER_RUN", 0)
 CB_SPEND_LIMIT_USD = float(_get("CB_SPEND_LIMIT_USD", 500))
 # boat.dev start limit per minute ($20 plan 12, $100 plan 30): new review boxes are requested no faster than this.
 BOAT_STARTS_PER_MIN = _int("BOAT_STARTS_PER_MIN", 12)
+# Slack alert when the boat wallet drops under this many dollars or boat can't start machines (boat_wallet.py; 0 = off).
+BOAT_WALLET_ALERT_USD = float(_get("BOAT_WALLET_ALERT_USD", "20"))
 # Where the eval zips live (the admin page's "Eval files" panel updates from these links).
 EVAL_ZIP_URL = _get("EVAL_ZIP_URL", "https://static.remotasks.com/uploads/6a5595596cf3031de47f0ea2").rstrip("/")
 # The zips, by name; a universe zip "<Normal|SynthCut>_HarmonyGames_X.zip" unpacks to Universe_<...>/<same name>.

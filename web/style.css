@@ -614,3 +614,6 @@ button.danger-solid:hover { border-color: var(--ink); }
 .cbs-app .th-sort:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px; }
 .cbs-people td.num, .cbs-people td:nth-child(2) { white-space: nowrap; }
 .check-panel ul.rows { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.navbtn.adminreq span { display: inline-block; min-width: 1.6em; padding: 0 6px; margin-left: 4px; border-radius: 9999px; background: var(--grey-90); color: var(--ink); font-size: 12px; text-align: center; }
+.navbtn.adminreq.alert { color: var(--error-ink); font-weight: 500; }
+.navbtn.adminreq.alert span { background: var(--negative); color: #000; }

@@ -666,7 +666,26 @@ $("#funnel-pick").addEventListener("click", e => { if (e.target.closest("[data-c
 })();
 
 const listTools = chatListTools($("#list-tools"), renderChats);
+// The top bar's "/admin requests (N)" button: the "/admin open" filter is easy to miss under the funnel panel.
+const openRequests = () => S.chats.filter(c => c.admin_open && !c.archived);
+function renderAdminRequests() {
+  const n = openRequests().length;
+  $("#adminreq-n").textContent = n;
+  $("#adminreq-btn").classList.toggle("alert", n > 0);
+}
+$("#adminreq-btn").onclick = () => {
+  S.funnelPick = null;
+  saveChatListPrefs({ chip: "admin" });
+  const search = $("#list-tools .list-search");
+  if (search) search.value = "";
+  if (S.steps) renderFunnel(S.steps);
+  renderChats();
+  $("#chats").scrollTop = 0;
+  const first = $("#chats [data-a]");
+  if (first && !openRequests().some(c => c.attempt_id === S.selected)) select(first.dataset.a);
+};
 function renderChats() {
+  renderAdminRequests();
   const list = S.chats.map(c => {
     const [cmd, verdict] = (c.last_review || "").split(" ");
     return { ...c, running: c.active_runs > 0, over: !!c.spend_flag, last_cmd: cmd, last_verdict: verdict };
