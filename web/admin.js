@@ -728,9 +728,44 @@ async function select(attempt) {
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 200;
     detail.messages.filter(m => !shown.has(m.id)).forEach(m => box.insertAdjacentHTML("beforeend", messageHtml(m, { admin: true })));
     if (nearBottom) box.scrollTop = box.scrollHeight;
+    markAdminMessages();
   }
   requestAnimationFrame(() => $("#detail").classList.remove("switching"));
 }
+
+// /admin requests inside a chat: the user's /admin messages are outlined (red while the request is open) and the
+// header's "Jump to /admin" button and each request line scroll to them, so they're easy to find in a long chat.
+function markAdminMessages() {
+  const open = (S.detail ? S.detail.admin_requests : []).filter(r => r.status === "open").map(r => r.created_at);
+  document.querySelectorAll("#messages [data-adminmsg]").forEach(el =>
+    el.classList.toggle("open", open.some(t => Math.abs(t - Number(el.dataset.at)) < 5)));
+  const all = document.querySelectorAll("#messages [data-adminmsg]").length;
+  const nOpen = document.querySelectorAll("#messages [data-adminmsg].open").length;
+  const btn = $("#detail-head [data-jumpadmin]");
+  if (btn) {
+    btn.classList.toggle("hidden", !all);
+    btn.classList.toggle("alert", nOpen > 0);
+    btn.textContent = nOpen ? `↓ Jump to /admin (${nOpen} open)` : `↓ Jump to /admin (${all})`;
+  }
+}
+let jumpIndex = 0;
+function jumpToAdmin(at = null) {
+  const els = [...document.querySelectorAll("#messages [data-adminmsg]")];
+  if (!els.length) return;
+  let el;
+  if (at != null) el = els.reduce((best, e) => Math.abs(Number(e.dataset.at) - at) < Math.abs(Number(best.dataset.at) - at) ? e : best);
+  else {  // the open ones first, newest first; each click goes to the next one
+    const open = els.filter(e => e.classList.contains("open")), pool = (open.length ? open : els).reverse();
+    el = pool[jumpIndex++ % pool.length];
+  }
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+}
+$("#detail-head").addEventListener("click", e => {
+  if (e.target.closest("[data-jumpadmin]")) { jumpToAdmin(); return; }
+  const req = e.target.closest("[data-jumpreq]");
+  if (req && !e.target.closest("summary .muted")) jumpToAdmin(Number(req.dataset.jumpreq));
+});
 
 function renderDetail(fresh = true) {
   const d = S.detail;
@@ -745,7 +780,7 @@ function renderDetail(fresh = true) {
   const openReqs = fresh ? new Set() : new Set([...document.querySelectorAll("#detail-head details[data-req][open]")].map(e => e.dataset.req));
   const requests = d.admin_requests.filter(r => r.status === "open").map(r => {
     const text = r.message || "", short = text.length > 160;
-    const line = `🚨 ${fmtTime(r.created_at)}: ${esc(short ? text.slice(0, 160).replace(/\s+/g, " ") + "…" : text)}`;
+    const line = `<a href="#" class="adm-jump" data-jumpreq="${r.created_at}" title="Show it in the chat">🚨 ${fmtTime(r.created_at)}</a>: ${esc(short ? text.slice(0, 160).replace(/\s+/g, " ") + "…" : text)}`;
     return short ? `<details class="adm-req" data-req="${esc(String(r.id))}"${openReqs.has(String(r.id)) ? " open" : ""}>
         <summary>${line} <span class="muted">show full (${fmtInt(text.length)} chars)</span></summary><div class="adm-req-full">${esc(text)}</div></details>`
       : `<div class="adm-req">${line}</div>`;
@@ -764,6 +799,7 @@ function renderDetail(fresh = true) {
         + d.broadcasts_waiting.map(b => `• ${b.title} (${fmtTime(b.created_at)})`).join("\n"))}">📣 ${d.broadcasts_waiting.length} broadcast${d.broadcasts_waiting.length === 1 ? "" : "s"} not yet acknowledged</span>` : ""}
       ${d.blocked ? `<span class="chip flag" title="${esc(blockTitle(d.blocked))}">⛔ chat blocked</span>` : ""}
       <span class="spacer"></span>
+      <button class="hidden adm-jumpbtn" data-jumpadmin title="Scroll to the user's /admin message in this chat (click again for the next one)">↓ Jump to /admin</button>
       ${(d.override_options || []).length ? `<button data-override title="Issue a pass card for a review that got none (it didn't pass, or passed but PARTIAL). It's marked as an admin override, with your name and reason, on the pass screen and on /verify.">Issue pass (override)…</button>` : ""}
       ${d.blocked ? `<button data-unblock="attempt" data-key="${esc(d.attempt_id)}">Unblock chat</button>`
         : `<button class="danger" data-block="attempt">Block chat</button>`}
@@ -779,7 +815,10 @@ function renderDetail(fresh = true) {
     const box = $("#messages");
     box.innerHTML = d.messages.map(m => messageHtml(m, { admin: true })).join("");
     box.scrollTop = box.scrollHeight;
+    jumpIndex = 0;
   }
+  markAdminMessages();
+  if (fresh && d.admin_open) requestAnimationFrame(() => jumpToAdmin());  // opening a chat with an open request: show it
   $("#composer").classList.remove("hidden");
   $("#detail-hint").textContent = "The user sees your reply live, labelled Admin.";
 }
@@ -863,6 +902,7 @@ function connect() {
         S.detail.messages.push(p.data);
         $("#messages").insertAdjacentHTML("beforeend", messageHtml(p.data, { admin: true }));
         $("#messages").scrollTop = $("#messages").scrollHeight;
+        markAdminMessages();
       } else if (type === "run") {
         select(S.selected);
       }

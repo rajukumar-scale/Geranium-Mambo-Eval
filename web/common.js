@@ -590,7 +590,9 @@ function messageHtml(m, opts = {}) {
     const text = m.content || "";
     const long = text.length > 1800;
     const files = (meta.files || []).length ? `<div class="attach-list">📎 ${meta.files.map(esc).join(", ")}</div>` : "";
-    return `<div class="msg user"><div class="bubble">${opts.admin ? '<div class="who">User</div>' : ""}${
+    const adm = meta.command === "admin";  // an /admin request: marked so admins can find it (admin.js markAdminMessages)
+    return `<div class="msg user${adm ? " adminmsg" : ""}"${adm ? ` data-adminmsg="${m.id}" data-at="${m.created_at}"` : ""}><div class="bubble">${
+      opts.admin ? `<div class="who">${adm ? '<span class="adm-tag">🚨 /admin request</span> · ' : ""}User</div>` : ""}${
       long ? `<span class="clip">${esc(text.slice(0, 1800))}…</span><span class="full hidden">${esc(text)}</span>
       <div class="more" data-expand>Show all (${fmtInt(text.length)} characters)</div>` : esc(text)}${files}<div class="ts-row">${ts}</div></div></div>`;
   }
