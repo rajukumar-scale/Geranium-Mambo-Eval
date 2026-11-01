@@ -82,6 +82,19 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(cbs.status_of(before + [row("dropped", t=T0 + 4 * H), row("dropped", t=T0 + 5 * H)], trained)[0], "offboard")
         self.assertEqual(cbs.status_of(before + [row("dropped", t=T0 + 4 * H), row("submitted", 20, 200, t=T0 + 5 * H)], trained)[0], "efficient")
 
+    def test_offboarded_comes_first_and_needs_the_tag_today(self):
+        facts = [user(TRUSTED, "b@gmail.com", tr=("2026-10-10", "2026-11-01")),
+                 {**user(NEW, "c@gmail.com"), "BLK_FIRST": "2026-10-28", "BLK_LAST": "2026-11-01"},
+                 {**user(QMA, "a@gmail.com"), "BLK_FIRST": "2026-10-20", "BLK_LAST": "2026-10-25"},  # tag removed
+                 node("t1", NEW, T0), node("t2", QMA, T0), node("t3", TRUSTED, T0)]
+        rows = {r["user"]: r for r in cbs.build_rows(facts, [], [], now=T0 + H)}
+        self.assertEqual(rows[NEW]["offboarded"], "2026-10-28")
+        self.assertIsNone(rows[QMA]["offboarded"])
+        self.assertIsNone(rows[TRUSTED]["offboarded"])
+        trained = T0 + 3 * H  # even a trained person who would be "offboard" shows as done
+        claims = [dict(row("dropped", t=T0 + 4 * H), offboarded="2026-10-28"), dict(row("dropped", t=T0 + 5 * H), offboarded="2026-10-28")]
+        self.assertEqual(cbs.status_of(claims, trained), ("offboarded", "Tagged mcp_ac_temp_block since 2026-10-28"))
+
     def test_live_claims_dont_count_as_drops(self):
         self.assertEqual(cbs.status_of([row("submitted", 50, 400), row("dropped"), row("working")])[0], "ok")
 

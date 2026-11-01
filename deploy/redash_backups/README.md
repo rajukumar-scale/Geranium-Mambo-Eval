@@ -16,3 +16,6 @@ After, it is:
 2026-10-26 (later): SMIG switch. Most calls now go through SMIG, not LiteLLM, so every cost query also reads
 SCALE_PROD.SMIG_PROD_DP_POSTGRES.USAGE_EVENTS. The *_before_smig_* files are the versions just before that change
 (390879 v2, 390881 v2, 390882 v2, 388350 v1, 389171 v1). New query 394171 = SMIG cost per portal run (runId tag).
+
+397453 (CB tracker facts), 2026-11-01: `397453_v1_before_temp_block_2026-11-01.sql` is the query before it gained the
+`blk_first` / `blk_last` columns (the days each person carried mcp_ac_temp_block, for the Offboarded status).
