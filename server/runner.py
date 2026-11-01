@@ -12,7 +12,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, config, db, fingerprint, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, workspace
+from . import boatrun, boxpool, config, db, fingerprint, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -613,7 +613,7 @@ class Runner:
             # So is one boat can't finish starting ("readiness command did not succeed", 23 times on 2026-10-26).
             for machine in range(1, MACHINE_TRIES + 1):
                 try:
-                    box = await boatrun.create_box()
+                    box = await boxpool.acquire()  # a wiped box from an earlier review, or a new one
                 except RuntimeError as error:
                     if machine == MACHINE_TRIES or self.cancel_requested(run_id):
                         raise
@@ -634,7 +634,7 @@ class Runner:
                     self._push_activity(run_id, attempt, "↺ That machine wasn't ready; starting another one"
                                         if isinstance(error, boatrun.MachineNotReady)
                                         else "↺ That machine didn't respond; starting another one")
-                    asyncio.create_task(boatrun.delete_box(box))
+                    asyncio.create_task(boxpool.release(box, clean=False))
                     box = None
             payload.unlink(missing_ok=True)
             db.update("runs", "id", run_id, boat_phase="started", review_started_at=time.time())
@@ -649,7 +649,7 @@ class Runner:
             proxy.ACTIVE_TOKENS.pop(token, None)
             db.update("runs", "id", run_id, proxy_token=None)
             if box:
-                asyncio.create_task(boatrun.delete_box(box))
+                asyncio.create_task(boxpool.release(box, clean=False))
             outcome["after"] = outcome["before"] = outcome.get("before") or {}
             outcome["reports"] = {}
             return outcome
@@ -725,8 +725,10 @@ class Runner:
             proxy.ACTIVE_TOKENS.pop(token, None)
             db.update("runs", "id", run_id, proxy_token=None)
             self.procs.pop(run_id, None)
-            if box:
-                asyncio.create_task(boatrun.delete_box(box))
+            if box:  # a review that ended normally leaves a box worth wiping and reusing; anything else is deleted
+                clean = ("returncode" in outcome and not cancelled() and not any(
+                    outcome.get(k) for k in ("timeout", "lost", "box_gone", "infra_error")))
+                asyncio.create_task(boxpool.release(box, clean=clean))
         outcome["after"] = workspace.report_snapshot(attempt)
         outcome["reports"] = {}
         for name, mtime in outcome["after"].items():

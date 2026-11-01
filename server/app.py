@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, boat_wallet, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -75,6 +75,7 @@ async def startup():
     asyncio.create_task(housekeeping.loop())
     asyncio.create_task(runner_image.loop())
     asyncio.create_task(boat_wallet.loop())
+    asyncio.create_task(boxpool.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
     if config.PLAN_PILOT and plan.placeholders():
         log.warning("PLAN_PILOT is on but these server/prompts files still hold placeholder text: %s",

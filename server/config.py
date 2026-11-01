@@ -174,6 +174,11 @@ MAX_CALLS_PER_RUN = _int("MAX_CALLS_PER_RUN", 0)
 CB_SPEND_LIMIT_USD = float(_get("CB_SPEND_LIMIT_USD", 500))
 # boat.dev start limit per minute ($20 plan 12, $100 plan 30): new review boxes are requested no faster than this.
 BOAT_STARTS_PER_MIN = _int("BOAT_STARTS_PER_MIN", 12)
+# Reused review boxes (boxpool.py): a box that ended a review cleanly is wiped and reused, up to BOX_REUSE_MAX reviews
+# (0 = a new box per review, as before) and BOX_MAX_AGE_H hours; an idle one is deleted after BOX_IDLE_MIN minutes.
+BOX_REUSE_MAX = _int("BOX_REUSE_MAX", 15)
+BOX_MAX_AGE_H = float(_get("BOX_MAX_AGE_H", "8"))
+BOX_IDLE_MIN = float(_get("BOX_IDLE_MIN", "5"))
 # Slack alert when the boat wallet drops under this many dollars or boat can't start machines (boat_wallet.py; 0 = off).
 BOAT_WALLET_ALERT_USD = float(_get("BOAT_WALLET_ALERT_USD", "20"))
 # Where the eval zips live (the admin page's "Eval files" panel updates from these links).
