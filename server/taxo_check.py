@@ -93,7 +93,8 @@ def compare(stage, pasted, pass_fp, saved=None):
         except ValueError:
             pass
         return out
-    a, b = fingerprint.normalize(pasted), fingerprint.normalize(saved)
+    a = fingerprint.normalize(fingerprint.as_taxonomy_stores(stage, pasted))
+    b = fingerprint.normalize(fingerprint.as_taxonomy_stores(stage, saved))
     i = next((k for k in range(min(len(a), len(b))) if a[k] != b[k]), min(len(a), len(b)))
     out["difference"] = {"at": i + 1, "taxonomy_chars": len(a), "passed_chars": len(b),
                          "taxonomy_text": a[max(0, i - 40):i + 80], "passed_text": b[max(0, i - 40):i + 80],

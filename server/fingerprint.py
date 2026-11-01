@@ -80,9 +80,22 @@ def _jsonata_string(value):
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
+# The taxonomy's prompt editor is markdown: text copied out of it comes with backslash escapes ("#admin_foundersonly"
+# -> "#admin\_foundersonly"), but it saves the plain text, and the linter counts that (166 submitted tasks
+# 2026-10-20..11-01: 0 stored escapes in prompts, underscores kept plain). A prompt copied from the taxonomy into
+# the portal was one character longer per escape and the prompt fingerprint linter blocked it. So for the prompt
+# the backslash of a markdown escape doesn't count. OE and injection fields store exactly what was typed.
+_MD_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+
+
+def as_taxonomy_stores(stage, raw):
+    raw = raw if isinstance(raw, str) else "" if raw is None else str(raw)
+    return _MD_ESCAPE.sub(r"\1", raw) if stage == "prompt" else raw
+
+
 def text(stage, raw):
     """Injection / prompt / OE fingerprint of one text input."""
-    norm = normalize(raw if isinstance(raw, str) else "" if raw is None else str(raw))
+    norm = normalize(as_taxonomy_stores(stage, raw))
     return _head_tail(norm) if norm else EMPTY[stage]
 
 
