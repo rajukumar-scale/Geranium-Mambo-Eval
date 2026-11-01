@@ -7,6 +7,7 @@ report contract check), so the step a run has reached is a much better guide tha
 """
 
 import json
+import re
 import statistics
 import time
 
@@ -23,6 +24,10 @@ DEFAULTS = {
     "rubric": {"minutes": 22.1, "marks": {"inputs": 0.013, "recheck": 0.162, "fixcheck": 0.558, "final": 0.886}},
 }
 MIN_RUNS = 5  # recorded runs needed before they replace the defaults
+STEPS = {"inputs", "gate", "recheck", "fixcheck", "final"}  # milestones also hold fixcheck_r2.. (see fixcheck_round)
+# The rubric skill checks its suggested fixes in up to 3 rounds, then a restructure (2026-11-01: 10 of 60 /rubric
+# reviews used all 4, median 47 min). Rounds 2+ often start after the first report check, so they are shown as such.
+FIXCHECK_ROUNDS = 4
 _cache = {}  # command -> (expires, calibration)
 
 
@@ -41,11 +46,28 @@ def step_of(block):
             return "inputs"
     elif block.get("name") in ("Agent", "Task"):
         description = (args.get("description") or "").lower()
-        if description.startswith("fix-check"):
+        if _is_fixcheck(description):  # "fix-check …", "Fixcheck round 2 …", "Fix check …"
             return "fixcheck"
         if "recheck" in description:
             return "recheck"
     return None
+
+
+def _is_fixcheck(description):
+    return re.sub(r"[\s-]", "", description).startswith("fixcheck")
+
+
+def fixcheck_round(block):
+    """Which fix-check round a top-level subagent call starts (1 when it doesn't say), or None."""
+    if block.get("type") != "tool_use" or block.get("name") not in ("Agent", "Task"):
+        return None
+    description = ((block.get("input") or {}).get("description") or "").lower()
+    if not _is_fixcheck(description):
+        return None
+    if "restructure" in description:
+        return FIXCHECK_ROUNDS
+    found = re.search(r"round\s*(\d+)", description)
+    return min(int(found.group(1)), FIXCHECK_ROUNDS) if found else 1
 
 
 def calibration(command):
@@ -65,6 +87,8 @@ def calibration(command):
         for run in runs:
             length = run["finished_at"] - run["started_at"]
             for step, at in json.loads(run["milestones"]).items():
+                if step not in STEPS:
+                    continue
                 fractions.setdefault(step, []).append(min(1.0, max(0.0, (at - run["started_at"]) / length)))
         result = {"minutes": round(statistics.median((r["finished_at"] - r["started_at"]) / 60 for r in runs), 1),
                   "marks": {s: round(statistics.median(v), 3) for s, v in fractions.items() if len(v) * 3 >= len(runs)}}

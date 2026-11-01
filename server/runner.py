@@ -788,6 +788,8 @@ class Runner:
                 step = None if sub else progress.step_of(block)
                 if step:
                     self._mark_step(run_id, attempt, step)
+                if step == "fixcheck" and (progress.fixcheck_round(block) or 1) > 1:  # shown as "round N of up to 4"
+                    self._mark_step(run_id, attempt, f"fixcheck_r{progress.fixcheck_round(block)}")
                 if block.get("type") == "tool_use":
                     self._push_activity(run_id, attempt, ("   ↳ " if sub else "") + activity_line(block))
                 elif block.get("type") == "text" and block.get("text", "").strip() and not sub:

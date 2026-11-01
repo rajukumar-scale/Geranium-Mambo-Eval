@@ -240,6 +240,7 @@ function setRun(run) {
 // step it has reached (save inputs, main review, recheck passes, fix-check passes, report check) and
 // how far through past runs of the same command each step started: the % moves with the clock but
 // never runs past the next step until that step starts, and jumps ahead when a run is quicker.
+const FIXCHECK_ROUNDS = 4;  // server/progress.py
 const STEP_LABELS = { inputs: "Reviewing", gate: "Reviewing", recheck: "Deep recheck passes", fixcheck: "Fix-check passes",
   final: "Finishing the report" };
 function estimate(r) {
@@ -256,15 +257,23 @@ function estimate(r) {
   const cap = Math.max(floor, at + 1 < order.length ? marks[order[at + 1]] - 0.01 : 0.97);
   const p = Math.max(Math.min(Math.max(elapsed / typical, floor), cap), r.shownPct || 0);
   r.shownPct = p;  // never goes backwards
-  const step = at < 0 ? null : order[at];
-  const label = !step ? "Starting" : step === "gate" && r.command === "injection" ? "Running the injection gate" : STEP_LABELS[step];
+  // /rubric checks its suggested fixes in up to 4 rounds, and rounds 2+ often start after the first report check:
+  // a review in round 3 is not "finishing up" (one ran 48 more minutes after it, 2026-11-01).
+  const rounds = Object.keys(reached).filter(k => /^fixcheck_r\d+$/.test(k)).map(k => +k.slice(10));
+  const round = rounds.length ? Math.max(...rounds) : reached.fixcheck ? 1 : 0;
+  const lateRound = round > 1 && reached.final && reached[`fixcheck_r${round}`] > reached.final;
+  const step = at < 0 ? null : lateRound ? "fixcheck" : order[at];
+  const label = !step ? "Starting" : step === "gate" && r.command === "injection" ? "Running the injection gate"
+    : step === "fixcheck" && round ? `Checking the suggested fixes · round ${round} of up to ${FIXCHECK_ROUNDS}` : STEP_LABELS[step];
   // Ahead of the usual pace (a step started early): project from this run's own pace. Otherwise
   // assume the usual pace for the rest; a step running well past its usual length says so instead.
   const ahead = floor > elapsed / typical;
   const left = ahead && p >= 0.15 ? elapsed * (1 - p) / p : (1 - p) * typical;
   const overrun = !ahead && p >= cap - 0.001 && elapsed > Math.max(cap * typical * 1.5, 180);
   return { pct: Math.min(99, Math.round(p * 100)), label, elapsed,
-           left: step === "final" ? "finishing up" : overrun ? "this step is taking longer than usual"
+           left: step === "final" ? "finishing up"
+             : lateRound ? (round >= FIXCHECK_ROUNDS ? "last round" : "more rounds may follow")
+             : overrun ? "this step is taking longer than usual"
              : `about ${Math.max(1, Math.round(left / 60))} min left` };
 }
 
