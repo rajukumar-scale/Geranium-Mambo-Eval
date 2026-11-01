@@ -17,8 +17,8 @@ print CLEAN; otherwise the box is deleted. BOX_REUSE_MAX=0 turns reuse off.
 """
 
 import asyncio
+import base64
 import logging
-import shlex
 import time
 
 from . import boatrun, config
@@ -116,7 +116,7 @@ async def release(box, clean):
     if info["snapshot"] != boatrun.active_snapshot() or time.time() - info["created"] > config.BOX_MAX_AGE_H * 3600:
         return await _retire(box, "old snapshot or too old")
     try:
-        rc, out = await boatrun.ssh(box, "sudo bash -c " + shlex.quote(SCRUB_SH + "touch /tmp/evp_clean\n"), timeout=180)
+        rc, out = await boatrun.ssh(box, scrub_command(), timeout=180)
     except Exception as error:  # noqa: BLE001
         rc, out = -1, str(error)
     if rc != 0 or "CLEAN" not in out or "NOT CLEAN" in out:
@@ -124,6 +124,13 @@ async def release(box, clean):
     async with _get_lock():
         info["idle_since"] = time.time()
         _idle.append(box)
+
+
+def scrub_command():
+    """The wipe, sent base64-encoded and run from stdin: passed as `bash -c <script>` its own command line contained
+    "/tmp/payload/memguard.sh", so its `pkill -f` killed the wipe itself (ssh exit 255, 2026-11-01)."""
+    script = (SCRUB_SH + "touch /tmp/evp_clean\n").encode()
+    return f"echo {base64.b64encode(script).decode()} | base64 -d | sudo bash"
 
 
 def stats():

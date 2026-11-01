@@ -2,7 +2,9 @@
 past its reuse count, age or snapshot, is deleted; idle boxes go after BOX_IDLE_MIN."""
 
 import asyncio
+import base64
 import itertools
+import re
 import unittest
 from unittest import mock
 
@@ -24,6 +26,10 @@ class BoxPoolTest(unittest.TestCase):
             self.deleted.append(box)
 
         async def ssh(box, command, timeout=300):
+            packed = re.match(r"echo (\S+) \| base64 -d \| sudo bash$", command)
+            if packed:  # the wipe: decode it so the test can read what it does
+                command = base64.b64decode(packed.group(1)).decode()
+                self.assertNotIn("memguard", re.sub(r"echo \S+", "", command.split("\n")[0]))
             self.ssh_calls.append((box, command))
             if "evp_clean && echo READY" in command:
                 return (0, "READY") if self.ready else (1, "")
@@ -100,3 +106,11 @@ class BoxPoolTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScrubCommandTest(unittest.TestCase):
+    def test_the_wipe_never_shows_its_own_pkill_patterns_on_its_command_line(self):
+        cmd = boxpool.scrub_command()
+        self.assertNotIn("memguard", cmd)
+        self.assertNotIn("runner", cmd)
+        self.assertTrue(cmd.endswith("| base64 -d | sudo bash"))
