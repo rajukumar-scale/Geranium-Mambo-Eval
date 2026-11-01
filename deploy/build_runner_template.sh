@@ -3,7 +3,8 @@
 # Claude Code + Python tools + the universes at /work (root-owned, read-only: the two dated universes
 # /work/Universe_Normal/Normal_HarmonyGames_X and /work/Universe_SynthCut/SynthCut_HarmonyGames_X, each from the zip
 # of the same name; Normal's GitHub from three parts) and an
-# unprivileged `runner` user without sudo that every review runs as. Then snapshot the box:
+# unprivileged `runner` user without sudo that every review runs as, plus the /opt/simcheck similarity runtime
+# (copy deploy/setup_similarity.sh to /tmp first). Then snapshot the box:
 #   boat snapshot <box> hg-runner
 set -euo pipefail
 ZIP_URL=${ZIP_URL:-https://static.remotasks.com/uploads/6a5595596cf3031de47f0ea2}
@@ -46,4 +47,6 @@ sudo find /work -name .DS_Store -delete
 sudo chown -R root:root /work
 sudo chmod -R a+rX,go-w /work
 du -sh /work/*
+# Dataset similarity runtime for /prompt (offline on review boxes); rebuild_runner_image.sh copies the script here.
+if [ ! -f /opt/simcheck/model/model.onnx ]; then bash /tmp/setup_similarity.sh; fi
 echo RUNNER_TEMPLATE_READY
