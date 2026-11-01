@@ -2,7 +2,8 @@
 UTC with an empty wallet, so boat refused every new review machine and /prompt and /rubric hung at "Starting a fresh
 review machine" until Evan topped up. Every CHECK_EVERY this reads the account with the portal's own boat CLI and posts
 to the Slack alert channel when the wallet is under BOAT_WALLET_ALERT_USD or boat can't start machines, repeating every
-REPEAT while it stays that way, with the burn rate and the time left; and once when it's back above the line.
+REPEAT while it stays that way, with roughly how long it lasts; and once when it's back above the line. No dollar
+amounts in the message (Evan, 2026-11-01).
 """
 
 import asyncio
@@ -26,14 +27,13 @@ def burn_per_hour(samples):
     return spent / hours if hours >= 0.5 else None
 
 
-def message(limits, wallet, rate, threshold):
+def message(limits, wallet, rate):
     blocked = not limits.get("canStart", True)
-    left = f" At about ${rate:.0f}/hour that's roughly {wallet / rate:.0f} more hours." if rate and wallet > 0 else ""
-    head = ("🚨 Eval portal: boat can't start review machines" if blocked
-            else f"⚠️ Eval portal: the boat wallet is low (${wallet:.2f}, under ${threshold:.0f})")
+    left = f" At the current pace it lasts about {wallet / rate:.0f} more hours." if rate and wallet > 0 and not blocked else ""
+    head = "🚨 Eval portal: boat can't start review machines" if blocked else "⚠️ Eval portal: the boat wallet is running low"
     why = f" ({limits.get('blockedReason') or limits.get('startBlockedReason')})" if blocked else ""
-    return (f"{head}{why}. Wallet ${wallet:.2f}.{left} When it's empty, /prompt and /rubric hang at \"Starting a fresh "
-            "review machine\". Top up: `boat wallet pay` or https://boat.dev/dashboard?tab=billing")
+    return (f"{head}{why}.{left} When it's empty, /prompt and /rubric hang at \"Starting a fresh review machine\". "
+            "Top up: `boat wallet pay` or https://boat.dev/dashboard?tab=billing")
 
 
 async def check(now=None):
@@ -53,10 +53,10 @@ async def check(now=None):
             _state["low_since"] = now
         if now - _state["alerted"] >= REPEAT:
             _state["alerted"] = now
-            await notify.slack(message(limits, wallet, rate, threshold))
+            await notify.slack(message(limits, wallet, rate))
     elif _state["low_since"] is not None:
         _state.update(low_since=None, alerted=0.0)
-        await notify.slack(f"✅ Eval portal: the boat wallet is back to ${wallet:.2f} and review machines can start.")
+        await notify.slack("✅ Eval portal: the boat wallet is topped up and review machines can start.")
     return {"wallet": wallet, "rate": rate, "low": low}
 
 

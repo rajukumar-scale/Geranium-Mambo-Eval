@@ -31,14 +31,16 @@ class BoatWalletTest(unittest.TestCase):
         self.assertEqual(self.sent, [])
         self.at(2 * H, 18)
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("$18.00", self.sent[0])
-        self.assertIn("about $11/hour", self.sent[0])  # 40 -> 18 over 2 h
+        self.assertIn("running low", self.sent[0])
+        self.assertIn("about 2 more hours", self.sent[0])  # 40 -> 18 over 2 h = $11/h, 18 left
+        self.assertNotIn("$", self.sent[0])  # no amounts in the channel
         self.at(3 * H, 8)
         self.assertEqual(len(self.sent), 1)  # not again within 6 h
         self.at(8.5 * H, 2)
         self.assertEqual(len(self.sent), 2)
         self.at(9 * H, 120)  # topped up
-        self.assertIn("back to $120.00", self.sent[-1])
+        self.assertIn("topped up", self.sent[-1])
+        self.assertNotIn("$", self.sent[-1])
 
     def test_blocked_boat_alerts_even_with_money(self):
         self.at(0, 50, can_start=False)
