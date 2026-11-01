@@ -11,3 +11,6 @@ guideline is a normal commit; no eval release is needed. The eval's own files an
   their Opus 5.5 baseline runs.
 - known_data_issues.md: the "Known data issues" list (base-data conflicts, same ids as the chat sidebar), grouped by
   task date. Generated with server/known_issues.json by deploy/build_known_issues.py; edit the script, not the file.
+
+Contributors can read the same three files in the chat page's Guide panel (tabs Hardness, Tool calls, Known data
+issues), served by GET /api/guides/<name> (app.py GUIDES allowlist). Links to /?guide=<tab>#<heading-slug> open a tab at a heading.

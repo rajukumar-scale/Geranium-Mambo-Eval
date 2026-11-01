@@ -4,7 +4,8 @@ Portal-owned text for the "plan your task" kickoff (server/plan.py, pilot `PLAN_
 and not copied into review workspaces: the portal reads these files itself. Changing one is a normal commit.
 
 - plan_kickoff_card.md: the chat card posted once per attempt, before the contributor's first /prompt (Markdown, shown
-  to the contributor). It ends by suggesting they ask "Check my task idea against the hardness and tool-call guides."
+  to the contributor). It suggests they ask "Check my task idea against the hardness and tool-call guides." and ends
+  with links (/?guide=hardness, /?guide=toolcalls) that open those Guide tabs in the chat page.
 - early_guard.md: one bullet added to the chat assistant's standing instructions (server/runner.py GUARD) for every
   chat, as the last bullet of "Helping them build their task". It covers the request the card suggests. Changing it
   changes GUARD_VERSION, so every chat's next follow-up starts a fresh session on the new rules.

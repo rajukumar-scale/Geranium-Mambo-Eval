@@ -96,6 +96,7 @@ async function showApp() {
   setRun(state.me.active_run);
   connect();
   checkBroadcasts();
+  openGuideFromUrl();
 }
 
 // ---- broadcasts: admin messages that stay over the chat until the contributor acknowledges them ----
@@ -701,11 +702,17 @@ const GUIDE_COMMANDS = [
   ["/rubric", "Checks your rubric: criteria, weights and facts.", "Your rubric (JSON)"],
 ];
 
-function openGuide() {
+// The Guide panel: "Steps" (how the portal works, the default) plus reading tabs for the guideline files the assistant
+// also reads (GET /api/guides/<name>). The last tab is remembered. openGuide(tab, heading) opens a tab scrolled to a
+// heading slug (common.js guideSlug); links to /?guide=<tab>#<slug> anywhere in the chat open it the same way.
+const GUIDE_TABS = [["steps", "Steps"], ["hardness", "Hardness"], ["toolcalls", "Tool calls"], ["known", "Known data issues"]];
+const guideDocs = {};  // name -> markdown, fetched once per page load
+
+function guideStepsHtml() {
   const rows = GUIDE_COMMANDS.map(([cmd, what, needs]) => `<div class="guide-cmd">
       <div class="grow"><b class="mono">${cmd}</b> <span>${esc(what)}</span><div class="muted" style="font-size:13px">Needs: ${esc(needs)}</div></div>
       <button data-use="${cmd}">Use</button></div>`).join("");
-  const w = openModal("Guide", `<div class="guide">
+  return `<div class="guide">
     <h4>1 · Add your task inputs</h4>
     <p>Paste them into the chat or attach files with 📎. Each one is saved to this attempt and listed under
       <b>Saved inputs</b> in the sidebar; click one to check exactly what was saved. Sending an input again replaces it.</p>
@@ -739,17 +746,104 @@ function openGuide() {
       Report cards, chat messages and FAIL results don't count as proof, only the pass screen does.</p>
     ${state.spend && state.spend.limit ? `<h4>5 · Spend limit</h4>
     <p>${spendRuleHtml()}</p>` : ""}
-  </div>`);
-  w.addEventListener("click", e => {
-    const use = e.target.closest("[data-use]");
-    if (!use) return;
-    const box = $("#input");
-    box.value = use.dataset.use + " " + box.value.replace(/^\/\w+\s*/, "");
-    w.remove();
-    box.focus();
-  });
+  </div>`;
 }
-$("#guide-btn").onclick = openGuide;
+
+function openGuide(tab, heading = "") {
+  let w = document.querySelector(".overlay[data-guide-panel]");
+  if (!w) {
+    w = openModal("Guide", `<div class="guide-tabs" role="tablist">${GUIDE_TABS.map(([k, label]) =>
+        `<button type="button" role="tab" data-guide-tab="${k}">${esc(label)}</button>`).join("")}</div><div class="guide-pane"></div>`);
+    w.dataset.guidePanel = "1";
+    w.addEventListener("click", e => {
+      const t = e.target.closest("[data-guide-tab]");
+      if (t) return showGuideTab(w, t.dataset.guideTab);
+      const go = e.target.closest("[data-guide-goto]");
+      if (go) { e.preventDefault(); return scrollGuideTo(w, go.dataset.guideGoto); }
+      const use = e.target.closest("[data-use]");
+      if (!use) return;
+      const box = $("#input");
+      box.value = use.dataset.use + " " + box.value.replace(/^\/\w+\s*/, "");
+      w.remove();
+      box.focus();
+    });
+  }
+  let last = "steps";
+  try { last = localStorage.getItem("evp_guide_tab") || "steps"; } catch (e) { /* private window */ }
+  const want = GUIDE_TABS.some(([k]) => k === tab) ? tab : GUIDE_TABS.some(([k]) => k === last) ? last : "steps";
+  return showGuideTab(w, want, heading);
+}
+
+async function showGuideTab(w, tab, heading = "") {
+  try { localStorage.setItem("evp_guide_tab", tab); } catch (e) { /* private window */ }
+  w.querySelectorAll("[data-guide-tab]").forEach(b => {
+    b.classList.toggle("on", b.dataset.guideTab === tab);
+    b.setAttribute("aria-selected", String(b.dataset.guideTab === tab));
+  });
+  const pane = w.querySelector(".guide-pane"), scroller = w.querySelector(".content");
+  w.dataset.guideTab = tab;
+  if (tab === "steps") { pane.innerHTML = guideStepsHtml(); scroller.scrollTop = 0; return; }
+  if (!guideDocs[tab]) {
+    pane.innerHTML = `<p class="muted">Loading…</p>`;
+    try { guideDocs[tab] = await api(`/api/guides/${encodeURIComponent(tab)}`); } catch (err) {
+      if (w.dataset.guideTab === tab) pane.innerHTML = `<p class="error">Couldn't load this guide: ${esc(err.message)}</p>`;
+      return;
+    }
+    if (w.dataset.guideTab !== tab) return;  // another tab was picked while this one loaded
+  }
+  pane.innerHTML = `<div class="guide-doc bubble">${md(guideDocs[tab])}</div>`;
+  const doc = pane.firstElementChild;
+  const seen = {};
+  doc.querySelectorAll("h1, h2, h3").forEach(h => {  // data-slug, not id: guide headings must never clash with the page's ids
+    let s = guideSlug(h.textContent);
+    seen[s] = (seen[s] || 0) + 1;
+    if (seen[s] > 1) s += "-" + (seen[s] - 1);
+    h.dataset.slug = s;
+  });
+  const parts = [...doc.querySelectorAll("h2")];
+  const checklist = parts.find(h => /checklist/i.test(h.textContent)) || parts.find(h => /^appendix/i.test(h.textContent));
+  const link = (h, label) => `<a href="/?guide=${tab}#${esc(h.dataset.slug)}" data-guide-goto="${esc(h.dataset.slug)}">${esc(label)}</a>`;
+  const top = document.createElement("div");
+  top.className = "guide-top";
+  top.innerHTML = (checklist ? `<p class="guide-jump">↓ ${link(checklist, "Jump to checklist")}</p>` : "")
+    + (parts.length > 1 ? `<nav class="guide-toc" aria-label="Contents"><div class="k">Contents</div><ol>${parts.map(h =>
+        `<li>${link(h, h.textContent)}</li>`).join("")}</ol></nav>` : "");
+  const h1 = doc.querySelector("h1");
+  if (h1) h1.after(top); else doc.prepend(top);
+  scroller.scrollTop = 0;
+  if (heading) scrollGuideTo(w, heading);
+}
+
+function scrollGuideTo(w, slug) {
+  const heads = [...w.querySelectorAll(".guide-doc [data-slug]")];
+  const s = guideSlug(decodeURIComponent(slug));
+  const h = heads.find(x => x.dataset.slug === s) || heads.find(x => x.dataset.slug.startsWith(s + "-"));
+  if (h) h.scrollIntoView({ block: "start" });
+}
+
+// Guide links in messages and cards (the kickoff card, the too-easy hint): open the panel in place, no page load.
+document.addEventListener("click", e => {
+  const a = e.target.closest("a[href]");
+  if (!a || !state.me || e.metaKey || e.ctrlKey || e.shiftKey) return;
+  let url;
+  try { url = new URL(a.getAttribute("href"), location.href); } catch (err) { return; }
+  if (url.origin !== location.origin || url.pathname !== "/" || !url.searchParams.get("guide")) return;
+  if (a.dataset.guideGoto) return;  // the panel's own contents links scroll inside it
+  e.preventDefault();
+  openGuide(url.searchParams.get("guide"), url.hash.slice(1));
+});
+
+// A fresh load of /?guide=<tab>#<slug> (signed in): open that tab once, then tidy the address bar.
+function openGuideFromUrl() {
+  const params = new URLSearchParams(location.search), tab = params.get("guide");
+  if (!tab) return;
+  const heading = location.hash.slice(1);
+  params.delete("guide");
+  history.replaceState(null, "", location.pathname + (params.toString() ? "?" + params : ""));
+  openGuide(tab, heading);
+}
+
+$("#guide-btn").onclick = () => openGuide();
 
 // Admins: jump to /admin with this chat selected (no second sign-in while the admin sign-in is recent).
 $("#view-switch").addEventListener("click", async e => {

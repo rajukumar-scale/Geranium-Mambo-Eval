@@ -197,6 +197,31 @@ button.danger-solid:hover { border-color: var(--ink); }
 .guide-cmd { display: flex; gap: 12px; align-items: center; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 6px; }
 .guide-cmd .grow { flex: 1; min-width: 0; }
 .guide-sample { width: 100%; margin: 4px 0 12px; }
+/* Guide tabs (Steps + the guideline files): the tab row stays put while the guide scrolls under it */
+.guide-tabs { position: sticky; top: -18px; z-index: 2; display: flex; flex-wrap: wrap; gap: 4px; margin: -18px -22px 16px; padding: 12px 22px 10px;
+  background: var(--panel); border-bottom: 1px solid var(--line); }
+.guide-tabs button { border: 1px solid transparent; background: transparent; color: var(--muted); border-radius: 9999px; padding: 5px 14px; font-size: 14px; }
+.guide-tabs button:hover { color: var(--ink); background: var(--grey-95); }
+.guide-tabs button.on { color: var(--ink); background: var(--grey-95); border-color: var(--line); font-weight: 500; cursor: default; }
+.guide-doc { max-width: 760px; font-size: 15px; line-height: 1.6; }
+.guide-doc [data-slug] { scroll-margin-top: 70px; }
+.guide-doc h1 { font-size: 24px; line-height: 1.25; margin: 0 0 12px; }
+.guide-doc h2 { font-size: 19px; line-height: 1.3; margin: 30px 0 10px; padding-top: 16px; border-top: 1px solid var(--line); }
+.guide-doc h3 { font-size: 16px; margin: 20px 0 6px; }
+.guide-doc p { margin: 0 0 12px; }
+.guide-doc ul, .guide-doc ol { margin: 0 0 12px; padding-left: 22px; }
+.guide-doc li { margin: 3px 0; }
+.guide-doc li > ul, .guide-doc li > ol { margin: 4px 0 2px; }
+.guide-top { margin: 0 0 18px; }
+.guide-jump { margin: 0 0 10px; font-size: 14px; }
+.guide-toc { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; background: var(--grey-95); font-size: 14px; }
+.guide-toc .k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 4px; }
+.guide-toc ol { list-style: none; padding: 0; margin: 0; columns: 2 260px; column-gap: 24px; }
+.guide-toc li { margin: 2px 0; break-inside: avoid; }
+.guide-toc a { text-decoration: none; }
+.guide-toc a:hover { text-decoration: underline; }
+/* "Too easy? See the hardness guide, Part 8" under a /hardness report that came back too easy */
+.guide-hint { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--ink); }
 .input-view { background: var(--grey-95); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; max-height: 60vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; margin: 0 0 14px; }
 
 /* pass screen: flat Evergreen header with the white wordmark; the verdict badge carries the semantic colour */

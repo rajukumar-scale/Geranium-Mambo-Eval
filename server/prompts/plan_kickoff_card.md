@@ -12,3 +12,5 @@ Plan tool calls: Normal needs 50–100, Long-Horizon 100+. Count items, records 
 Check **Known data issues** in the sidebar before building on a record.
 
 When you have an idea or a draft, ask me: “Check my task idea against the hardness and tool-call guides.”
+
+[Read the hardness guide](/?guide=hardness) · [Read the tool-call guide](/?guide=toolcalls)

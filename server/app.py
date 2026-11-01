@@ -537,6 +537,27 @@ def known_data_issues(request: Request):
     return known_issues.view(workspace.universe_date(session["attempt_id"]))
 
 
+# The Guide panel's reading tabs (2026-10-31): the same guideline files the chat assistant reads (server/guidelines),
+# so there's one source. A fixed allowlist: the name is a key here, never a path. Static docs for every signed-in
+# contributor (no pilot), never for anyone signed out.
+GUIDES = {"hardness": "hardness_v2.md", "toolcalls": "tool_call_minimum.md", "known": "known_data_issues.md"}
+_GUIDE_MAINTAINER_LINE = re.compile(r"^Built by deploy/.*(?:\n|$)", re.M)  # "edit the script" notes are for maintainers
+
+
+@app.get("/api/guides/{name}")
+def guide(name: str, request: Request):
+    session = current_user(request)  # before the name check: signed out gets 401 for any name
+    file = GUIDES.get(name)
+    if not file:
+        raise HTTPException(404, "No such guide.")
+    try:
+        text = (config.GUIDELINES_DIR / file).read_text(encoding="utf-8")
+    except OSError:
+        raise HTTPException(404, "That guide isn't available.")
+    return PlainTextResponse(for_viewer(session, _GUIDE_MAINTAINER_LINE.sub("", text)),
+                             media_type="text/markdown; charset=utf-8", headers=NO_CACHE)
+
+
 @app.get("/api/spend")
 def my_spend(request: Request):
     """The top bar's spend figure: the attempt owner's total across all their attempts (live during a run)."""

@@ -582,6 +582,23 @@ function msgTime(t) {
   return `<span class="ts" title="${esc(d.toLocaleString([], { dateStyle: "full", timeStyle: "medium" }))} · ${esc(fmtUTC(t))}">${esc(label)}</span>`;
 }
 
+// ---- guide links (the chat page's Guide panel: app.js openGuide) ----
+// A link to /?guide=<tab>#<heading-slug> opens that Guide tab scrolled to the heading; the chat page catches the click,
+// and a fresh load of that URL opens it too. Slugs are GitHub-style ("Part 8. If the run comes back too easy" ->
+// "part-8-if-the-run-comes-back-too-easy"), and a link may use just the start of one ("#part-8").
+function guideSlug(text) {
+  return String(text ?? "").toLowerCase().trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-");
+}
+const TOO_EASY_LINK = "/?guide=hardness#part-8-if-the-run-comes-back-too-easy";
+// A /hardness report that came back too easy: a FAIL, or score 1 (Too easy) or 2 (Easy).
+function hardnessTooEasy(meta) {
+  return !!meta && meta.stage === "hardness" && (meta.verdict === "FAIL" || meta.score === 1 || meta.score === 2);
+}
+function tooEasyHint() {
+  return `<div class="guide-hint">Too easy? See the <a href="${TOO_EASY_LINK}">hardness guide, Part 8. If the run comes back too easy</a></div>`;
+}
+// ---- end guide links ----
+
 // One chat message -> HTML. Used by the user chat and the admin view.
 function messageHtml(m, opts = {}) {
   const meta = m.meta || {};
@@ -605,7 +622,8 @@ function messageHtml(m, opts = {}) {
       ${meta.score != null ? `<span class="muted">score ${esc(meta.score)}</span>` : ""}
       ${meta.exec_status && meta.exec_status !== "COMPLETE" ? `<span class="muted">· ${esc(meta.exec_status)}</span>` : ""}</div>
       ${ts}<button data-report="${m.id}">View</button><button data-download="${m.id}">Download</button></div>
-      ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}</div></div>`;
+      ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}
+      ${!opts.admin && hardnessTooEasy(meta) ? tooEasyHint() : ""}</div></div>`;
   }
   if (m.role === "proof") {
     const stale = meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "";
