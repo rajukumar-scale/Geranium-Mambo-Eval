@@ -37,7 +37,12 @@ echo "STEP update started for: $FILES"
 UNIS=""
 for f in $FILES; do case "$f" in *HarmonyGames_*) UNIS="$UNIS $f";; esac; done
 NEWSNAP=""
-if [ -n "$UNIS" ]; then
+RUNNER=$(grep -E '^REVIEW_RUNNER=' "$APP/.env" 2>/dev/null | cut -d= -f2 | awk '{print $1}' || true)
+if [ -n "$UNIS" ] && [ "$RUNNER" = modal ]; then
+  # Modal review machines download their universe from the zips when they start (server/modalrun.py), so they get the
+  # new files without an image rebuild. The boat image is left as it is.
+  echo "STEP reviews run on Modal: new universes reach them at their next start"
+elif [ -n "$UNIS" ]; then
   bash "$APP/deploy/rebuild_runner_image.sh" $UNIS | tee "$D/rebuild.out"
   NEWSNAP=$(tail -1 "$D/rebuild.out")
 fi

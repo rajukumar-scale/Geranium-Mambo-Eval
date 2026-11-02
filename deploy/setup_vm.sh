@@ -78,6 +78,8 @@ if [ -n "$PUBLIC_URL" ]; then
   sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=${PUBLIC_URL%/}|; s|^HOST=.*|HOST=127.0.0.1|; s|^COOKIE_SECURE=.*|COOKIE_SECURE=1|; s|^TRUST_PROXY=.*|TRUST_PROXY=0|" "$ENV"
 elif [ -n "$DOMAIN" ]; then
   sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=https://${DOMAIN}|" "$ENV"
+  # Caddy also serves the meter at /meter, for review machines off this server (Modal); keep a URL already set.
+  sed -i -E "s|^PROXY_PUBLIC_URL=[[:space:]]*(#.*)?$|PROXY_PUBLIC_URL=https://${DOMAIN}/meter|" "$ENV"
 else  # no domain: serve plain HTTP on port 8000 (put it behind your own load balancer / VPN)
   IP=$(hostname -I | awk '{print $1}')
   sed -i "s|^HOST=.*|HOST=0.0.0.0|; s|^COOKIE_SECURE=.*|COOKIE_SECURE=0|; s|^TRUST_PROXY=.*|TRUST_PROXY=0|; s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://${IP}:8000|" "$ENV"

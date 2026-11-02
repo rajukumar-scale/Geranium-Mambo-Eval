@@ -1,10 +1,21 @@
 {$DOMAIN} {
-	encode zstd gzip
+	# Not the meter: its streamed model replies must pass through as they come.
+	@compress not path /meter/*
+	encode @compress zstd gzip
 	request_body {
 		max_size 60MB
 	}
-	reverse_proxy 127.0.0.1:8000 {
-		# Server-sent events: pass each event through immediately.
-		flush_interval -1
+	# The metering proxy, for review machines off this server (REVIEW_RUNNER=modal): PROXY_PUBLIC_URL=https://<domain>/meter.
+	# Only a live run's token gets through it (proxy.py), as on boat's public relay.
+	handle_path /meter/* {
+		reverse_proxy 127.0.0.1:8001 {
+			flush_interval -1
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8000 {
+			# Server-sent events: pass each event through immediately.
+			flush_interval -1
+		}
 	}
 }
