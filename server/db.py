@@ -396,7 +396,12 @@ class _Pin:
         return {name: m[2] for name, m in self.maps.items()}
 
 
+PIN_DELAY = 120  # seconds after start before the first pin: reading 1 GB in at startup slowed the start past the
+# deploy's health check (2026-11-02 19:04, with a boat snapshot loading the disk), so it waits for the portal to be up
+
+
 def _pin_loop():
+    time.sleep(PIN_DELAY)
     pin = _Pin()
     while True:
         try:

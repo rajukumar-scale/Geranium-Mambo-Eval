@@ -130,7 +130,9 @@ healthy() {
   curl -sf -o /dev/null http://127.0.0.1:8000/healthz || return 1
   [ "$METER" = none ] || curl -sf -o /dev/null "$METER_URL"
 }
-for i in $(seq 1 30); do healthy && break; sleep 1; done
+# Up to 2 minutes (30 s until 2026-11-02): under disk load (boat snapshots) a start took 41 s and a good version was
+# rolled back.
+for i in $(seq 1 120); do healthy && break; sleep 1; done
 if ! healthy; then
   echo "new code failed its health check; rolling back to $STAMP"
   for item in server web deploy README.md; do rm -rf "$APP/$item"; cp -a "$BACKUP/$item" "$APP/$item"; done
