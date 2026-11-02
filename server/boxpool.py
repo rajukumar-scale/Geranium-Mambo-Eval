@@ -85,8 +85,9 @@ async def _usable(box):
     return rc == 0 and "READY" in out and ext_rc == 0
 
 
-async def acquire():
-    """A box for a new review: a clean idle one when there is one, else a new one."""
+async def acquire(progress=None):
+    """A box for a new review: a clean idle one when there is one, else a new one. progress(text): told when boat
+    refuses a start and it tries again."""
     _demand["last"] = time.time()
     if enabled():
         while True:
@@ -101,7 +102,7 @@ async def acquire():
                 log.info("reusing review box %s (review %d)", box, _boxes[box]["reviews"] + 1)
                 return box
             await _retire(box, "not usable any more")
-    box = await machines().create_box()
+    box = await (boatrun.create_box(progress=progress) if machines() is boatrun else machines().create_box())
     _stats["created"] += 1
     if enabled():
         _boxes[box] = {"created": time.time(), "snapshot": boatrun.active_snapshot(), "reviews": 0, "idle_since": None}
@@ -134,6 +135,27 @@ async def release(box, clean):
     async with _get_lock():
         info["idle_since"] = time.time()
         _idle.append(box)
+
+
+async def give_back(box):
+    """A machine that was started (or claimed) for a review cancelled before it began: keep it, clean, for the next."""
+    if not enabled():
+        return await _retire(box, "review cancelled before it started")
+    try:
+        rc, out = await boatrun.ssh(box, "sudo touch /tmp/evp_clean && echo WARM", timeout=120)
+    except Exception as error:  # noqa: BLE001
+        rc, out = -1, str(error)
+    if rc != 0 or "WARM" not in out:
+        return await _retire(box, "couldn't keep it after a cancel")
+    now = time.time()
+    info = _boxes.setdefault(box, {"created": now, "snapshot": boatrun.active_snapshot(), "reviews": 0})
+    info["idle_since"] = now
+    info.setdefault("extended", now)
+    async with _get_lock():
+        if box not in _idle:
+            _idle.append(box)
+    _stats["given_back"] = _stats.get("given_back", 0) + 1
+    log.info("kept review box %s for the next review (its review was cancelled while it started)", box)
 
 
 def scrub_command():

@@ -359,7 +359,7 @@ async def cli(*args, timeout=300, input_bytes=None):
     return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
-async def create_box():
+async def create_box(progress=None):
     """Clone a review box. If boat refuses before a box exists (e.g. the per-minute start limit when
     many reviews start at once), wait and retry instead of failing the review."""
     ttl = config.RUN_TIMEOUT_MIN * 60 + 1800  # auto-stop backstop if the server dies mid-run
@@ -383,6 +383,8 @@ async def create_box():
             break
         wait = min(15 * attempt, 60)
         log.info("boat new refused (%s); retrying in %ss", str(error or err or out)[-200:], wait)
+        if progress:
+            progress(f"↺ boat is busy and didn't start the machine; trying again in {wait} s ({attempt} of {tries})")
         await asyncio.sleep(wait)
     if box:  # boat made a machine but couldn't finish it (e.g. "readiness command did not succeed"): don't leak it
         await delete_box(box)

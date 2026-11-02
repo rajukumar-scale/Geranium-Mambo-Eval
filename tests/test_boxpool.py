@@ -17,7 +17,7 @@ class BoxPoolTest(unittest.TestCase):
         self.snapshot, self.wipe_ok, self.ready = "snap-1", True, True
         ids = (f"bx_{i}" for i in itertools.count(1))
 
-        async def create_box():
+        async def create_box(**kw):
             box = next(ids)
             self.created.append(box)
             return box

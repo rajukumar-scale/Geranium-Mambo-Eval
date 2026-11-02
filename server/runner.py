@@ -286,6 +286,13 @@ def remote():
     return boxpool.machines()
 
 
+def _keep_for_next_review(task):
+    """A machine still booting when its review was cancelled: into the pool when it's ready (a failed boot: nothing)."""
+    if task.cancelled() or task.exception() is not None:
+        return
+    asyncio.ensure_future(boxpool.give_back(task.result()))
+
+
 def server_reviews_enabled():
     return config.REVIEW_RUNNER == "boat" and config.RUNNER_MODE == "docker" and config.SERVER_REVIEW_SLOTS > 0
 
@@ -485,6 +492,32 @@ class Runner:
     @staticmethod
     def cancel_requested(run_id):
         return (db.get_run(run_id) or {}).get("error") == CANCELLED
+
+    async def _acquire_machine(self, run_id, attempt):
+        """boxpool.acquire(), but a cancel ends the wait within a second (it used to wait out boat's whole boot and its
+        retries: "Stopping..." for 4.5 minutes, 2026-11-02) and the machine, when it comes, goes to the pool for the
+        next review. Every minute of waiting the CB hears that boat is still starting it."""
+        task = asyncio.ensure_future(boxpool.acquire(progress=lambda m: self._push_activity(run_id, attempt, m)))
+        started, told = time.time(), 0
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=1)
+            if done:
+                return task.result()
+            if self.cancel_requested(run_id):
+                task.add_done_callback(_keep_for_next_review)
+                raise RuntimeError(CANCELLED)
+            minutes = int((time.time() - started) // 60)
+            if minutes > told:
+                told = minutes
+                self._push_activity(run_id, attempt, f"⏳ Still waiting for boat to start the machine ({minutes} min)")
+
+    async def _wait_unless_cancelled(self, run_id, seconds):
+        """Sleep between machine tries, but stop at once on a cancel."""
+        end = time.time() + seconds
+        while time.time() < end:
+            if self.cancel_requested(run_id):
+                raise RuntimeError(CANCELLED)
+            await asyncio.sleep(min(1.0, max(0.0, end - time.time())))
 
     async def _worker(self, pool):
         while True:
@@ -952,7 +985,7 @@ class Runner:
             # So is one boat can't finish starting ("readiness command did not succeed", 23 times on 2026-10-26).
             for machine in range(1, MACHINE_TRIES + 1):
                 try:
-                    box = await boxpool.acquire()  # a wiped box from an earlier review, or a new one
+                    box = await self._acquire_machine(run_id, attempt)  # a wiped box from an earlier review, or a new one
                 except RuntimeError as error:
                     if machine == MACHINE_TRIES or self.cancel_requested(run_id):
                         raise
@@ -961,10 +994,12 @@ class Runner:
                                 MACHINE_TRIES, wait, str(error)[-200:])
                     self._push_activity(run_id, attempt, f"↺ That machine didn't start; trying another in {wait} s "
                                                          f"({machine} of {MACHINE_TRIES})")
-                    await asyncio.sleep(wait)
+                    await self._wait_unless_cancelled(run_id, wait)
                     continue
                 db.update("runs", "id", run_id, runner_box=box, box_ready_at=time.time())  # for the status page
-                if self.cancel_requested(run_id):  # cancelled while the machine was starting: don't start the review
+                if self.cancel_requested(run_id):  # cancelled while the machine was starting: keep it for the next review
+                    asyncio.create_task(boxpool.give_back(box))
+                    box = None
                     raise RuntimeError(CANCELLED)
                 try:
                     universe_ready = False  # a new machine: its universe isn't there yet
@@ -984,7 +1019,7 @@ class Runner:
                                         else "↺ That machine didn't respond; starting another one")
                     asyncio.create_task(boxpool.release(box, clean=False))
                     box = None
-                    await asyncio.sleep(min(MACHINE_WAIT_S * machine, MACHINE_WAIT_MAX_S) // 2)
+                    await self._wait_unless_cancelled(run_id, min(MACHINE_WAIT_S * machine, MACHINE_WAIT_MAX_S) // 2)
             payload.unlink(missing_ok=True)
             db.update("runs", "id", run_id, boat_phase="started", review_started_at=time.time())
             self._push_activity(run_id, attempt, "▶️ Review started")
