@@ -9,7 +9,7 @@ from unittest import mock
 
 from server import boatrun, config, runner, workspace
 
-NAMES = {"hardness_v2.md", "tool_call_minimum.md"}
+NAMES = {"hardness_v2.md", "tool_call_minimum.md", "distinct_failure_patterns.md"}
 
 
 class GuidelinesTest(unittest.TestCase):

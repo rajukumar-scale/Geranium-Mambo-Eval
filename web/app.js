@@ -719,7 +719,7 @@ const GUIDE_COMMANDS = [
 // The Guide panel: "Steps" (how the portal works, the default) plus reading tabs for the guideline files the assistant
 // also reads (GET /api/guides/<name>). The last tab is remembered. openGuide(tab, heading) opens a tab scrolled to a
 // heading slug (common.js guideSlug); links to /?guide=<tab>#<slug> anywhere in the chat open it the same way.
-const GUIDE_TABS = [["steps", "Steps"], ["hardness", "Hardness"], ["toolcalls", "Tool calls"], ["known", "Known data issues"]];
+const GUIDE_TABS = [["steps", "Steps"], ["hardness", "Hardness"], ["toolcalls", "Tool calls"], ["patterns", "Failure patterns"], ["known", "Known data issues"]];
 const guideDocs = {};  // name -> markdown, fetched once per page load
 
 function guideStepsHtml() {

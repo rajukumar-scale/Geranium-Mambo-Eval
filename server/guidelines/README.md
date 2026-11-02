@@ -9,8 +9,10 @@ guideline is a normal commit; no eval release is needed. The eval's own files an
   completed/L12 Atlas Commercial tasks where Opus 5.5 scored under 75% weighted.
 - tool_call_minimum.md: CB Guideline: Reaching the Tool-Call Minimum (50 or 100), 2026-10-30. Built from 10 tasks and
   their Opus 5.5 baseline runs.
+- distinct_failure_patterns.md: CB Guideline: Distinct Failure Patterns (Spec V2), 2026-10-08. How the six baseline
+  rollouts' failure patterns are counted and how to build traps that split them. Converted from Evan's PDF on 2026-11-02.
 - known_data_issues.md: the "Known data issues" list (base-data conflicts, same ids as the chat sidebar), grouped by
   task date. Generated with server/known_issues.json by deploy/build_known_issues.py; edit the script, not the file.
 
-Contributors can read the same three files in the chat page's Guide panel (tabs Hardness, Tool calls, Known data
-issues), served by GET /api/guides/<name> (app.py GUIDES allowlist). Links to /?guide=<tab>#<heading-slug> open a tab at a heading.
+Contributors can read the same four files in the chat page's Guide panel (tabs Hardness, Tool calls, Failure
+patterns, Known data issues), served by GET /api/guides/<name> (app.py GUIDES allowlist). Links to /?guide=<tab>#<heading-slug> open a tab at a heading.
