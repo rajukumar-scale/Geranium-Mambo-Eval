@@ -74,6 +74,8 @@ $("#login-form").addEventListener("submit", async e => {
 $("#logout").onclick = async () => { await api("/api/logout", { method: "POST" }); location.reload(); };
 // ☰: on a phone it opens the sidebar over the chat; on a wider screen it hides or shows it (remembered).
 const narrow = () => window.matchMedia("(max-width: 820px)").matches;
+// A phone or tablet (no mouse): its keyboard has no Shift+Enter, so Enter adds a new line and the Send button sends.
+const touchOnly = () => window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 if (localStorage.getItem("evp_side") === "hidden") document.body.classList.add("side-hidden");
 $("#menu").onclick = () => {
   if (narrow()) return $("#side").classList.toggle("open");
@@ -84,7 +86,8 @@ $("#menu").onclick = () => {
 async function showApp(prefetched = null) {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  $("#chip-attempt").textContent = "attempt " + state.me.attempt_id + (state.me.admin ? " · admin" : "");
+  $("#chip-attempt").innerHTML = `<span class="chip-lbl">attempt </span>${esc(state.me.attempt_id)}${state.me.admin ? '<span class="chip-lbl"> · admin</span>' : ""}`;
+  $("#chip-attempt").title = "attempt " + state.me.attempt_id;
   // Task IDs are for admins only: the server sends none to contributors.
   $("#chip-task").textContent = state.me.task_id ? "task " + state.me.task_id : "";
   $("#chip-task").classList.toggle("hidden", !state.me.task_id);
@@ -889,7 +892,7 @@ const input = $("#input");
 input.addEventListener("input", autosize);
 input.addEventListener("keydown", e => {
   if (slashKey(e)) return;
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !touchOnly()) { e.preventDefault(); send(); }
 });
 
 // ---- "/" command menu: typing "/" (or "/p", "/ru"…) at the start lists the matching commands ----

@@ -65,6 +65,7 @@ a { color: var(--link); }
 
 /* app shell */
 .app { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); height: 100%; }  /* never wider than the screen */
+@supports (height: 100dvh) { .app { height: 100dvh; } }  /* phones: the visible height, so the browser bar never covers the send box */
 .app.has-spend { grid-template-rows: auto auto 1fr; }
 /* spend bar under the top bar: the contributor's total against the limit */
 .spendbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 20px; font-size: 13px; cursor: pointer;
@@ -516,7 +517,25 @@ button.danger-solid:hover { border-color: var(--ink); }
   .side.open { display: block; position: fixed; inset: 56px 0 0 0; z-index: 30; }
 }
 @media (max-width: 560px) {
-  .topbar { gap: 6px; padding: 10px 12px; }
+  /* Phones (2026-11-01): the header, spend notice and send box took ~45% of the screen. Keep them to one line each. */
+  .topbar { gap: 6px; padding: 8px 10px; }
+  .topbar .chip-lbl, .tlabel { display: none; }
+  .topbar button { padding: 6px 10px; }
+  .spendbar { gap: 8px; }
+  .spendbar .spend-who { display: none; }
+  .spendbar .spend-meter { flex: 1; width: auto; }
+  .spendbar:not(.near):not(.over) .spend-rule { display: none; }  /* tap the bar for the full rule */
+  .messages { padding: 14px 10px; }
+  .msg .bubble { max-width: 92%; }
+  .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+  .composer .hint { display: none; }
+  .composer .actions { justify-content: space-between; margin-top: 6px; }
+  .composer textarea { min-height: 44px; }
+  input, textarea, select { font-size: 16px; }  /* under 16px, iPhone Safari zooms the page in on focus */
+  .overlay { padding: 8px; }
+  .rcard { flex-wrap: wrap; }
+  .rcard .grow { flex-basis: 100%; }  /* report and pass cards: title on its own line, buttons below */
+  .modal { max-height: 100%; }
   .topbar .title, #chip-task { display: none; }
   #chip-attempt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topbar button { padding: 6px 10px; }

@@ -668,7 +668,7 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   localStorage.setItem("evp_theme", theme);
   document.querySelectorAll("[data-theme-toggle]").forEach(b => {
-    b.textContent = theme === "dark" ? "☀ Light" : "☾ Dark";
+    b.innerHTML = theme === "dark" ? '☀<span class="tlabel"> Light</span>' : '☾<span class="tlabel"> Dark</span>';
     b.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
   });
 }
