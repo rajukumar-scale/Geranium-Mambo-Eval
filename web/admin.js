@@ -914,7 +914,28 @@ $("#send").onclick = sendReply;
 $("#reply").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); } });
 $("#resolve").onclick = async () => { if (S.selected) { await api(`/api/admin/chat/${S.selected}/resolve`, { method: "POST" }); await select(S.selected); loadChats(); } };
 
-let refreshTimer = null;
+// The chat list after live events. It used to reload ~800 ms after ANY event in the whole portal; with 30+ reviews
+// streaming that was about once a second per open admin tab, ~3 heavy /api/admin/chats a second in all, and a newly
+// opened admin page sat on a blank screen for minutes behind them (2026-11-02). Now: at most once per LIST_EVERY_MS
+// per tab, one request at a time, none while the tab is in the background (it catches up when shown again); a new
+// /admin request refreshes at once.
+const LIST_EVERY_MS = 15000;
+let refreshTimer = null, listBusy = false, listLast = 0, listPending = false;
+async function refreshList(now = false) {
+  listPending = true;
+  if (document.hidden || listBusy || refreshTimer) return;
+  const wait = now ? 0 : Math.max(0, listLast + LIST_EVERY_MS - Date.now());
+  refreshTimer = setTimeout(async () => {
+    refreshTimer = null;
+    if (document.hidden) return;
+    listBusy = true; listPending = false; listLast = Date.now();
+    try { await loadChats(); } catch (e) { /* the next event or the interval tries again */ }
+    listBusy = false;
+    if (listPending) refreshList();
+  }, wait);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && listPending) refreshList(true); });
+
 function connect() {
   const es = new EventSource("/api/admin/events");
   S.es = es;
@@ -931,8 +952,7 @@ function connect() {
         select(S.selected);
       }
     }
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(loadChats, 800);
+    refreshList(type === "admin_request");
     if (type === "admin_request" && window.Notification && Notification.permission === "granted") {
       new Notification("Eval portal /admin request", { body: p.data.message });
     }
