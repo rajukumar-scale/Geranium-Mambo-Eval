@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-time VM setup for the HarmonyGames Eval Portal (Ubuntu 22.04 / 24.04). Run as root:
 #   sudo DOMAIN=eval.example.com bash deploy/setup_vm.sh   (or DOMAIN=auto for <ip>.sslip.io)
+#   sudo DOMAIN=eval.example.com BEHIND_LB=1 bash deploy/setup_vm.sh   (a load balancer ends HTTPS and sends port 80 here)
 # Re-running is safe: it skips finished steps. Afterwards put the keys in /opt/eval-portal/.env
 # (LITELLM_API_KEY, REDASH_API_KEY, SLACK_WEBHOOK_URL) and `systemctl restart eval-portal-meter eval-portal`.
 set -euo pipefail
@@ -14,6 +15,9 @@ DOMAIN=${DOMAIN:-}
 # PUBLIC_URL: the platform already serves HTTPS for you (e.g. boat.dev: https://<id>-8000.on.boat.dev).
 # The portal then listens on 127.0.0.1:8000 and Caddy is skipped.
 PUBLIC_URL=${PUBLIC_URL:-}
+# BEHIND_LB=1 (with DOMAIN): a load balancer (e.g. an AWS ALB) serves https://$DOMAIN and forwards to port 80 here, so
+# Caddy serves plain HTTP on :80 (the portal and /meter) and gets no certificate.
+BEHIND_LB=${BEHIND_LB:-}
 # DOMAIN=auto: no domain needed, use <public-ip>.sslip.io (resolves to this VM; Caddy still gets real HTTPS).
 if [ "$DOMAIN" = "auto" ]; then
   DOMAIN="$(curl -fsS https://api.ipify.org | tr . -).sslip.io"
@@ -80,6 +84,7 @@ elif [ -n "$DOMAIN" ]; then
   sed -i "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=https://${DOMAIN}|" "$ENV"
   # Caddy also serves the meter at /meter, for review machines off this server (Modal); keep a URL already set.
   sed -i -E "s|^PROXY_PUBLIC_URL=[[:space:]]*(#.*)?$|PROXY_PUBLIC_URL=https://${DOMAIN}/meter|" "$ENV"
+  if [ -n "$BEHIND_LB" ]; then sed -i "s|^COOKIE_SECURE=.*|COOKIE_SECURE=1|" "$ENV"; fi  # visitors still see https
 else  # no domain: serve plain HTTP on port 8000 (put it behind your own load balancer / VPN)
   IP=$(hostname -I | awk '{print $1}')
   sed -i "s|^HOST=.*|HOST=0.0.0.0|; s|^COOKIE_SECURE=.*|COOKIE_SECURE=0|; s|^TRUST_PROXY=.*|TRUST_PROXY=0|; s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=http://${IP}:8000|" "$ENV"
@@ -97,14 +102,15 @@ systemctl enable eval-portal eval-portal-meter
 systemctl enable --now eval-portal-firewall.timer
 
 if [ -n "$DOMAIN" ] && [ -z "$PUBLIC_URL" ]; then
-  log "Caddy (HTTPS for $DOMAIN)"
+  SITE=$DOMAIN; [ -n "$BEHIND_LB" ] && SITE=":80"
+  log "Caddy ($SITE for $DOMAIN)"
   if ! command -v caddy >/dev/null; then
     apt-get install -y -q debian-keyring debian-archive-keyring apt-transport-https gnupg
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
     apt-get update -q && apt-get install -y -q caddy
   fi
-  sed "s|{\$DOMAIN}|$DOMAIN|" "$APP_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
+  sed "s|{\$DOMAIN}|$SITE|" "$APP_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
   systemctl reload caddy || systemctl restart caddy
 fi
 
