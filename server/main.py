@@ -31,6 +31,9 @@ async def serve(mode):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # On its own, a meter restart waits for in-flight model calls (a review's call can stream for minutes).
     servers = {"meter": [_meter(600)], "portal": [_portal()]}.get(mode) or [_portal(), _meter(3)]
+    from . import db, stallwatch
+    db.start_background(pin=mode != "meter")  # WAL checkpoints off the request path; the portal pins the database in RAM
+    stallwatch.start(asyncio.get_running_loop())
     await asyncio.gather(*(s.serve() for s in servers))
 
 

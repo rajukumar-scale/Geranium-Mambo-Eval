@@ -93,6 +93,10 @@ create table if not exists cb_training (
 """
 
 
+CACHE_KB = 262144  # the writer connection's page cache (256 MB)
+READER_CACHE_KB = 32768  # each reading() thread's (32 MB; up to 40 threads)
+CHECKPOINT_EVERY = 30  # seconds between background WAL checkpoints
+PIN_EVERY = 60  # seconds between re-pinning the database file in memory (it grows)
 BUSY_TIMEOUT_MS = 15000  # the portal and the meter service both write; 5 s was too short under disk load
 
 
@@ -110,6 +114,12 @@ def conn():
             # busy waits ran out under that load, runs crashed on "database is locked" and stayed "running".
             _conn.execute("pragma synchronous=normal")
             _conn.execute(f"pragma busy_timeout={BUSY_TIMEOUT_MS}")
+            # Busy disk (boat snapshots, 2026-11-02 stalls): keep reads in memory and fsyncs off the request path.
+            # A 256 MB page cache in the process (the OS page cache gets evicted by the snapshot's reads), and no
+            # automatic checkpoint: the commit that crossed 1,000 WAL pages used to fsync the whole database while
+            # holding the portal's lock. checkpoint_loop() does it in its own thread and connection instead.
+            _conn.execute(f"pragma cache_size=-{CACHE_KB}")
+            _conn.execute("pragma wal_autocheckpoint=0")
             _conn.executescript(SCHEMA)
             migrate()
         return _conn
@@ -134,6 +144,7 @@ def reading():
         reader = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         reader.row_factory = sqlite3.Row
         reader.execute(f"pragma busy_timeout={BUSY_TIMEOUT_MS}")
+        reader.execute(f"pragma cache_size=-{READER_CACHE_KB}")
         _local.reader, _local.reader_path = reader, path
     outer = getattr(_local, "active", None)
     _local.active = _local.reader
@@ -291,3 +302,116 @@ def record_call(run_id, model, path, http_status, usage, cost):
            " litellm_cost_usd=litellm_cost_usd+?, models=? where id=?",
            (usage.get("input_tokens", 0), usage.get("output_tokens", 0), usage.get("cache_read_input_tokens", 0),
             usage.get("cache_creation_input_tokens", 0), cost or 0, json.dumps(models), run_id))
+
+
+# ---- keeping the database off the disk's critical path ------------------------------------------------------------
+_background = {"started": False}
+
+
+def checkpoint_once(mode="PASSIVE"):
+    """Copy the WAL into the database file, on a connection of its own: nothing waits for it (PASSIVE never blocks
+    readers or writers). Returns sqlite's (busy, wal pages, checkpointed pages)."""
+    c = sqlite3.connect(config.DATA_DIR / "portal.db", timeout=1)
+    try:
+        return tuple(c.execute(f"pragma wal_checkpoint({mode})").fetchone())
+    finally:
+        c.close()
+
+
+def _checkpoint_loop():
+    while True:
+        time.sleep(CHECKPOINT_EVERY)
+        try:
+            busy, wal, done = checkpoint_once()
+            if wal > 200000:  # ~800 MB of WAL: something keeps a reader open; worth knowing
+                _log().warning("WAL is %d pages (%d checkpointed)", wal, done)
+        except Exception:  # noqa: BLE001
+            _log().exception("background checkpoint failed")
+
+
+def _log():
+    import logging
+    return logging.getLogger("portal.db")
+
+
+class _Pin:
+    """Hold portal.db (and its WAL) in RAM: map the files shared and read-only and mlock them (libc, through ctypes),
+    so a read never waits on a disk the boat snapshot is saturating; the locked pages are the page cache sqlite reads.
+    Without the right (RLIMIT_MEMLOCK, eval-portal.service LimitMEMLOCK) it asks the kernel to keep them read in
+    (MADV_WILLNEED, again every minute)."""
+    PROT_READ, MAP_SHARED, MADV_WILLNEED = 1, 1, 3
+
+    def __init__(self):
+        import ctypes
+        import ctypes.util
+        self.ct = ctypes
+        self.libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        self.libc.mmap.restype = ctypes.c_void_p
+        self.libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+        for f in ("munmap", "mlock", "madvise"):
+            getattr(self.libc, f).argtypes = [ctypes.c_void_p, ctypes.c_size_t] + ([ctypes.c_int] if f == "madvise" else [])
+            getattr(self.libc, f).restype = ctypes.c_int
+        self.maps = {}  # file name -> (size, address, locked)
+
+    def _map(self, path, size):
+        import os
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            addr = self.libc.mmap(None, size, self.PROT_READ, self.MAP_SHARED, fd, 0)
+        finally:
+            os.close(fd)
+        if addr in (None, self.ct.c_void_p(-1).value):
+            raise OSError(self.ct.get_errno(), "mmap failed")
+        locked = self.libc.mlock(addr, size) == 0
+        if not locked:
+            self.libc.madvise(addr, size, self.MADV_WILLNEED)
+        return addr, locked
+
+    def refresh(self):
+        for name in ("portal.db", "portal.db-wal"):
+            path = config.DATA_DIR / name
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = 0
+            old = self.maps.get(name)
+            if old and old[0] == size:
+                if not old[2]:
+                    self.libc.madvise(old[1], size, self.MADV_WILLNEED)
+                continue
+            new = None
+            if size:
+                addr, locked = self._map(path, size)
+                new = (size, addr, locked)
+                if not old or old[2] != locked:
+                    _log().info("%s %s in memory (%.0f MB)", name, "locked" if locked else "kept warm", size / 1e6)
+            if old:
+                self.libc.munmap(old[1], old[0])
+            if new:
+                self.maps[name] = new
+            else:
+                self.maps.pop(name, None)
+
+    def locked(self):
+        return {name: m[2] for name, m in self.maps.items()}
+
+
+def _pin_loop():
+    pin = _Pin()
+    while True:
+        try:
+            pin.refresh()
+        except Exception:  # noqa: BLE001
+            _log().exception("pinning the database in memory failed")
+        time.sleep(PIN_EVERY)
+
+
+def start_background(pin=True):
+    """Start the checkpoint (and pin) threads once per process (the portal and the meter both call this)."""
+    if _background["started"]:
+        return
+    _background["started"] = True
+    conn()
+    threading.Thread(target=_checkpoint_loop, name="db-checkpoint", daemon=True).start()
+    if pin:
+        threading.Thread(target=_pin_loop, name="db-pin", daemon=True).start()

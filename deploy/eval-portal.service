@@ -19,6 +19,8 @@ RestartSec=5
 TimeoutStopSec=20
 # 50 reviews, their proxied model calls and 50 open chat pages need well over the default 1024 files.
 LimitNOFILE=65536
+# The portal keeps portal.db (~1 GB) locked in RAM (db._Pin), so a disk the boat snapshot saturates can't stall reads.
+LimitMEMLOCK=3G
 
 [Install]
 WantedBy=multi-user.target

@@ -42,8 +42,29 @@ FONTS = {"Cache-Control": "public, max-age=604800"}  # not in WEB_BUILD; a chang
 
 
 class Static(StaticFiles):
+    """The web files, read from disk once per process and then served from memory: a deploy restarts the process, so
+    they can't go stale, and a disk the boat snapshot saturates no longer stalls the page loading (2026-11-02: app.js
+    took 23 s). StaticFiles still does the lookup (and its path checks) the first time."""
+    _memory = {}  # path -> (body, media type, etag)
+
     async def get_response(self, path, scope):
-        response = await super().get_response(path, scope)
+        held = self._memory.get(path)
+        if held is None:
+            response = await super().get_response(path, scope)
+            if response.status_code == 200 and isinstance(response, FileResponse):
+                body = await asyncio.to_thread(Path(response.path).read_bytes)
+                self._memory[path] = held = (body, response.media_type, response.headers.get("etag"))
+            else:
+                return self._headers(response, path, scope)
+        body, media_type, etag = held
+        if etag and etag in (dict(scope.get("headers") or []).get(b"if-none-match", b"").decode(errors="replace")):
+            response = Response(status_code=304, headers={"etag": etag})
+        else:
+            response = Response(body, media_type=media_type, headers={"etag": etag} if etag else None)
+        return self._headers(response, path, scope)
+
+    @staticmethod
+    def _headers(response, path, scope):
         if response.status_code in (200, 304) and b"v=" + WEB_BUILD.encode() in scope.get("query_string", b""):
             response.headers.update(IMMUTABLE)
         elif response.status_code in (200, 304) and path.startswith("fonts/"):
@@ -581,10 +602,22 @@ def guide(name: str, request: Request):
                              media_type="text/markdown; charset=utf-8", headers=NO_CACHE)
 
 
+SPEND_TTL = 5  # seconds one attempt's spend figure is reused: every open chat page polls it (~400 calls a minute)
+_spend_cache = {}  # attempt id -> (time, figure)
+
+
 @app.get("/api/spend")
 def my_spend(request: Request):
     """The top bar's spend figure: the attempt owner's total across all their attempts (live during a run)."""
-    return spend.status(db.get_chat(current_user(request)["attempt_id"]))
+    attempt_id = current_user(request)["attempt_id"]
+    held = _spend_cache.get(attempt_id)
+    if held and time.time() - held[0] < SPEND_TTL:
+        return held[1]
+    figure = spend.status(db.get_chat(attempt_id))
+    if len(_spend_cache) > 5000:
+        _spend_cache.clear()
+    _spend_cache[attempt_id] = (time.time(), figure)
+    return figure
 
 
 def history_chats(session):
@@ -743,7 +776,15 @@ async def events(request: Request):
     session = current_user(request)
     attempt_id = session["attempt_id"]
     hello = {"active_run": run_view(db.active_run(attempt_id)), "build": WEB_BUILD}
-    return StreamingResponse(event_stream(request, attempt_id, hello, lambda payload: for_viewer(session, payload)),
+    # The chat's task id, looked up once for this stream: for_viewer() read it from the database for every event of
+    # every open page, on the event loop (a busy disk then froze the whole portal, 2026-11-02).
+    if session.get("admin"):
+        view = lambda payload: payload  # noqa: E731
+    else:
+        chat = db.get_chat(attempt_id)
+        extra = [chat["task_id"]] if chat else []
+        view = lambda payload: taskids.hide(payload, extra=extra)  # noqa: E731
+    return StreamingResponse(event_stream(request, attempt_id, hello, view),
                              media_type="text/event-stream", headers=SSE_HEADERS)
 
 
