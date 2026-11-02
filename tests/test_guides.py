@@ -1,5 +1,5 @@
-"""The Guide panel's reading tabs (2026-10-31): GET /api/guides/<name> serves the three guideline files to any signed-in
-contributor (fixed allowlist, never a path), the kickoff card links to two of them, and a /hardness report that came
+"""The Guide panel's reading tabs (2026-10-31): GET /api/guides/<name> serves the four guideline files to any signed-in
+contributor (fixed allowlist, never a path), the kickoff card links to three of them, and a /hardness report that came
 back too easy gets a one-line link to the hardness guide's Part 8."""
 
 import json
@@ -17,7 +17,8 @@ from fastapi.testclient import TestClient
 from server import app as portal, auth, config, db, plan
 
 ROOT = Path(__file__).resolve().parent.parent
-NAMES = {"hardness": "hardness_v2.md", "toolcalls": "tool_call_minimum.md", "known": "known_data_issues.md"}
+NAMES = {"hardness": "hardness_v2.md", "toolcalls": "tool_call_minimum.md", "patterns": "distinct_failure_patterns.md",
+         "known": "known_data_issues.md"}
 
 
 class GuideEndpointTest(unittest.TestCase):
@@ -42,7 +43,7 @@ class GuideEndpointTest(unittest.TestCase):
             client.cookies.set(auth.USER_COOKIE, auth.sign({"attempt_id": "a1", "user_id": "u1", "iat": time.time()}))
         return client
 
-    def test_the_allowlist_is_the_three_guides(self):
+    def test_the_allowlist_is_the_four_guides(self):
         self.assertEqual(portal.GUIDES, NAMES)
         for file in NAMES.values():
             self.assertTrue((config.GUIDELINES_DIR / file).is_file(), file)
@@ -85,10 +86,11 @@ class GuideEndpointTest(unittest.TestCase):
 
 
 class KickoffLinksTest(unittest.TestCase):
-    def test_the_card_links_both_guides(self):
+    def test_the_card_links_the_guides(self):
         card = plan.card_text()
         self.assertIn("[Read the hardness guide](/?guide=hardness)", card)
         self.assertIn("[Read the tool-call guide](/?guide=toolcalls)", card)
+        self.assertIn("[Read the failure patterns guide](/?guide=patterns)", card)
         for name in re.findall(r"\]\(/\?guide=(\w+)", card):
             self.assertIn(name, portal.GUIDES)
 
@@ -165,9 +167,9 @@ class WebGuidePanelTest(unittest.TestCase):
     def setUp(self):
         self.app = (ROOT / "web" / "app.js").read_text()
 
-    def test_four_tabs_steps_first(self):
+    def test_five_tabs_steps_first(self):
         tabs = re.search(r"const GUIDE_TABS = (\[.*?\]);\n", self.app).group(1)
-        self.assertEqual(re.findall(r'\["(\w+)"', tabs), ["steps", "hardness", "toolcalls", "known"])
+        self.assertEqual(re.findall(r'\["(\w+)"', tabs), ["steps", "hardness", "toolcalls", "patterns", "known"])
         self.assertEqual(set(re.findall(r'\["(\w+)"', tabs)[1:]), set(portal.GUIDES))
 
     def test_last_tab_is_remembered_and_deep_links_open(self):

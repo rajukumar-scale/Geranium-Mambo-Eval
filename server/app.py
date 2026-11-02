@@ -584,7 +584,8 @@ def known_data_issues(request: Request):
 # The Guide panel's reading tabs (2026-10-31): the same guideline files the chat assistant reads (server/guidelines),
 # so there's one source. A fixed allowlist: the name is a key here, never a path. Static docs for every signed-in
 # contributor (no pilot), never for anyone signed out.
-GUIDES = {"hardness": "hardness_v2.md", "toolcalls": "tool_call_minimum.md", "known": "known_data_issues.md"}
+GUIDES = {"hardness": "hardness_v2.md", "toolcalls": "tool_call_minimum.md", "patterns": "distinct_failure_patterns.md",
+          "known": "known_data_issues.md"}
 _GUIDE_MAINTAINER_LINE = re.compile(r"^Built by deploy/.*(?:\n|$)", re.M)  # "edit the script" notes are for maintainers
 
 
