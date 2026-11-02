@@ -81,6 +81,19 @@ github_done() {  # after a successful deploy: earlier deployments that never wen
   done
 }
 fail() { echo "$NEW" > $DATA/failed_commit; notify "$1"; github "${2:-failure}" "${3:-Not deployed}"; exit 1; }
+# At most one deploy an hour (2026-11-02): each restart holds new chat replies while it waits for the running ones, and
+# with several merges an hour CBs waited again and again. Merges in the hour go out together. touch $DATA/deploy_now
+# to skip the wait once (e.g. an urgent fix).
+EVERY=${EVP_DEPLOY_EVERY_SEC:-3600}
+LAST_AT=$(cat $DATA/last_deploy_at 2>/dev/null || echo 0)
+if [ ! -e $DATA/deploy_now ] && [ $(( $(date +%s) - LAST_AT )) -lt "$EVERY" ]; then
+  if [ "$(cat $DATA/deploy_gate_noted 2>/dev/null || true)" != "$NEW" ]; then  # say it once per commit, not every minute
+    echo "$NEW" > $DATA/deploy_gate_noted
+    github queued "Goes out with the next hourly deploy, at $(date -u -d @$((LAST_AT + EVERY)) +%H:%M 2>/dev/null || date -u -r $((LAST_AT + EVERY)) +%H:%M) UTC"
+  fi
+  exit 0
+fi
+rm -f $DATA/deploy_now
 echo "$(date -u +%FT%TZ) deploying $WHAT"
 github in_progress "Testing, then deploying once the server is free"
 
@@ -98,6 +111,7 @@ set -e
 cat $DATA/pull_deploy.log
 if [ $rc = 0 ]; then
   echo "$NEW" > $DATA/deployed_commit
+  date +%s > $DATA/last_deploy_at
   rm -f $DATA/failed_commit $DATA/deploy_backoff
   REVIEWS=$(grep -oE '[0-9]+ running review\(s\) re-attached' $DATA/pull_deploy.log | grep -oE '^[0-9]+' || echo 0)
   notify "✅ Portal updated: $WHAT. $REVIEWS running review(s) kept going."

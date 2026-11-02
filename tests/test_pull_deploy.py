@@ -210,5 +210,22 @@ class PullDeployTest(unittest.TestCase):
         self.assertEqual(self.github()[-1], "POST deployments/1/statuses failure")
 
 
+    def test_at_most_one_deploy_an_hour_unless_asked(self):
+        self.pull()  # nothing new: no deploy
+        first = self.commit("first change")
+        self.pull()
+        self.assertEqual(self.deployed(), first)
+        second = self.commit("second change, minutes later")
+        self.pull()
+        self.assertEqual(self.deployed(), first)  # waits for the hourly slot
+        (self.data / "deploy_now").write_text("")
+        self.pull()  # an urgent fix: deploy_now skips the wait once
+        self.assertEqual(self.deployed(), second)
+        self.assertFalse((self.data / "deploy_now").exists())
+        (self.data / "last_deploy_at").write_text("0\n")  # an hour later
+        third = self.commit("third change")
+        self.pull()
+        self.assertEqual(self.deployed(), third)
+
 if __name__ == "__main__":
     unittest.main()
