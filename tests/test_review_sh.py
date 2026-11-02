@@ -62,7 +62,8 @@ class ReviewShTest(unittest.TestCase):
         self.assertNotIn("(4 of 3)", err)
 
     def test_other_api_error_is_not_resumed(self):
-        lines, rc, err = self.run_review([INIT, '{"type":"result","is_error":true,"result":"API Error: 500 overloaded"}'])
+        # a request the API refused (4xx) is not temporary; 5xx server errors are resumed since 2026-11-02
+        lines, rc, err = self.run_review([INIT, '{"type":"result","is_error":true,"result":"API Error: 400 invalid request"}'])
         self.assertEqual((len(lines), rc), (2, "1"))
         self.assertNotIn("resuming", err)
 

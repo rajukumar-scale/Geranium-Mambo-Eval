@@ -146,6 +146,15 @@ class DockerRetryTest(unittest.TestCase):
         self.assertIn('"result":"done"', (self.io / "out.jsonl").read_text())
         self.assertIn("resuming the session (1 of 3)", (self.io / "err.txt").read_text())
 
+    def test_a_proxy_restart_502_resumes_too(self):
+        # 2026-11-02 18:07: the metering proxy restarted and 9 reviews failed on this exact message
+        err = {"type": "result", "is_error": True, "result": "API Error: 502 upstream unavailable. This is a server-side "
+                                                              "issue, usually temporary — try again in a moment."}
+        ok = {"type": "result", "is_error": False, "result": "done"}
+        proc, args = self.run_scripts([err, ok])
+        self.assertEqual(len(args), 2)
+        self.assertIn("--resume S-1", args[1])
+
     def test_real_errors_are_not_retried_and_retries_stop_at_three(self):
         budget = {"type": "result", "is_error": True, "result": "Budget exceeded for this key"}
         proc, args = self.run_scripts([budget])

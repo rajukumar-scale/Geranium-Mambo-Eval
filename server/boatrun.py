@@ -127,8 +127,10 @@ echo STARTED
 # 2026-11-02: also a reset connection (ECONNRESET, the most common at 23 in 3 weeks), timeouts, an unverifiable
 # certificate, and the API's own server errors (5xx, 499, 529 overloaded, 429 rate limit). Shared with the server's
 # containers (runner.DOCKER_REVIEW_SH), which had no retry at all.
+# "API Error: 5xx <anything>" too: 2026-11-02 18:07 a metering-proxy restart made boat's edge answer "API Error: 502
+# upstream unavailable" for ~2 min and 9 reviews failed instead of resuming (only "502 status code" was matched).
 RETRY_ERRORS = (r"API Error: (Connection (closed mid-response|refused|dropped|lost|error|reset)|Can.t reach the API|"
-                r"Unable to connect to API|Request timed out|(5[0-9][0-9]|499|429) status code)|ECONNREFUSED|ECONNRESET|"
+                r"Unable to connect to API|Request timed out|(5[0-9][0-9]|499|429) status code|5[0-9][0-9] )|ECONNREFUSED|ECONNRESET|"
                 r"ENOTFOUND|ETIMEDOUT|EPIPE|EAI_AGAIN|socket hang up|overloaded_error|UNKNOWN_CERTIFICATE")
 REVIEW_SH = r"""#!/bin/bash
 P=/tmp/payload
