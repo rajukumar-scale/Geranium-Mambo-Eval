@@ -291,6 +291,8 @@ run, so it runs one run at a time.
 - `server/notify.py`: Slack.
 - `server/plan.py` + `server/prompts/`: the "plan your task" kickoff (pilot `PLAN_PILOT`): one card per attempt
   before the first /prompt, and the early guard added to the assistant's rules (checks an idea against the guides).
+- `server/fix_helper.py` + `server/prompts/fix_helper_rules.md`: the /prompt fix helper (pilot `FIX_HELPER_PILOT`): a
+  fix-help offer from the 2nd /prompt FAIL on, and the rules note sent with the contributor's answer.
 - `web/`: the chat, admin and verify pages (plain HTML/JS, marked + DOMPurify from a CDN).
 - `runner/Dockerfile`: the sandbox image (Ubuntu, Python 3, Claude Code 2.1.296).
 - `deploy/`: the VM setup and update scripts, systemd unit and Caddyfile.

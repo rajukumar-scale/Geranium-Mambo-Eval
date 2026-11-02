@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import auth, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -97,6 +97,9 @@ async def startup():
     asyncio.create_task(boat_wallet.loop())
     asyncio.create_task(boxpool.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
+    if config.FIX_HELPER_PILOT and not (config.PROMPTS_DIR / fix_helper.RULES_FILE).is_file():
+        log.error("FIX_HELPER_PILOT is on but server/prompts/%s is missing: answers get no fix-helper note",
+                  fix_helper.RULES_FILE)
     if config.PLAN_PILOT and plan.placeholders():
         log.warning("PLAN_PILOT is on but these server/prompts files still hold placeholder text: %s",
                     ", ".join(plan.placeholders()))
@@ -855,7 +858,15 @@ async def send(body: SendBody, request: Request):
         db.update("chats", "attempt_id", attempt_id, pending_review_run=None)
         pending = paused = None
 
-    user_msg = db.add_message(attempt_id, "user", text, {"files": files, "command": command})
+    # /prompt fix helper (pilot): the plain message that answers its offer carries the fix rules + their answer. Never
+    # a command or an answer to a waiting review (pending), which keeps its own note below.
+    fix_note, fix_meta = "", {}
+    if kind == "followup" and not pending:
+        try:
+            fix_note, fix_meta = fix_helper.answer_note(session, chat, text)
+        except Exception:  # noqa: BLE001 - the helper must never stop a message from being sent
+            log.exception("fix helper note failed for %s", attempt_id)
+    user_msg = db.add_message(attempt_id, "user", text, {"files": files, "command": command, **fix_meta})
     hub.publish(attempt_id, "message", user_msg)
     if blocked_resume:
         note = db.add_message(attempt_id, "system", "Your inputs changed since the review was paused, so it can't continue "
@@ -864,6 +875,8 @@ async def send(body: SendBody, request: Request):
                               {"warn": True})
         hub.publish(attempt_id, "message", note)
     prompt = (f"/{command} {rest}".strip() if command else text) or "(see attached files)"
+    if fix_note:
+        prompt = fix_note + prompt
     if paused:
         prompt = pause.RESUME_NOTE.format(command=paused["command"], minutes=config.RUN_TIMEOUT_MIN) + "\n\n" + prompt
     elif pending:

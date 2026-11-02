@@ -12,7 +12,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, boxpool, config, db, fingerprint, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, workspace
+from . import boatrun, boxpool, config, db, fingerprint, fix_helper, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -940,6 +940,10 @@ class Runner:
                                  "to submit), so there's no pass card yet. Fix the items in the report and run /oe again to get one.",
                                  {"run_id": run_id})
             hub.publish(attempt, "message", msg)
+        try:  # /prompt fix helper (pilot): the fix-help offer after a 2nd+ FAIL, the next step after a pass
+            fix_helper.after_review(chat, db.get_run(run_id), status, report_fields.get("verdict"))
+        except Exception:  # noqa: BLE001 - a helper message must never break finishing the run
+            log.exception("fix helper message failed for %s", attempt)
         self._stale_notice(attempt, run_id)
         self.activity.pop(run_id, None)
         await self._check_spend(attempt)
