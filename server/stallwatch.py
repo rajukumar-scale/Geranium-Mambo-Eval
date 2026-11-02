@@ -48,19 +48,28 @@ def _write(text):
 
 
 def _watch():
-    in_stall = False
+    in_stall, path, worst = False, None, 0.0
     while True:
         time.sleep(1)
         lag = time.monotonic() - _state["tick"]
         if lag >= STALL_S and not in_stall:
-            in_stall = True
+            in_stall, worst = True, lag
             try:
                 path = _write(snapshot(lag))
                 log.warning("event loop stalled %.1f s; stacks in %s", lag, path)
             except Exception:  # noqa: BLE001
                 log.exception("couldn't record a stall")
-        elif lag < 1 and in_stall:
-            in_stall = False
+        elif in_stall:
+            worst = max(worst, lag)
+            if lag < 1:  # over: how long it really lasted (the file is written when it crosses STALL_S)
+                in_stall = False
+                log.warning("event loop stall over: %.1f s", worst)
+                if path:
+                    try:
+                        with open(path, "a") as f:
+                            f.write(f"\nstall over after {worst:.1f} s\n")
+                    except OSError:
+                        pass
 
 
 def start(loop):

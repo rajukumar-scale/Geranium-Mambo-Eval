@@ -54,6 +54,27 @@ class DatabaseTest(unittest.TestCase):
             db.checkpoint_once()
             pin.refresh()
 
+    def test_reads_never_wait_for_the_write_lock_and_see_every_committed_write(self):
+        import threading
+        db.ex("create table t(x)")
+        db.ex("insert into t values (1)")
+        self.assertEqual(db.q("select count(*) n from t")[0]["n"], 1)  # read-your-writes on the read connection
+        held = threading.Event()
+
+        def slow_writer():  # a write crawling through a saturated disk, holding the portal's lock
+            with db._lock:
+                held.set()
+                time.sleep(1.5)
+        t = threading.Thread(target=slow_writer)
+        t.start()
+        held.wait()
+        t0 = time.time()
+        self.assertEqual(db.one("select count(*) n from t")["n"], 1)
+        self.assertLess(time.time() - t0, 0.5)  # did not queue behind the writer
+        t.join()
+        db.ex("insert into t values (2)")
+        self.assertEqual(db.one("select count(*) n from t")["n"], 2)
+
     def test_reads_get_a_big_cache(self):
         db.ex("create table t(x)")
         with db.reading():
@@ -77,6 +98,8 @@ class StallWatchTest(unittest.TestCase):
             text = files[0].read_text()
             self.assertIn("event loop stalled", text)
             self.assertIn("time.sleep(2.6)", text)  # the main thread's stack shows what blocked it
+            time.sleep(1.5)
+            self.assertIn("stall over after", files[0].read_text())  # and how long it really lasted
 
 
 class WebFromMemoryTest(unittest.TestCase):

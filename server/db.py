@@ -94,7 +94,7 @@ create table if not exists cb_training (
 
 
 CACHE_KB = 262144  # the writer connection's page cache (256 MB)
-READER_CACHE_KB = 32768  # each reading() thread's (32 MB; up to 40 threads)
+READER_CACHE_KB = 8192  # each thread's read connection (8 MB; up to ~45 threads; the file itself is pinned in RAM)
 CHECKPOINT_EVERY = 30  # seconds between background WAL checkpoints
 PIN_EVERY = 60  # seconds between re-pinning the database file in memory (it grows)
 BUSY_TIMEOUT_MS = 15000  # the portal and the meter service both write; 5 s was too short under disk load
@@ -102,6 +102,8 @@ BUSY_TIMEOUT_MS = 15000  # the portal and the meter service both write; 5 s was 
 
 def conn():
     global _conn
+    if _conn is not None:  # open already: no lock (a read must not wait while a writer holds it)
+        return _conn
     with _lock:
         if _conn is None:
             config.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -125,10 +127,36 @@ def conn():
         return _conn
 
 
+def _reader():
+    """This thread's read-only connection (made on first use). WAL readers never wait for a writer, so reads no longer
+    queue behind the portal's write lock: 2026-11-02 the event loop sat in q() waiting for that lock while another
+    thread's write crawled through a disk boat's snapshot had saturated (or froze), and every page stalled."""
+    conn()  # schema + migrations first
+    path = config.DATA_DIR / "portal.db"
+    if getattr(_local, "reader_path", None) != path:
+        reader = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None, check_same_thread=False)
+        reader.row_factory = sqlite3.Row
+        reader.execute(f"pragma busy_timeout={BUSY_TIMEOUT_MS}")
+        reader.execute(f"pragma cache_size=-{READER_CACHE_KB}")
+        _local.reader, _local.reader_path = reader, path
+    return _local.reader
+
+
 def q(sql, args=()):
+    """Read. On this thread's own read-only connection: it sees every committed write at once (WAL, autocommit) and
+    never waits for one. Statements that write (a pragma, an insert ... returning) go to the writer."""
     reader = getattr(_local, "active", None)
+    if reader is None and sql.lstrip()[:7].lower().startswith(("select", "with ", "with\n")):
+        try:
+            reader = _reader()
+        except sqlite3.Error:
+            reader = None
     if reader is not None:
-        return [dict(r) for r in reader.execute(sql, args).fetchall()]
+        try:
+            return [dict(r) for r in reader.execute(sql, args).fetchall()]
+        except sqlite3.OperationalError as error:
+            if "readonly" not in str(error) and "read-only" not in str(error):
+                raise
     with _lock:
         return [dict(r) for r in conn().execute(sql, args).fetchall()]
 
@@ -138,16 +166,9 @@ def reading():
     """Run q()/one() in this block on the thread's own read-only connection, without the global lock. For heavy
     read-only pages (the /admin lists): WAL lets them read while others write, so they no longer stall every
     other request. Don't write, or read-then-write, inside it."""
-    conn()  # schema + migrations first
-    path = config.DATA_DIR / "portal.db"
-    if getattr(_local, "reader_path", None) != path:
-        reader = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        reader.row_factory = sqlite3.Row
-        reader.execute(f"pragma busy_timeout={BUSY_TIMEOUT_MS}")
-        reader.execute(f"pragma cache_size=-{READER_CACHE_KB}")
-        _local.reader, _local.reader_path = reader, path
+    reader = _reader()
     outer = getattr(_local, "active", None)
-    _local.active = _local.reader
+    _local.active = reader
     try:
         yield
     finally:
