@@ -176,6 +176,31 @@ LOADTEST_REPORT_FROM = "917391917391917391917391"  # a real PASS/COMPLETE inject
 MACHINE_TRIES = 3  # review machines tried per run before giving up (failed start or no SSH)
 
 
+DOCKER_WRAP = 'exec "$@" < /evp_io/in.txt > /evp_io/out.jsonl 2> /evp_io/err.txt'
+
+
+def container_name(run_id):
+    return f"evp-{run_id}"
+
+
+def docker_io(attempt_id, run_id):
+    """Where a detached container's prompt, output and stderr live while it runs (it outlives a portal restart)."""
+    return workspace.attempt_dir(attempt_id) / "logs" / f"{run_id}.io"
+
+
+async def _docker(*args):
+    proc = await asyncio.create_subprocess_exec("docker", *args, stdout=asyncio.subprocess.DEVNULL,
+                                                stderr=asyncio.subprocess.DEVNULL)
+    await proc.wait()
+
+
+def _containers():
+    """Names of the evp- containers on this machine (running or exited)."""
+    out = subprocess.run(["docker", "ps", "-a", "--filter", "name=evp-", "--format", "{{.Names}}"],
+                         capture_output=True, text=True).stdout
+    return set(out.split())
+
+
 def drain_file():
     return config.DATA_DIR / "DRAIN"
 
@@ -227,13 +252,16 @@ class Runner:
         runs that hadn't started are queued again, and anything else that was cut off is failed with a
         message asking the user to resend."""
         drain_file().unlink(missing_ok=True)
-        self.reattach, self.requeue = [], []
+        self.reattach, self.requeue, self.reattach_docker = [], [], []
+        containers = _containers() if config.RUNNER_MODE == "docker" and shutil.which("docker") else set()
         for run in db.q("select * from runs where status in ('queued','running') order by created_at"):
             if run["status"] == "queued":
                 self.requeue.append(run["id"])
             elif (config.REVIEW_RUNNER == "boat" and run["runner_box"] and run["boat_phase"] == "started"
                   and run["proxy_token"]):
                 self.reattach.append(run["id"])
+            elif run.get("container") and run["container"] in containers:  # a detached chat reply or server review
+                self.reattach_docker.append(run["id"])
             elif run["runner_box"] or run["kind"] == "review" and config.REVIEW_RUNNER == "boat":
                 # a review still setting up its box: start it over (the half-made box is swept below)
                 db.update("runs", "id", run["id"], status="queued", started_at=None, runner_box=None, boat_phase=None,
@@ -247,17 +275,21 @@ class Runner:
                                      {"run_id": run["id"]})
                 hub.publish(run["attempt_id"], "message", msg)
         if config.RUNNER_MODE == "docker" and shutil.which("docker"):
-            names = subprocess.run(["docker", "ps", "-aq", "--filter", "name=evp-"], capture_output=True, text=True).stdout.split()
+            keep = {container_name(i) for i in self.reattach_docker}
+            names = sorted(containers - keep)  # leftovers no run is following any more
             if names:
                 subprocess.run(["docker", "rm", "-f", *names], capture_output=True)
         else:
             workspace.recover_local()
-        if self.reattach or self.requeue:
-            log.info("restart: re-attaching %d running reviews, re-queueing %d runs", len(self.reattach), len(self.requeue))
+        if self.reattach or self.requeue or self.reattach_docker:
+            log.info("restart: re-attaching %d running reviews and %d container runs, re-queueing %d runs", len(self.reattach),
+                     len(self.reattach_docker), len(self.requeue))
         for _ in range(config.MAX_CONCURRENT_RUNS):
             self.workers.append(asyncio.create_task(self._worker("main")))
         for run_id in self.reattach:
             self.workers.append(asyncio.create_task(self._reattach(run_id)))
+        for run_id in self.reattach_docker:
+            self.workers.append(asyncio.create_task(self._reattach_docker(run_id)))
         if config.REVIEW_RUNNER == "boat":
             self.workers.append(asyncio.create_task(self._start_boat()))
         else:
@@ -566,36 +598,54 @@ class Runner:
                 home = workspace.attempt_dir(attempt) / "home"
                 env = self._env(token, home)
                 cmd = self._command(chat, session_args, followup=self._is_followup(run_id))
+                outcome["before"] = workspace.report_snapshot(attempt)
+                with open(err_path, "ab") as err, open(log_path, "a", encoding="utf-8") as raw_log:
+                    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(cwd), env=env, stdin=asyncio.subprocess.PIPE,
+                                                                stdout=asyncio.subprocess.PIPE, stderr=err)
+                    self.procs[run_id] = proc
+                    proc.stdin.write(prompt.encode())
+                    await proc.stdin.drain()
+                    proc.stdin.close()
+                    try:
+                        await asyncio.wait_for(self._read(run_id, attempt, proc, raw_log, outcome),
+                                               timeout=config.RUN_TIMEOUT_MIN * 60)
+                    except asyncio.TimeoutError:
+                        outcome["timeout"] = True
+                        proc.kill()
+                    await proc.wait()
+                    outcome["returncode"] = proc.returncode
             else:
-                cwd = config.DATA_DIR
+                # Detached (2026-11-02): the container reads its prompt from and writes its output to files in
+                # logs/<run>.io and the portal follows them, so a portal restart (a deploy) re-attaches to a running
+                # chat reply or server review (start()) instead of cutting it off. Deploys used to hold every new chat
+                # reply until the running ones had ended, up to 12 minutes, several times a day.
                 env = {**self._env(token, "/home/runner"), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
                 passthrough = [k for k in env if k != "PATH"]
-                cmd = ["docker", "run", "--rm", "-i", "--name", f"evp-{run_id}",
+                io = docker_io(attempt, run_id)
+                shutil.rmtree(io, ignore_errors=True)
+                io.mkdir(parents=True)
+                (io / "in.txt").write_text(prompt)
+                (io / "out.jsonl").touch()
+                (io / "err.txt").touch()
+                outcome["before"] = workspace.report_snapshot(attempt)
+                (io / "before.json").write_text(json.dumps(outcome["before"]))  # a re-attach needs the start's reports
+                cmd = ["docker", "run", "-d", "--name", container_name(run_id),
                        "--user", f"{os.getuid()}:{os.getgid()}",
                        "--memory", config.CONTAINER_MEMORY, "--cpus", config.CONTAINER_CPUS,
                        "--pids-limit", "2048", "--security-opt", "no-new-privileges", "--cap-drop", "ALL",
                        "--network", config.DOCKER_NETWORK, "--add-host", "host.docker.internal:host-gateway", "-w", "/work",
                        *[a for k in passthrough for a in ("-e", k)],
-                       *workspace.docker_mounts(attempt), config.RUNNER_IMAGE,
+                       *workspace.docker_mounts(attempt), "--mount", f"type=bind,source={io},target=/evp_io",
+                       config.RUNNER_IMAGE, "bash", "-c", DOCKER_WRAP, "evp",
                        *self._command(chat, session_args, followup=self._is_followup(run_id))]
-            outcome["before"] = workspace.report_snapshot(attempt)
-            with open(err_path, "ab") as err, open(log_path, "a", encoding="utf-8") as raw_log:
-                proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(cwd), env=env, stdin=asyncio.subprocess.PIPE,
-                                                            stdout=asyncio.subprocess.PIPE, stderr=err)
-                self.procs[run_id] = proc
-                proc.stdin.write(prompt.encode())
-                await proc.stdin.drain()
-                proc.stdin.close()
-                try:
-                    await asyncio.wait_for(self._read(run_id, attempt, proc, raw_log, outcome),
-                                           timeout=config.RUN_TIMEOUT_MIN * 60)
-                except asyncio.TimeoutError:
-                    outcome["timeout"] = True
-                    if not local:
-                        subprocess.run(["docker", "kill", f"evp-{run_id}"], capture_output=True)
-                    proc.kill()
-                await proc.wait()
-                outcome["returncode"] = proc.returncode
+                started = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.DATA_DIR), env=env,
+                                                               stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                _, err_out = await started.communicate()
+                if started.returncode != 0:
+                    raise RuntimeError(f"docker run failed: {err_out.decode(errors='replace')[-300:]}")
+                db.update("runs", "id", run_id, container=container_name(run_id))
+                started_at = (db.get_run(run_id) or {}).get("started_at") or time.time()
+                await self._follow_docker(run_id, attempt, outcome, started_at + config.RUN_TIMEOUT_MIN * 60)
             outcome["after"] = workspace.report_snapshot(attempt)
             outcome["reports"] = {}
             for name, mtime in outcome["after"].items():
@@ -608,6 +658,11 @@ class Runner:
             if local:
                 workspace.swap_out(attempt)
                 self.local_lock.release()
+        return self._stderr_flags(attempt, run_id, outcome)
+
+    @staticmethod
+    def _stderr_flags(attempt, run_id, outcome):
+        err_path = workspace.attempt_dir(attempt) / "logs" / f"{run_id}.stderr.txt"
         stderr_tail = err_path.read_text(errors="replace")[-2000:] if err_path.exists() else ""
         outcome["stderr_tail"] = stderr_tail
         if not outcome["init"] and "is already in use" in stderr_tail:
@@ -615,6 +670,96 @@ class Runner:
         if not outcome["init"] and "No conversation found" in stderr_tail:
             outcome["resume_missing"] = True
         return outcome
+
+    async def _follow_docker(self, run_id, attempt, outcome, deadline, replay=False):
+        """Read a detached container's output file until it exits (docker wait), into the run log and outcome. With
+        replay (re-attaching after a restart) the output is read again from the start, which rebuilds the outcome and
+        the log exactly. Then the container and its io folder are removed and its stderr kept in logs/<run>.stderr.txt."""
+        name, io = container_name(run_id), docker_io(attempt, run_id)
+        logs = workspace.attempt_dir(attempt) / "logs"
+        waiter = await asyncio.create_subprocess_exec("docker", "wait", name, stdout=asyncio.subprocess.PIPE,
+                                                      stderr=asyncio.subprocess.PIPE)
+        self.procs[run_id] = waiter  # cancel() stops the container by name; killing this just ends the wait
+        wait_task = asyncio.ensure_future(waiter.communicate())
+        buffer = b""
+        try:
+            with open(logs / f"{run_id}.jsonl", "w" if replay else "a", encoding="utf-8") as raw_log, \
+                    open(io / "out.jsonl", "rb") as out:
+                while True:
+                    chunk = out.read(1 << 16)
+                    if chunk:
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            self._handle_line(run_id, attempt, line, raw_log, outcome)
+                        continue
+                    if wait_task.done():
+                        break
+                    if time.time() > deadline:
+                        outcome["timeout"] = True
+                        await _docker("kill", name)
+                        await asyncio.wait({wait_task}, timeout=60)
+                        break
+                    await asyncio.wait({wait_task}, timeout=0.3)
+                rest = out.read()
+                if rest:
+                    buffer += rest
+                for line in buffer.split(b"\n"):
+                    if line.strip():
+                        self._handle_line(run_id, attempt, line, raw_log, outcome)
+            if wait_task.done():
+                stdout, _ = wait_task.result()
+                code = stdout.decode(errors="replace").strip().splitlines()
+                if code and code[-1].lstrip("-").isdigit():
+                    outcome["returncode"] = int(code[-1])
+            else:
+                wait_task.cancel()
+                outcome.setdefault("returncode", -1)
+        finally:
+            try:
+                with open(logs / f"{run_id}.stderr.txt", "ab") as err:
+                    err.write((io / "err.txt").read_bytes())
+            except OSError:
+                pass
+            await _docker("rm", "-f", name)
+            shutil.rmtree(io, ignore_errors=True)
+
+    async def _reattach_docker(self, run_id):
+        """After a restart: follow a chat reply or server review whose container kept running (or ended meanwhile)."""
+        run = db.get_run(run_id)
+        attempt = run["attempt_id"]
+        server = run["boat_phase"] == "server"
+        self.live.add(run_id)
+        if server:
+            self.pool_of[run_id] = "server"
+            self.server_held.add(run_id)
+        try:
+            self.activity[run_id] = []
+            if run["proxy_token"]:
+                proxy.ACTIVE_TOKENS[run["proxy_token"]] = run_id
+            io = docker_io(attempt, run_id)
+            try:
+                before = json.loads((io / "before.json").read_text())
+            except (OSError, ValueError):
+                before = {}
+            outcome = {"events": 0, "result": None, "texts": [], "init": False, "before": before}
+            self._push_activity(run_id, attempt, "↺ Server updated; reconnected to the run")
+            await self._follow_docker(run_id, attempt, outcome, (run["started_at"] or time.time()) + config.RUN_TIMEOUT_MIN * 60,
+                                      replay=True)
+            outcome["after"] = workspace.report_snapshot(attempt)
+            outcome["reports"] = {n: workspace.read_report(attempt, n) for n, m in outcome["after"].items()
+                                  if outcome["before"].get(n) != m}
+            self._stderr_flags(attempt, run_id, outcome)
+            proxy.ACTIVE_TOKENS.pop(run["proxy_token"], None)
+            db.update("runs", "id", run_id, proxy_token=None)
+            await self._complete(run_id, outcome)
+        except Exception as error:  # noqa: BLE001
+            log.exception("re-attaching container run %s failed", run_id)
+            await self._fail_crashed(run_id, error)
+        finally:
+            self.procs.pop(run_id, None)
+            self.live.discard(run_id)
+            self._release_server_slot(run_id)
 
     async def _read(self, run_id, attempt, proc, raw_log, outcome, keep_partial=True):
         buffer = b""

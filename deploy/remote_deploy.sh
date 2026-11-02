@@ -16,9 +16,12 @@ $APP/.venv/bin/python -m compileall -q "$NEW/server" >/dev/null
 # let the running ones finish, up to 20 minutes, before holding anything back.
 touch "$DATA/DEPLOY_PENDING"; chown "$OWNER" "$DATA/DEPLOY_PENDING"
 trap 'rm -f "$DATA/DEPLOY_PENDING"' EXIT
+# Runs in a detached container (runs.container set, 2026-11-02) are re-attached after the restart, so only older ones
+# count. (Before that column exists, every one counts.)
+DETACHED=""; q "select container from runs limit 0" 2>/dev/null && DETACHED=" and container is null"
 if q "select boat_phase from runs limit 0" 2>/dev/null; then
   for i in $(seq 1 1200); do
-    ON_SERVER=$(q "select count(*) from runs where status='running' and boat_phase='server'")
+    ON_SERVER=$(q "select count(*) from runs where status='running' and boat_phase='server'$DETACHED")
     [ "$ON_SERVER" = 0 ] && break
     [ $((i % 60)) = 1 ] && echo "waiting for $ON_SERVER review(s) running on this server to finish…"
     sleep 1
@@ -33,7 +36,7 @@ touch "$DATA/DRAIN"; chown "$OWNER" "$DATA/DRAIN"
 trap 'rm -f "$DATA/DRAIN" "$DATA/DEPLOY_PENDING"' EXIT
 # (Before the first deploy of re-attach support there is no boat_phase column: then every running run counts.)
 if q "select boat_phase from runs limit 0" 2>/dev/null; then
-  BUSY_SQL="select count(*) from runs where status='running' and (kind='followup' or boat_phase='server')"
+  BUSY_SQL="select count(*) from runs where status='running' and (kind='followup' or boat_phase='server')$DETACHED"
   LIVE_SQL="select count(*) from runs where status='running' and boat_phase='started'"
 else
   BUSY_SQL="select count(*) from runs where status='running'"
