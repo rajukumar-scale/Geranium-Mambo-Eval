@@ -555,7 +555,9 @@ async function runTaxoCheck(p, root) {
     const r = await api(`/api/proofs/${encodeURIComponent(p.code)}/check-input`, { json: { text } });
     if (r.match) {
       out.className = "ok";
-      out.innerHTML = `✓ Matches this pass. The taxonomy's code will be <span class="mono">${esc(r.taxonomy)}</span>.`;
+      out.innerHTML = r.links_ignored
+        ? `✓ Matches this pass: same rows, titles and weights. Links aren't compared, because the taxonomy's JSON view shortens them.`
+        : `✓ Matches this pass. The taxonomy's code will be <span class="mono">${esc(r.taxonomy)}</span>.`;
       return;
     }
     const d = r.difference;
