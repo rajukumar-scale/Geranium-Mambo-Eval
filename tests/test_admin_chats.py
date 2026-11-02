@@ -81,6 +81,35 @@ class AdminChatsTest(unittest.TestCase):
                 self.assertEqual(build.call_count, 2)
         self.assertFalse(next(c for c in body["chats"] if c["attempt_id"] == "a2")["admin_open"])
 
+    def test_many_tabs_during_a_slow_build_share_one_build_and_never_wait_on_stale_data(self):
+        # 2026-11-02: 3.5 requests a second, each waiting on a lock for a slow build, used up every worker thread
+        import asyncio
+        builds = []
+
+        def slow_build():
+            builds.append(time.time())
+            time.sleep(0.3)
+            return {"chats": [len(builds)]}
+
+        async def scenario():
+            with mock.patch.object(portal, "_build_admin_chats", slow_build), \
+                    mock.patch.dict(portal._admin_chats_cache, {"at": 0.0, "data": None, "gen": 0}), \
+                    mock.patch.dict(portal._admin_chats_build, {"task": None}):
+                first = await asyncio.gather(*[portal.admin_chats_data() for _ in range(20)])  # nothing built yet: all wait for ONE build
+                self.assertEqual(len(builds), 1)
+                self.assertTrue(all(d == {"chats": [1]} for d in first))
+                portal._admin_chats_cache["at"] = time.time() - portal.ADMIN_CHATS_TTL - 1  # aged, not busted
+                t0 = time.time()
+                stale = await asyncio.gather(*[portal.admin_chats_data() for _ in range(20)])
+                self.assertLess(time.time() - t0, 0.1)  # answered at once with the last list
+                self.assertTrue(all(d == {"chats": [1]} for d in stale))
+                await asyncio.sleep(0.4)
+                self.assertEqual(len(builds), 2)  # one rebuild behind them
+                self.assertEqual(await portal.admin_chats_data(), {"chats": [2]})
+                portal.bust_admin_chats()  # an admin changed something: the next load waits for a fresh list
+                self.assertEqual(await portal.admin_chats_data(), {"chats": [3]})
+        asyncio.run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

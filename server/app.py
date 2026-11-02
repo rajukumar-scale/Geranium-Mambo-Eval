@@ -601,10 +601,23 @@ def history_chats(session):
     return sorted(rows, key=lambda r: r["last_activity"] or 0, reverse=True)
 
 
+GOD_HISTORY_TTL = 30  # seconds the admin ("god mode") chat history, ~2,000 queries a build, is shared by every admin
+_god_history = {"at": 0.0, "data": None}
+
+
 @app.get("/api/history")
 def history(request: Request):
+    session = current_user(request)
+    god = bool(session.get("admin"))
+    c = _god_history
+    if god and c["data"] is not None and time.time() - c["at"] < GOD_HISTORY_TTL \
+            and any(r["attempt_id"] == session["attempt_id"] for r in c["data"]):
+        return [r | {"current": r["attempt_id"] == session["attempt_id"]} for r in c["data"]]
     with db.reading():
-        return _history(request)
+        out = _history(request)
+    if god:
+        c["data"], c["at"] = out, time.time()
+    return out
 
 
 def _history(request):
@@ -1249,13 +1262,14 @@ async def admin_rubric_done(request: Request, refresh: int = 0):
 
 
 ADMIN_CHATS_TTL = 5  # seconds one build of the /admin chat list is shared by every admin tab
-_admin_chats_cache = {"at": 0.0, "data": None}
-_admin_chats_lock = threading.Lock()
+_admin_chats_cache = {"at": 0.0, "data": None, "gen": 0}
+_admin_chats_build = {"task": None}
 
 
 def bust_admin_chats():
     """An admin changed something the list shows: the next load rebuilds it instead of reusing the last one."""
     _admin_chats_cache["at"] = 0.0
+    _admin_chats_cache["gen"] += 1  # a build already running started before the change: it doesn't count as fresh
 
 
 def _chat_list_rows():
@@ -1334,14 +1348,45 @@ class BustAdminChats:
 app.add_middleware(BustAdminChats)
 
 
+def _start_admin_chats_build():
+    """One build at a time, in one worker thread, however many tabs ask."""
+    task = _admin_chats_build["task"]
+    if task is None or task.done():
+        gen = _admin_chats_cache["gen"]
+
+        def done(t):
+            if t.cancelled() or t.exception() is not None:
+                return
+            _admin_chats_cache["data"] = t.result()
+            _admin_chats_cache["at"] = time.time() if _admin_chats_cache["gen"] == gen else 0.0
+        task = asyncio.ensure_future(asyncio.to_thread(_build_admin_chats))
+        task.add_done_callback(done)
+        _admin_chats_build["task"] = task
+    return task
+
+
+async def admin_chats_data():
+    """The /admin chat list, shared by every admin tab. Fresh (built in the last ADMIN_CHATS_TTL s): returned at once.
+    Older: returned at once while ONE rebuild runs. Right after an admin change (bust) or with nothing built yet: wait
+    for the rebuild. Until 2026-11-02 every request waited on a lock for the build, each holding one of the 40 worker
+    threads; at 3.5 requests a second from admin tabs on the old page the threads ran out and the whole portal stopped
+    answering (home page, static files) for minutes."""
+    c = _admin_chats_cache
+    if c["data"] is not None and time.time() - c["at"] <= ADMIN_CHATS_TTL:
+        return c["data"]
+    task = _start_admin_chats_build()
+    if c["data"] is not None and c["at"] > 0:
+        return c["data"]
+    data = await asyncio.shield(task)
+    if c["at"] == 0.0 and _admin_chats_cache["data"] is data:  # busted again while building: build once more
+        data = await asyncio.shield(_start_admin_chats_build())
+    return data
+
+
 @app.get("/api/admin/chats")
-def admin_chats(request: Request):
+async def admin_chats(request: Request):
     me_admin = current_admin(request)
-    with _admin_chats_lock:  # tabs asking at once wait for one build and share it
-        if _admin_chats_cache["data"] is None or time.time() - _admin_chats_cache["at"] > ADMIN_CHATS_TTL:
-            _admin_chats_cache["data"] = _build_admin_chats()
-            _admin_chats_cache["at"] = time.time()
-        data = _admin_chats_cache["data"]
+    data = await admin_chats_data()
     return data | {"queued": RUNNER.queued(), "me": {"email": me_admin["email"], "role": me_admin["role"]}}
 
 

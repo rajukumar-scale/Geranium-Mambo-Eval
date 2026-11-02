@@ -21,9 +21,14 @@ trap 'rm -f "$DATA/DEPLOY_PENDING"' EXIT
 # Container runs (chat replies, server reviews) survive the restart and are re-attached, so the deploy needn't wait for
 # them, but only if the LIVE code leaves them running when it stops (_container_running, 2026-11-02: before that its
 # shutdown removed them, which cut 4 runs at 08:38).
-DETACHED=""
+DETACHED=""; KILL_OLD=""
 if grep -q "_container_running" $APP/server/runner.py 2>/dev/null && q "select container from runs limit 0" 2>/dev/null; then
   DETACHED=" and container is null"
+elif q "select container from runs limit 0" 2>/dev/null; then
+  # The live code has detached runs but removes their containers when it stops cleanly. Stop it with SIGKILL instead
+  # (its cleanup never runs: the containers keep going and the new code re-attaches them, like after a crash), so the
+  # deploy needn't wait for them either. 2026-11-02 10:30: that wait (up to 32 min) held a deploy that fixed a freeze.
+  DETACHED=" and container is null"; KILL_OLD=1
 fi
 if q "select boat_phase from runs limit 0" 2>/dev/null; then
   for i in $(seq 1 1200); do
@@ -113,6 +118,11 @@ else
   if [ "$METER" = restart ]; then
     echo "server/proxy.py changed: restarting the metering proxy (it waits for in-flight model calls)"
     systemctl restart eval-portal-meter
+  fi
+  if [ "$KILL_OLD" = 1 ]; then
+    echo "stopping the old portal with SIGKILL so its running containers survive and are re-attached"
+    systemctl kill -s SIGKILL eval-portal || true
+    sleep 2
   fi
   systemctl restart eval-portal
 fi
