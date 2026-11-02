@@ -62,13 +62,19 @@ done
 LIVE=$(q "$LIVE_SQL")
 QUEUED=$(q "select count(*) from runs where status='queued'")
 RELOAD=0
-for unit in eval-portal.service eval-portal-meter.service eval-portal-update.service eval-portal-pull.service eval-portal-pull.timer; do
+for unit in eval-portal.service eval-portal-meter.service eval-portal-update.service eval-portal-pull.service eval-portal-pull.timer \
+            eval-similarity-refresh.service eval-similarity-refresh.timer; do
   [ -e "$APP/deploy/$unit" ] || continue
   if ! cmp -s "$APP/deploy/$unit" "/etc/systemd/system/$unit"; then
     install -m 644 "$APP/deploy/$unit" "/etc/systemd/system/$unit"; RELOAD=1; echo "$unit updated"
   fi
 done
 [ "$RELOAD" = 1 ] && systemctl daemon-reload
+# Dataset similarity (/prompt STEP 0.6): the offline runtime, and the hourly library refresh into the live release.
+if [ -e "$APP/deploy/setup_similarity.sh" ]; then
+  [ -f /opt/simcheck/model/model.onnx ] || bash "$APP/deploy/setup_similarity.sh" || echo "similarity runtime install failed (reviews report the check as SKIPPED)"
+  systemctl is-enabled -q eval-similarity-refresh.timer 2>/dev/null || systemctl enable -q --now eval-similarity-refresh.timer || true
+fi
 # The one root command the portal may run: start the update job (checked with visudo before installing).
 if ! cmp -s "$APP/deploy/eval-portal-update.sudoers" /etc/sudoers.d/eval-portal-update; then
   visudo -cf "$APP/deploy/eval-portal-update.sudoers" >/dev/null && \

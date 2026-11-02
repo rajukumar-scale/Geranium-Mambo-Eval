@@ -1,0 +1,8 @@
+[Unit]
+Description=Eval portal: add newly submitted prompts to the dataset-similarity library (Redash query 397721)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/eval-portal/deploy/similarity_refresh.sh
+TimeoutStartSec=15min
