@@ -6,11 +6,13 @@ started, was cancelled or was cut off by a restart, and 18 GB was raw run logs. 
   PAYLOAD_MAX_AGE: they're only read while a review machine starts;
 - gzips run logs (logs/<run>.jsonl -> .jsonl.gz) of runs that finished more than LOG_GZIP_DAYS ago: the admin log
   link serves the .gz (app.admin_run_log); nothing else reads a finished run's log;
-- cold-stores chats idle for COLD_DAYS: their home/ (Claude Code sessions) and cache/ packed into cold.tgz, unpacked
+- cold-stores chats idle for COLD_HOURS: their home/ (Claude Code sessions) and cache/ packed into cold.tgz, unpacked
   again by workspace.ensure_attempt() the moment the chat runs anything (workspace.freeze / thaw);
-- tells Slack when free space drops under LOW_DISK_GB (at most every LOW_DISK_EVERY).
+- tells Slack when free space drops under ALERT_DISK_GB (at most every LOW_DISK_EVERY).
 The disk grew 14.7 GB on 10-30 alone (sessions 6.6, run logs ~4, eval cache 2.7), so under LOW_DISK_GB free it works
 harder: chats idle for COLD_HOURS_LOW_DISK and logs older than LOG_GZIP_DAYS_LOW_DISK.
+2026-11-02 (Evan): 11 GB free with 12 GB of raw logs and 31 GB of open chats waiting on the old 3-day / 2-day limits, so
+the normal limits are now 1 day / 12 h, the harder ones start at 15 GB, and Slack hears at 20 GB, with time to act.
 """
 
 import asyncio
@@ -24,13 +26,14 @@ from . import config, db, notify, workspace
 log = logging.getLogger("portal.housekeeping")
 EVERY = 900
 PAYLOAD_MAX_AGE = 6 * 3600  # far longer than a machine takes to start (MACHINE_TRIES boots)
-LOG_GZIP_DAYS = 3
-LOG_GZIP_DAYS_LOW_DISK = 1
+LOG_GZIP_DAYS = 1
+LOG_GZIP_DAYS_LOW_DISK = 0.25
 LOG_GZIP_BATCH = 2000  # logs per pass, so a backlog is worked through over a few hours
-COLD_DAYS = 2
+COLD_HOURS = 12  # a CB back after this waits a few seconds while the chat unpacks
 COLD_HOURS_LOW_DISK = 6
 FREEZE_BATCH = 60  # chats per pass (~125 MB each before packing)
-LOW_DISK_GB = 10
+LOW_DISK_GB = 15  # under this: the harder limits
+ALERT_DISK_GB = 20  # under this: Slack
 LOW_DISK_EVERY = 6 * 3600
 _state = {"alerted": 0.0}
 
@@ -88,7 +91,7 @@ def gzip_logs(now=None, batch=LOG_GZIP_BATCH, days=LOG_GZIP_DAYS):
     return done, saved
 
 
-def freeze_idle(now=None, idle=COLD_DAYS * 86400, batch=FREEZE_BATCH):
+def freeze_idle(now=None, idle=COLD_HOURS * 3600, batch=FREEZE_BATCH):
     """Cold-store chats with no activity for `idle` seconds and no queued or running run. Returns (chats, bytes) freed."""
     now = now or time.time()
     done, freed = 0, 0
@@ -118,7 +121,7 @@ def free_gb():
 async def check_disk(now=None):
     now = now or time.time()
     free = free_gb()
-    if free < LOW_DISK_GB and now - _state["alerted"] >= LOW_DISK_EVERY:
+    if free < ALERT_DISK_GB and now - _state["alerted"] >= LOW_DISK_EVERY:
         _state["alerted"] = now
         await notify.slack(f"⚠️ Eval portal server disk is low: {free:.1f} GB free. At 0 every send fails "
                            f"(\"No space left on device\"). Biggest use: {config.DATA_DIR}/attempts.")
@@ -129,7 +132,7 @@ async def run_once():
     low = free_gb() < LOW_DISK_GB
     files, freed = await asyncio.to_thread(sweep_payloads)
     logs, saved = await asyncio.to_thread(gzip_logs, None, LOG_GZIP_BATCH, LOG_GZIP_DAYS_LOW_DISK if low else LOG_GZIP_DAYS)
-    chats, packed = await asyncio.to_thread(freeze_idle, None, COLD_HOURS_LOW_DISK * 3600 if low else COLD_DAYS * 86400)
+    chats, packed = await asyncio.to_thread(freeze_idle, None, COLD_HOURS_LOW_DISK * 3600 if low else COLD_HOURS * 3600)
     free = await check_disk()
     if files or logs or chats:
         log.info("housekeeping%s: %d upload packages (%.1f GB), %d logs gzipped (%.1f GB), %d chats cold-stored (%.1f GB), "
