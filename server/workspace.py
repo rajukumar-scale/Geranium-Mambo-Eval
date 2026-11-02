@@ -70,7 +70,9 @@ def _cold_lock(attempt_id):
 
 
 def is_cold(attempt_id):
-    return (attempt_dir(attempt_id) / COLD).is_file()
+    """Packed here (cold.tgz) or moved to S3 (archive.py: archived.json)."""
+    root = attempt_dir(attempt_id)
+    return (root / COLD).is_file() or (root / "archived.json").is_file()
 
 
 def freeze(attempt_id, busy=lambda: False):
@@ -79,8 +81,8 @@ def freeze(attempt_id, busy=lambda: False):
     root = attempt_dir(attempt_id)
     with _cold_lock(attempt_id):
         dirs = [d for d in COLD_DIRS if (root / d).is_dir()]
-        if (root / COLD).exists() or not dirs or busy():
-            return 0
+        if (root / COLD).exists() or (root / "archived.json").exists() or not dirs or busy():
+            return 0  # archived: its sessions come back from S3 on thaw; empty dirs made meanwhile mustn't replace them
         before = sum(f.lstat().st_size for d in dirs for f in (root / d).rglob("*") if f.is_file() or f.is_symlink())
         tmp = root / (COLD + ".tmp")
         try:
@@ -97,11 +99,15 @@ def freeze(attempt_id, busy=lambda: False):
 
 
 def thaw(attempt_id):
-    """Unpack cold.tgz back into home/ and cache/ (a no-op for a chat that isn't cold)."""
+    """Unpack cold.tgz back into home/ and cache/ (a no-op for a chat that isn't cold). An archived chat's cold.tgz is
+    first downloaded back from S3 (archive.fetch)."""
     root = attempt_dir(attempt_id)
-    if not (root / COLD).is_file():
+    if not (root / COLD).is_file() and not (root / "archived.json").is_file():
         return False
     with _cold_lock(attempt_id):
+        if (root / "archived.json").is_file() and not (root / COLD).is_file():
+            from . import archive
+            archive.fetch(attempt_id)
         packed = root / COLD
         if not packed.is_file():
             return False
