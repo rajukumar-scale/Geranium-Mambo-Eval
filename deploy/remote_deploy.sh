@@ -39,13 +39,16 @@ else
   BUSY_SQL="select count(*) from runs where status='running'"
   LIVE_SQL="select 0"
 fi
-for i in $(seq 1 300); do
+# Up to 12 minutes (5 until 2026-11-02): chat replies run up to ~10 minutes, and with 3-4 at once there was nearly
+# always one still going after 5, so every busy-hour deploy gave up (5 changes waited 3.5 hours). New ones are held
+# meanwhile, so the count only goes down. Keep it under runner.draining()'s 15-minute stale limit.
+for i in $(seq 1 720); do
   BUSY=$(q "$BUSY_SQL")
   [ "$BUSY" = 0 ] && break
   [ $((i % 15)) = 1 ] && echo "waiting for $BUSY run(s) running on this server to finish before restarting…"
   sleep 1
 done
-if [ "$BUSY" != 0 ]; then echo "still $BUSY busy after 5 min; deploy aborted, nothing changed"; exit 1; fi
+if [ "$BUSY" != 0 ]; then echo "still $BUSY busy after 12 min; deploy aborted, nothing changed"; exit 1; fi
 
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 BACKUP=/opt/eval-portal-backups/$STAMP

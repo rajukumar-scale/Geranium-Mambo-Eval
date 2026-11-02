@@ -19,7 +19,7 @@ exit 0
 FAKE_DEPLOY = """#!/bin/bash
 case "${FAKE_DEPLOY:-ok}" in
   ok) echo "deployed 20261027T000000Z: 2 running review(s) re-attached, 0 queued run(s) resumed";;
-  busy) echo "still 1 busy after 5 min; deploy aborted, nothing changed"; exit 1;;
+  busy) echo "still 1 busy after 12 min; deploy aborted, nothing changed"; exit 1;;
   rollback) echo "new code failed its health check; rolling back to 20261027T000000Z"; exit 1;;
 esac
 """
