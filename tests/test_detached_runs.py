@@ -39,6 +39,7 @@ FAKE_DOCKER = textwrap.dedent("""\
         while [ ! -e "$D/$1/exit" ] && [ ! -e "$D/$1/killed" ]; do sleep 0.1; done
         if [ -e "$D/$1/killed" ]; then echo 137; else cat "$D/$1/exit"; fi;;
       kill) touch "$D/$1/killed";;
+      inspect) n=${@: -1}; if [ -d "$D/$n" ] && [ ! -e "$D/$n/exit" ] && [ ! -e "$D/$n/killed" ]; then echo true; else echo false; fi;;
       rm) shift; rm -rf "$D/$1";;
       ps) ls "$D" 2>/dev/null;;
     esac
@@ -90,35 +91,63 @@ class DetachedRunTest(unittest.TestCase):
         self.assertFalse(runner.docker_io("a1", "r1").exists())  # cleaned up
         self.assertFalse((self.tmp / "containers" / "evp-r1").exists())  # container removed
 
-    def test_a_restart_mid_reply_re_attaches_instead_of_cutting_it_off(self):
-        self.lines(INIT, TEXT, "SLEEP 1.5", RESULT)
-        completed = []
-
+    def stop_portal_mid_reply(self, kill_waits):
+        """The old portal stops mid-reply, the way systemd stops it: optionally the `docker wait` dies first (SIGTERM
+        to the whole service), then the follow task is cancelled. No cleanup is bypassed."""
         async def scenario():
             task = asyncio.ensure_future(self.r._spawn("r1", db.get_chat("a1"), "hello", ["--session-id", "S-1"]))
             await asyncio.sleep(0.8)
-            task.cancel()  # the old portal process goes away mid-reply; the container keeps going
+            if kill_waits:
+                waiter = self.r.procs.get("r1")
+                waiter.kill()
+                await asyncio.sleep(0.5)  # the follow sees its wait end while the container still runs
+            task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
+        asyncio.run(scenario())
 
-        # simulate the process dying: stop the follow without cleaning up the container
-        async def no_cleanup(*a, **k):
-            return None
-        with mock.patch.object(runner, "_docker", no_cleanup), mock.patch.object(runner.shutil, "rmtree"):
-            asyncio.run(scenario())
-        self.assertTrue((self.tmp / "containers" / "evp-r1").exists())
-        db.update("runs", "id", "r1", status="running", proxy_token="evp-tok")
+    def restart_and_follow(self):
+        completed = []
         restarted = runner.Runner()
         with mock.patch.object(restarted, "_complete", mock.AsyncMock(side_effect=lambda rid, o: completed.append(o))), \
                 mock.patch.object(runner, "drain_file", lambda: self.tmp / "nodrain"):
-            names = runner._containers()
-            self.assertIn("evp-r1", names)
+            self.assertIn("evp-r1", runner._containers())
             asyncio.run(restarted._reattach_docker("r1"))
+        return completed
+
+    def test_a_restart_mid_reply_re_attaches_instead_of_cutting_it_off(self):
+        self.lines(INIT, TEXT, "SLEEP 2", RESULT)
+        self.stop_portal_mid_reply(kill_waits=False)
+        self.assertTrue((self.tmp / "containers" / "evp-r1").exists())  # still running
+        self.assertTrue(runner.docker_io("a1", "r1").exists())
+        self.assertTrue(db.get_run("r1")["proxy_token"])  # its model calls stay allowed
+        completed = self.restart_and_follow()
         self.assertEqual(len(completed), 1)
         self.assertEqual(completed[0]["returncode"], 0)
         self.assertEqual((completed[0]["result"] or {}).get("result"), "Here is your answer.")
+        self.assertFalse((self.tmp / "containers" / "evp-r1").exists())
+
+    def test_systemd_killing_the_docker_wait_does_not_end_the_run(self):
+        self.lines(INIT, TEXT, "SLEEP 2.5", RESULT)
+        self.stop_portal_mid_reply(kill_waits=True)  # 2026-11-02 08:38: this removed 4 live containers
+        self.assertTrue((self.tmp / "containers" / "evp-r1").exists())
+        self.assertTrue(db.get_run("r1")["proxy_token"])
+        completed = self.restart_and_follow()
+        self.assertEqual((completed[0]["result"] or {}).get("result"), "Here is your answer.")
+
+    def test_a_killed_wait_alone_is_replaced_and_the_reply_still_completes(self):
+        self.lines(INIT, TEXT, "SLEEP 1.5", RESULT)
+
+        async def scenario():
+            task = asyncio.ensure_future(self.r._spawn("r1", db.get_chat("a1"), "hello", ["--session-id", "S-1"]))
+            await asyncio.sleep(0.8)
+            self.r.procs["r1"].kill()
+            return await task
+        out = asyncio.run(scenario())
+        self.assertEqual(out["returncode"], 0)
+        self.assertEqual((out["result"] or {}).get("result"), "Here is your answer.")
         self.assertFalse((self.tmp / "containers" / "evp-r1").exists())
 
     def test_start_re_attaches_live_containers_and_fails_only_those_that_are_gone(self):

@@ -18,7 +18,13 @@ touch "$DATA/DEPLOY_PENDING"; chown "$OWNER" "$DATA/DEPLOY_PENDING"
 trap 'rm -f "$DATA/DEPLOY_PENDING"' EXIT
 # Runs in a detached container (runs.container set, 2026-11-02) are re-attached after the restart, so only older ones
 # count. (Before that column exists, every one counts.)
-DETACHED=""; q "select container from runs limit 0" 2>/dev/null && DETACHED=" and container is null"
+# Container runs (chat replies, server reviews) survive the restart and are re-attached, so the deploy needn't wait for
+# them, but only if the LIVE code leaves them running when it stops (_container_running, 2026-11-02: before that its
+# shutdown removed them, which cut 4 runs at 08:38).
+DETACHED=""
+if grep -q "_container_running" $APP/server/runner.py 2>/dev/null && q "select container from runs limit 0" 2>/dev/null; then
+  DETACHED=" and container is null"
+fi
 if q "select boat_phase from runs limit 0" 2>/dev/null; then
   for i in $(seq 1 1200); do
     ON_SERVER=$(q "select count(*) from runs where status='running' and boat_phase='server'$DETACHED")

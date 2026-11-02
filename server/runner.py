@@ -229,6 +229,17 @@ async def _docker(*args):
     await proc.wait()
 
 
+async def _container_running(name):
+    """Whether this container is still running (False when it's gone or docker can't tell)."""
+    try:
+        proc = await asyncio.create_subprocess_exec("docker", "inspect", "-f", "{{.State.Running}}", name,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except (OSError, asyncio.TimeoutError):
+        return False
+    return out.decode(errors="replace").strip() == "true"
+
+
 def _containers():
     """Names of the evp- containers on this machine (running or exited)."""
     out = subprocess.run(["docker", "ps", "-a", "--filter", "name=evp-", "--format", "{{.Names}}"],
@@ -650,6 +661,7 @@ class Runner:
         proxy.ACTIVE_TOKENS[token] = run_id
         db.update("runs", "id", run_id, proxy_token=token)  # the metering proxy is its own process: it checks the table
         local = config.RUNNER_MODE == "local"
+        left_running = False  # a container left running at shutdown: its token must stay valid for the re-attach
         if local:
             await self.local_lock.acquire()
         try:
@@ -706,7 +718,11 @@ class Runner:
                     raise RuntimeError(f"docker run failed: {err_out.decode(errors='replace')[-300:]}")
                 db.update("runs", "id", run_id, container=container_name(run_id))
                 started_at = (db.get_run(run_id) or {}).get("started_at") or time.time()
-                await self._follow_docker(run_id, attempt, outcome, started_at + config.RUN_TIMEOUT_MIN * 60)
+                try:
+                    await self._follow_docker(run_id, attempt, outcome, started_at + config.RUN_TIMEOUT_MIN * 60)
+                except asyncio.CancelledError:
+                    left_running = True
+                    raise
             outcome["after"] = workspace.report_snapshot(attempt)
             outcome["reports"] = {}
             for name, mtime in outcome["after"].items():
@@ -714,7 +730,8 @@ class Runner:
                     outcome["reports"][name] = workspace.read_report(attempt, name)
         finally:
             proxy.ACTIVE_TOKENS.pop(token, None)
-            db.update("runs", "id", run_id, proxy_token=None)
+            if not left_running:
+                db.update("runs", "id", run_id, proxy_token=None)
             self.procs.pop(run_id, None)
             if local:
                 workspace.swap_out(attempt)
@@ -735,15 +752,30 @@ class Runner:
     async def _follow_docker(self, run_id, attempt, outcome, deadline, replay=False):
         """Read a detached container's output file until it exits (docker wait), into the run log and outcome. With
         replay (re-attaching after a restart) the output is read again from the start, which rebuilds the outcome and
-        the log exactly. Then the container and its io folder are removed and its stderr kept in logs/<run>.stderr.txt."""
+        the log exactly. Then the container and its io folder are removed and its stderr kept in logs/<run>.stderr.txt.
+
+        A container is only removed once it has stopped (or the portal stopped it: timeout, cancel). When the portal
+        itself stops (a deploy), systemd also kills the `docker wait` and the follow task is cancelled; both used to
+        look like the end of the run, and the cleanup removed 4 live containers at 2026-11-02 08:38. Now the container
+        keeps running and the next start re-attaches it."""
         name, io = container_name(run_id), docker_io(attempt, run_id)
         logs = workspace.attempt_dir(attempt) / "logs"
-        waiter = await asyncio.create_subprocess_exec("docker", "wait", name, stdout=asyncio.subprocess.PIPE,
-                                                      stderr=asyncio.subprocess.PIPE)
-        self.procs[run_id] = waiter  # cancel() stops the container by name; killing this just ends the wait
-        wait_task = asyncio.ensure_future(waiter.communicate())
         buffer = b""
+        shutting_down, killed, exit_code = False, False, None
+        wait_task = None
+
+        async def new_waiter():
+            waiter = await asyncio.create_subprocess_exec("docker", "wait", name, stdout=asyncio.subprocess.PIPE,
+                                                          stderr=asyncio.subprocess.PIPE)
+            self.procs[run_id] = waiter  # cancel() stops the container by name; killing this just ends the wait
+            return asyncio.ensure_future(waiter.communicate())
+
+        def read_code(task):
+            lines = task.result()[0].decode(errors="replace").strip().splitlines()
+            return int(lines[-1]) if lines and lines[-1].lstrip("-").isdigit() else None
+
         try:
+            wait_task = await new_waiter()
             with open(logs / f"{run_id}.jsonl", "w" if replay else "a", encoding="utf-8") as raw_log, \
                     open(io / "out.jsonl", "rb") as out:
                 while True:
@@ -755,9 +787,15 @@ class Runner:
                             self._handle_line(run_id, attempt, line, raw_log, outcome)
                         continue
                     if wait_task.done():
-                        break
+                        exit_code = read_code(wait_task)
+                        if exit_code is not None or not await _container_running(name):
+                            break
+                        await asyncio.sleep(1)  # the wait was killed, the container runs on: wait again
+                        wait_task = await new_waiter()
+                        continue
                     if time.time() > deadline:
                         outcome["timeout"] = True
+                        killed = True
                         await _docker("kill", name)
                         await asyncio.wait({wait_task}, timeout=60)
                         break
@@ -768,22 +806,29 @@ class Runner:
                 for line in buffer.split(b"\n"):
                     if line.strip():
                         self._handle_line(run_id, attempt, line, raw_log, outcome)
-            if wait_task.done():
-                stdout, _ = wait_task.result()
-                code = stdout.decode(errors="replace").strip().splitlines()
-                if code and code[-1].lstrip("-").isdigit():
-                    outcome["returncode"] = int(code[-1])
+            if wait_task.done() and exit_code is None:
+                exit_code = read_code(wait_task)
+            if exit_code is not None:
+                outcome["returncode"] = exit_code
             else:
                 wait_task.cancel()
                 outcome.setdefault("returncode", -1)
+        except asyncio.CancelledError:
+            shutting_down = True  # the portal is stopping: leave the container, its io folder and its token alone
+            if wait_task:
+                wait_task.cancel()
+            raise
         finally:
-            try:
-                with open(logs / f"{run_id}.stderr.txt", "ab") as err:
-                    err.write((io / "err.txt").read_bytes())
-            except OSError:
-                pass
-            await _docker("rm", "-f", name)
-            shutil.rmtree(io, ignore_errors=True)
+            if not shutting_down and (killed or self.cancel_requested(run_id) or not await _container_running(name)):
+                try:
+                    with open(logs / f"{run_id}.stderr.txt", "ab") as err:
+                        err.write((io / "err.txt").read_bytes())
+                except OSError:
+                    pass
+                await _docker("rm", "-f", name)
+                shutil.rmtree(io, ignore_errors=True)
+            elif not shutting_down:
+                log.warning("run %s: container %s still running after the follow ended; left for the next start", run_id, name)
 
     async def _reattach_docker(self, run_id):
         """After a restart: follow a chat reply or server review whose container kept running (or ended meanwhile)."""
