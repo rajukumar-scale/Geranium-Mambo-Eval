@@ -95,6 +95,17 @@ class StatusTest(unittest.TestCase):
         claims = [dict(row("dropped", t=T0 + 4 * H), offboarded="2026-10-28"), dict(row("dropped", t=T0 + 5 * H), offboarded="2026-10-28")]
         self.assertEqual(cbs.status_of(claims, trained), ("offboarded", "Tagged mcp_ac_temp_block since 2026-10-28"))
 
+    def test_the_live_tag_wins_over_the_day_old_snapshot(self):
+        # 2026-11-02: tagged today = not in the daily snapshot yet; untagged today = still in it
+        facts = [{**user(NEW, "c@gmail.com"), "BLK_NOW": True},  # tagged this morning
+                 {**user(QMA, "a@gmail.com"), "BLK_FIRST": "2026-10-28", "BLK_LAST": "2026-11-01", "BLK_NOW": False},  # removed today
+                 {**user(TRUSTED, "b@gmail.com"), "BLK_FIRST": "2026-10-30", "BLK_LAST": "2026-11-01", "BLK_NOW": True},
+                 node("t1", NEW, T0), node("t2", QMA, T0), node("t3", TRUSTED, T0)]
+        rows = {r["user"]: r for r in cbs.build_rows(facts, [], [], now=T0 + H)}
+        self.assertTrue(rows[NEW]["offboarded"])
+        self.assertIsNone(rows[QMA]["offboarded"])
+        self.assertEqual(rows[TRUSTED]["offboarded"], "2026-10-30")
+
     def test_live_claims_dont_count_as_drops(self):
         self.assertEqual(cbs.status_of([row("submitted", 50, 400), row("dropped"), row("working")])[0], "ok")
 

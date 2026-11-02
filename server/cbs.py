@@ -19,7 +19,7 @@ The bars are fixed at the analysis's numbers (Evan, 2026-10-30: a target for tra
 the page also shows what the same cut (p50 / p75 / p90 of QMA + trusted submitted tasks) gives on recent data.
 
 Statuses (Evan, 2026-10-30), checked in this order:
-- Offboarded: carries the mcp_ac_temp_block tag on the latest daily tag snapshot (Evan, 2026-11-01: that tag is how
+- Offboarded: carries the mcp_ac_temp_block tag right now (USERS.TAGS; Evan, 2026-11-01: that tag is how
   people are offboarded). Done, so listed last; removing the tag gives them their usual status back.
 - Offboard: trained, and the last 2 claims closed since the training date both went badly.
 - Needs training: not trained, past the first 2 claims (grace), and the last 2 closed claims ended with no submit, or
@@ -143,6 +143,11 @@ def build_rows(facts, chats, runs, now=None):
     tag_day = max([u.get("tr_last") or "" for u in users.values()] + [u.get("blk_last") or "" for u in users.values()],
                   default="")
     offboarded = {uid: u["blk_first"] for uid, u in users.items() if tag_day and u.get("blk_last") == tag_day}
+    # blk_now (2026-11-02): the live tag from USERS.TAGS. The daily snapshot lags a day, so someone tagged today showed
+    # as "Needs training"; the live tag is the truth when the query has it (also when a tag was removed today).
+    if any("blk_now" in u for u in users.values()):
+        today = time.strftime("%Y-%m-%d", time.gmtime(now))
+        offboarded = {uid: u.get("blk_first") or today for uid, u in users.items() if u.get("blk_now") in (True, 1, "true", "True")}
 
     rows = []
     for key in set(nodes) | set(submits) | set(incompletes) | set(first_chat):
