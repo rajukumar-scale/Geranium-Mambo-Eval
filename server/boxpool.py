@@ -21,7 +21,7 @@ import base64
 import logging
 import time
 
-from . import boatrun, config
+from . import boatrun, config, modalrun
 
 log = logging.getLogger("portal.boxpool")
 
@@ -59,7 +59,12 @@ def _get_lock():
 
 
 def enabled():
-    return config.BOX_REUSE_MAX > 0
+    return config.BOX_REUSE_MAX > 0 and config.REVIEW_RUNNER != "modal"  # a Modal sandbox starts in seconds: no reuse
+
+
+def machines():
+    """The review-machine backend: boat.dev boxes, or Modal sandboxes (modalrun, the same contract)."""
+    return modalrun if config.REVIEW_RUNNER == "modal" else boatrun
 
 
 def keep():
@@ -96,7 +101,7 @@ async def acquire():
                 log.info("reusing review box %s (review %d)", box, _boxes[box]["reviews"] + 1)
                 return box
             await _retire(box, "not usable any more")
-    box = await boatrun.create_box()
+    box = await machines().create_box()
     _stats["created"] += 1
     if enabled():
         _boxes[box] = {"created": time.time(), "snapshot": boatrun.active_snapshot(), "reviews": 0, "idle_since": None}
@@ -107,7 +112,7 @@ async def _retire(box, why):
     _boxes.pop(box, None)
     _stats["retired"] += 1
     log.info("deleting review box %s: %s", box, why)
-    await boatrun.delete_box(box)
+    await machines().delete_box(box)
 
 
 async def release(box, clean):

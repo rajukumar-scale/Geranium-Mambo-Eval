@@ -262,8 +262,9 @@ def _only_session(info, keep):
     return info
 
 
-def build_payload(run_id, attempt_id, prompt, args, env, extra=None, scratch=None, bundle=None):
+def build_payload(run_id, attempt_id, prompt, args, env, extra=None, scratch=None, bundle=None, restrict_egress=True):
     """Write payload.tgz for one run and return its path. `extra`: more files for /tmp/payload.
+    restrict_egress=False skips RUN_SH's iptables lock to the metering proxy (Modal sandboxes have no iptables).
     `scratch`: a paused review's /tmp scratch files (scratch.tgz), put back by RUN_SH. The eval bundle isn't in it,
     only its name: the runner uploads the bundle separately when the box lacks it (`bundle`, default the current one)."""
     root = workspace.attempt_dir(attempt_id)
@@ -296,7 +297,7 @@ def build_payload(run_id, attempt_id, prompt, args, env, extra=None, scratch=Non
     (work / "run.sh").write_text(RUN_SH)
     (work / "collect.sh").write_text(COLLECT_SH)
     (work / "memguard.sh").write_text(MEMGUARD_SH)
-    (work / "proxy_host").write_text(proxy_host() if config.BOAT_RESTRICT_EGRESS else "")
+    (work / "proxy_host").write_text(proxy_host() if restrict_egress and config.BOAT_RESTRICT_EGRESS else "")
     for name, content in (extra or {}).items():
         (work / name).write_text(content)
     payload = root / "logs" / f"{run_id}.payload.tgz"
