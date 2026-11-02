@@ -495,7 +495,9 @@ async def login(body: LoginBody, request: Request):
     if existing and not bypass and existing["user_id"] and row.get("USER_ID") and existing["user_id"] != row["USER_ID"]:
         # The platform re-served this claim to someone else: the previous holder's chat moves aside.
         try:
-            handover.archive(attempt_id)
+            # In a thread: it unpacks and copies the previous holder's whole workspace (5-6 s each; 2026-11-02 22:20
+            # and 22:55 this froze the portal for everyone, on the event loop).
+            await asyncio.to_thread(handover.archive, attempt_id)
         except handover.Busy:
             raise HTTPException(409, "This task's previous holder still has a review running in it. Please try again in a few minutes.")
         log.info("attempt %s re-served: archived the previous holder's chat, fresh chat for the new one", attempt_id)
