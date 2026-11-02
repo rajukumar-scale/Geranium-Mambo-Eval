@@ -17,6 +17,8 @@ from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
 CANCELLED = "cancelled by user"
+ORPHAN_GRACE_S = 120  # a run must be this old before the sweep may call it orphaned
+ORPHAN_SWEEP_S = 60
 
 DISALLOWED_TOOLS = ["WebFetch", "WebSearch", "CronCreate", "CronDelete", "CronList", "ScheduleWakeup",
                     "EnterWorktree", "ExitWorktree", "Workflow", "RemoteTrigger", "PushNotification"]
@@ -214,6 +216,7 @@ class Runner:
         self.server_held = set()  # run ids holding a server slot, from placement until the run ends
         self.pool_of = {}
         self.procs = {}  # run id -> process
+        self.live = set()  # run ids this process is executing (worker or re-attach); a "running" row not here is orphaned
         self.activity = {}  # run id -> recent activity lines
         self.local_lock = asyncio.Lock()
         self.workers = []
@@ -260,6 +263,7 @@ class Runner:
         else:
             self._submit_requeued()
         self.workers.append(asyncio.create_task(self._janitor()))
+        self.workers.append(asyncio.create_task(self._orphan_sweeper()))
 
     async def _start_boat(self):
         """Clear review boxes left by a restart first, so the sweep can't race a new review's box."""
@@ -283,6 +287,7 @@ class Runner:
     async def _reattach(self, run_id):
         run = db.get_run(run_id)
         attempt = run["attempt_id"]
+        self.live.add(run_id)
         try:
             self.pool_of[run_id] = "boat"
             self.activity[run_id] = []
@@ -295,9 +300,9 @@ class Runner:
             await self._complete(run_id, outcome)
         except Exception as error:  # noqa: BLE001
             log.exception("re-attaching run %s failed", run_id)
-            run = db.get_run(run_id)
-            if run and run["status"] == "running":
-                self._finish(run, "failed", f"internal error: {error}")
+            await self._fail_crashed(run_id, error)
+        finally:
+            self.live.discard(run_id)
 
     async def _janitor(self):
         """Clear the disposable eval search caches of attempts idle for CACHE_TTL_DAYS."""
@@ -365,6 +370,10 @@ class Runner:
             self._finish(run, "cancelled", CANCELLED)
             self._broadcast_positions()
             return True
+        if run["status"] == "running" and run_id not in self.live:  # orphaned: nothing left to stop, just close it
+            db.update("runs", "id", run_id, error=CANCELLED)
+            await self._fail_crashed(run_id, "cancelled", tries=3)
+            return True
         db.update("runs", "id", run_id, error=CANCELLED)
         hub.publish(run["attempt_id"], "run", {"id": run_id, "status": run["status"], "error": CANCELLED})
         self._push_activity(run_id, run["attempt_id"], "⏹ Cancelling: stopping the review")
@@ -395,20 +404,58 @@ class Runner:
             if run_id not in self.pending[pool]:
                 continue  # cancelled while queued
             self.pending[pool].remove(run_id)
-            self._broadcast_positions()
+            self.live.add(run_id)
             try:
+                self._broadcast_positions()
                 await self._execute(run_id)
             except Exception as error:  # noqa: BLE001 - never let one run kill the worker
                 log.exception("run %s crashed", run_id)
-                run = db.get_run(run_id)
-                if run and run["status"] == "running":
-                    self._finish(run, "failed", f"internal error: {error}")
-                    msg = db.add_message(run["attempt_id"], "system",
-                                         "Something went wrong on our side and this run stopped. Please try again, "
-                                         "or type `/admin` if it keeps happening.", {"run_id": run_id})
-                    hub.publish(run["attempt_id"], "message", msg)
+                await self._fail_crashed(run_id, error)
             finally:
+                self.live.discard(run_id)
                 self._release_server_slot(run_id)
+
+    async def _fail_crashed(self, run_id, error, tries=8):
+        """Mark a crashed run failed and tell the user. Retried: the crash is often itself a "database is locked",
+        and a single failed write here used to leave the run "running" forever, which locks the chat (2026-11-02)."""
+        for attempt_no in range(tries):
+            try:
+                run = db.get_run(run_id)
+                if not run or run["status"] not in ("queued", "running"):
+                    return
+                if (run["error"] or "") == CANCELLED:
+                    self._finish(run, "cancelled", CANCELLED)
+                    text = "Run cancelled."
+                else:
+                    self._finish(run, "failed", f"internal error: {error}"[:500])
+                    text = ("Something went wrong on our side and this run stopped. Please try again, "
+                            "or type `/admin` if it keeps happening.")
+                msg = db.add_message(run["attempt_id"], "system", text, {"run_id": run_id})
+                hub.publish(run["attempt_id"], "message", msg)
+                return
+            except Exception:  # noqa: BLE001
+                log.warning("marking crashed run %s failed: try %d/%d failed", run_id, attempt_no + 1, tries,
+                            exc_info=True)
+                await asyncio.sleep(min(2 ** attempt_no, 30))
+        log.error("run %s could not be marked failed; the orphan sweep will retry", run_id)
+
+    def _orphans(self, grace=ORPHAN_GRACE_S):
+        """Runs marked running that nothing in this process is executing (e.g. their crash handler couldn't write)."""
+        cutoff = time.time() - grace
+        return [r for r in db.q("select * from runs where status='running' and coalesce(started_at, created_at)<?",
+                                (cutoff,))
+                if r["id"] not in self.live]
+
+    async def _orphan_sweeper(self):
+        while True:
+            await asyncio.sleep(ORPHAN_SWEEP_S)
+            try:
+                for run in self._orphans():
+                    log.warning("orphaned run %s (%s) was still 'running': marking it finished", run["id"],
+                                run["attempt_id"])
+                    await self._fail_crashed(run["id"], "the run stopped without finishing", tries=1)
+            except Exception:  # noqa: BLE001
+                log.exception("orphan sweep failed")
 
     # ---- one run -------------------------------------------------------------
     def _command(self, chat, extra_args, followup=False):

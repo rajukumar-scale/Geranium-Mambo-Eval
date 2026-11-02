@@ -93,6 +93,9 @@ create table if not exists cb_training (
 """
 
 
+BUSY_TIMEOUT_MS = 15000  # the portal and the meter service both write; 5 s was too short under disk load
+
+
 def conn():
     global _conn
     with _lock:
@@ -101,7 +104,12 @@ def conn():
             _conn = sqlite3.connect(config.DATA_DIR / "portal.db", check_same_thread=False, isolation_level=None)
             _conn.row_factory = sqlite3.Row
             _conn.execute("pragma journal_mode=wal")
-            _conn.execute("pragma busy_timeout=5000")
+            # WAL + synchronous=NORMAL: a commit no longer waits for an fsync (only checkpoints do), so the write
+            # lock isn't held for seconds while the disk is busy (boat snapshots read the whole disk). Commits stay
+            # safe if the process crashes; only an OS crash/power loss can drop the last few. 2026-11-02: 5 s
+            # busy waits ran out under that load, runs crashed on "database is locked" and stayed "running".
+            _conn.execute("pragma synchronous=normal")
+            _conn.execute(f"pragma busy_timeout={BUSY_TIMEOUT_MS}")
             _conn.executescript(SCHEMA)
             migrate()
         return _conn
@@ -125,7 +133,7 @@ def reading():
     if getattr(_local, "reader_path", None) != path:
         reader = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         reader.row_factory = sqlite3.Row
-        reader.execute("pragma busy_timeout=5000")
+        reader.execute(f"pragma busy_timeout={BUSY_TIMEOUT_MS}")
         _local.reader, _local.reader_path = reader, path
     outer = getattr(_local, "active", None)
     _local.active = _local.reader
