@@ -124,22 +124,28 @@ echo STARTED
 # machine, up to 3 times with a growing wait (1, 2, 3 minutes) so a burst can pass, so the work so far is kept instead
 # of failing a review that may be 30 minutes in. The output stream and the exit file carry on as one run, so the
 # server reads it like any other (it keeps the last result line).
+# 2026-11-02: also a reset connection (ECONNRESET, the most common at 23 in 3 weeks), timeouts, an unverifiable
+# certificate, and the API's own server errors (5xx, 499, 529 overloaded, 429 rate limit). Shared with the server's
+# containers (runner.DOCKER_REVIEW_SH), which had no retry at all.
+RETRY_ERRORS = (r"API Error: (Connection (closed mid-response|refused|dropped|lost|error|reset)|Can.t reach the API|"
+                r"Unable to connect to API|Request timed out|(5[0-9][0-9]|499|429) status code)|ECONNREFUSED|ECONNRESET|"
+                r"ENOTFOUND|ETIMEDOUT|EPIPE|EAI_AGAIN|socket hang up|overloaded_error|UNKNOWN_CERTIFICATE")
 REVIEW_SH = r"""#!/bin/bash
 P=/tmp/payload
 sudo -u runner -H bash $P/cmd.sh >> /tmp/out.jsonl 2>> /tmp/err.txt; rc=$?
 n=0
 while [ -e $P/resume.sh ] && [ $n -lt 3 ] && tail -n 1 /tmp/out.jsonl | grep -q '"is_error":true' \
-   && tail -n 3 /tmp/out.jsonl | grep -qE 'API Error: Connection (closed mid-response|refused)|ECONNREFUSED|ENOTFOUND'; do
+   && tail -n 3 /tmp/out.jsonl | grep -qE '__RETRY_ERRORS__'; do
   n=$((n+1))
   echo "$(date -u +%FT%TZ) model connection failed; resuming the session ($n of 3) in $((60 * n))s" >> /tmp/err.txt
   sleep $((60 * n))
   sudo -u runner -H bash $P/resume.sh >> /tmp/out.jsonl 2>> /tmp/err.txt; rc=$?
 done
 echo $rc > /tmp/claude.exit
-"""
+""".replace("__RETRY_ERRORS__", RETRY_ERRORS)
 
 RESUME_PROMPT = ("The connection to the model failed in the middle of your last step (a dropped or refused "
-                 "connection). Continue exactly where you left off: don't redo steps that already finished, and "
+                 "connection, or a temporary server error). Continue exactly where you left off: don't redo steps that already finished, and "
                  "redo the step that was cut off only if its result is missing. Then finish the task as instructed.")
 
 # Runs as root next to the review. When the machine is about to run out of memory (seen: parallel recheck passes

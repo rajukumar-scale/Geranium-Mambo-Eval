@@ -44,7 +44,11 @@ echo CLEAN
 _boxes = {}  # box id -> {"created": t, "snapshot": name, "reviews": n, "idle_since": t or None, "bundle": name}
 _idle = []  # idle box ids, most recently released last
 _lock = None
-_stats = {"reused": 0, "created": 0, "retired": 0}
+_stats = {"reused": 0, "created": 0, "retired": 0, "warmed": 0, "warm_failed": 0}
+_demand = {"last": 0.0}  # when a review last asked for a box (warm boxes are kept only while they keep coming)
+_warming = set()  # warm boxes being started right now (tasks)
+WARM_AT_ONCE = 2  # warm boxes started at the same time, at most
+EXTEND_EVERY_S = 1800  # an idle box's lifetime is pushed out this often (boat stops a box at its TTL)
 
 
 def _get_lock():
@@ -78,6 +82,7 @@ async def _usable(box):
 
 async def acquire():
     """A box for a new review: a clean idle one when there is one, else a new one."""
+    _demand["last"] = time.time()
     if enabled():
         while True:
             async with _get_lock():
@@ -86,6 +91,7 @@ async def acquire():
                 break
             if await _usable(box):
                 _boxes[box]["idle_since"] = None
+                _boxes[box]["extended"] = time.time()
                 _stats["reused"] += 1
                 log.info("reusing review box %s (review %d)", box, _boxes[box]["reviews"] + 1)
                 return box
@@ -143,19 +149,76 @@ def note_bundle(box, name):
 
 
 def stats():
-    return {**_stats, "idle": len(_idle), "pool": len(_boxes)}
+    return {**_stats, "idle": len(_idle), "pool": len(_boxes), "warming": len(_warming)}
+
+
+def busy(now=None):
+    """Reviews are coming in: one asked for a box in the last BOX_WARM_BUSY_MIN minutes."""
+    return (now or time.time()) - _demand["last"] < config.BOX_WARM_BUSY_MIN * 60
+
+
+async def _warm_one():
+    """Start a box ahead of demand and put it in the pool, clean. Its failures (boat's failed boots) cost no review."""
+    try:
+        box = await boatrun.create_box()
+    except Exception as error:  # noqa: BLE001
+        _stats["warm_failed"] += 1
+        log.info("warm box didn't start: %s", str(error)[-200:])
+        return
+    try:
+        rc, out = await boatrun.ssh(box, "sudo touch /tmp/evp_clean && echo WARM", timeout=120)
+    except Exception as error:  # noqa: BLE001
+        rc, out = -1, str(error)
+    if rc != 0 or "WARM" not in out:
+        _stats["warm_failed"] += 1
+        await boatrun.delete_box(box)
+        return
+    now = time.time()
+    _boxes[box] = {"created": now, "snapshot": boatrun.active_snapshot(), "reviews": 0, "idle_since": now,
+                   "extended": now, "warm": True}
+    async with _get_lock():
+        _idle.insert(0, box)  # used after the boxes released by reviews (those already hold an eval bundle)
+    _stats["warmed"] += 1
+    log.info("warm review box %s ready (%d idle)", box, len(_idle))
+
+
+async def tick(now=None):
+    """One pass: keep the warm minimum while reviews come in, delete what's idle past BOX_IDLE_MIN beyond that, push
+    out the lifetime of boxes that stay."""
+    now = now or time.time()
+    keep_warm = config.BOX_WARM_MIN if busy(now) else 0
+    async with _get_lock():
+        newest_first = sorted(_idle, key=lambda b: _boxes.get(b, {}).get("idle_since") or now, reverse=True)
+        kept, stale = newest_first[:keep_warm], []
+        for b in newest_first:
+            info = _boxes.get(b) or {}
+            outdated = info.get("snapshot") != boatrun.active_snapshot() or now - info.get("created", 0) > config.BOX_MAX_AGE_H * 3600
+            idle_too_long = now - (info.get("idle_since") or now) > config.BOX_IDLE_MIN * 60
+            if outdated or (b not in kept and idle_too_long):
+                stale.append((b, "old snapshot or too old" if outdated else f"idle for {config.BOX_IDLE_MIN:g} minutes"))
+                _idle.remove(b)
+        kept = [b for b in kept if b in _idle]
+    for b, why in stale:
+        await _retire(b, why)
+    for b in kept:
+        info = _boxes.get(b) or {}
+        if now - info.get("extended", info.get("created", now)) > EXTEND_EVERY_S:
+            rc, out, err = await boatrun.cli("extend", b, "--ttl", str(config.RUN_TIMEOUT_MIN * 60 + 1800), "--json", timeout=60)
+            if rc == 0:
+                info["extended"] = now
+    missing = keep_warm - len(_idle) - len(_warming)
+    for _ in range(max(0, min(missing, WARM_AT_ONCE - len(_warming)))):
+        task = asyncio.ensure_future(_warm_one())
+        _warming.add(task)
+        task.add_done_callback(_warming.discard)
 
 
 async def loop():
-    """Delete boxes idle for longer than BOX_IDLE_MIN."""
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
         if not enabled():
             continue
-        now = time.time()
-        async with _get_lock():
-            stale = [b for b in _idle if now - (_boxes.get(b, {}).get("idle_since") or now) > config.BOX_IDLE_MIN * 60]
-            for b in stale:
-                _idle.remove(b)
-        for b in stale:
-            await _retire(b, f"idle for {config.BOX_IDLE_MIN} minutes")
+        try:
+            await tick()
+        except Exception:  # noqa: BLE001 - the pool must never take the portal down
+            log.exception("box pool pass failed")

@@ -79,6 +79,15 @@ def _tags(run_id):
     return _TAGS[run_id]
 
 
+def _record(run_id, model, path, status, usage, cost):
+    """Meter a call. A failed write is logged, never raised: it ran in the stream's finally, so a "database is locked"
+    there broke the model answer the review was reading (2026-11-02)."""
+    try:
+        db.record_call(run_id, model, path, status, usage, cost)
+    except Exception:  # noqa: BLE001
+        log.exception("couldn't record a model call for run %s", run_id)
+
+
 def _cost(headers):
     try:
         return float(headers.get("x-litellm-response-cost") or 0)
@@ -180,7 +189,7 @@ async def forward(path: str, request: Request):
         if run and run.get("loadtest"):  # canned reply after a model-like pause; never reaches LiteLLM
             await asyncio.sleep(random.uniform(0.5, 3.0))
             usage = {"input_tokens": 12, "output_tokens": 4}
-            db.record_call(run_id, model or "loadtest", path, 200, usage, 0.0)
+            _record(run_id, model or "loadtest", path, 200, usage, 0.0)
             return JSONResponse({"id": "msg_loadtest", "type": "message", "role": "assistant", "model": model or "loadtest",
                                  "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": usage})
         if run and config.MAX_CALLS_PER_RUN and run["calls"] >= config.MAX_CALLS_PER_RUN:
@@ -225,7 +234,7 @@ async def forward(path: str, request: Request):
                     yield chunk
             finally:
                 await upstream.aclose()
-                db.record_call(run_id, model, path, upstream.status_code, meter.usage, _cost(upstream.headers))
+                _record(run_id, model, path, upstream.status_code, meter.usage, _cost(upstream.headers))
 
         return StreamingResponse(stream(), status_code=upstream.status_code, headers=out_headers)
 
@@ -238,5 +247,5 @@ async def forward(path: str, request: Request):
             usage = json.loads(data).get("usage") or {}
         except ValueError:
             pass
-        db.record_call(run_id, model, path, upstream.status_code, usage, _cost(upstream.headers))
+        _record(run_id, model, path, upstream.status_code, usage, _cost(upstream.headers))
     return Response(content=data, status_code=upstream.status_code, headers=out_headers)

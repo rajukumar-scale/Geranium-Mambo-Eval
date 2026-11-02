@@ -149,9 +149,18 @@ def one(sql, args=()):
 
 
 def ex(sql, args=()):
-    with _lock:
-        cur = conn().execute(sql, args)
-        return cur.lastrowid
+    """Write. If the database is still locked after busy_timeout (the portal and the meter both write), try again a few
+    times, without holding the portal's lock in between: a crashed run that stays "running" costs far more than a
+    second's wait (2026-11-02: runs failed on "database is locked")."""
+    for wait in (1, 2, 4, None):
+        try:
+            with _lock:
+                cur = conn().execute(sql, args)
+                return cur.lastrowid
+        except sqlite3.OperationalError as error:
+            if wait is None or "locked" not in str(error) and "busy" not in str(error):
+                raise
+        time.sleep(wait)
 
 
 def update(table, key, key_value, **fields):

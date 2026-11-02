@@ -33,6 +33,8 @@ class BoxPoolTest(unittest.TestCase):
             self.ssh_calls.append((box, command))
             if "evp_clean && echo READY" in command:
                 return (0, "READY") if self.ready else (1, "")
+            if command.endswith("echo WARM"):
+                return (0, "WARM") if self.ready else (1, "")
             if "SCRUB" in command or "pkill" in command:
                 return (0, "CLEAN") if self.wipe_ok else (1, "NOT CLEAN")
             return 0, ""
@@ -47,7 +49,9 @@ class BoxPoolTest(unittest.TestCase):
                   mock.patch.object(config, "BOX_REUSE_MAX", 3), mock.patch.object(config, "BOX_MAX_AGE_H", 8.0),
                   mock.patch.object(config, "BOX_IDLE_MIN", 5.0),
                   mock.patch.object(boxpool, "_boxes", {}), mock.patch.object(boxpool, "_idle", []),
-                  mock.patch.object(boxpool, "_lock", None)):
+                  mock.patch.object(boxpool, "_lock", None), mock.patch.object(boxpool, "_demand", {"last": 0.0}),
+                  mock.patch.object(boxpool, "_warming", set()), mock.patch.object(config, "BOX_WARM_MIN", 3),
+                  mock.patch.object(config, "BOX_WARM_BUSY_MIN", 20.0)):
             p.start()
             self.addCleanup(p.stop)
 
@@ -123,6 +127,75 @@ class BoxPoolTest(unittest.TestCase):
             self.run_(boxpool.release(box, clean=True))
             self.assertEqual(self.deleted, [box])
             self.assertNotEqual(self.run_(boxpool.acquire()), box)
+
+    # Warm boxes (2026-11-02): while reviews come in, BOX_WARM_MIN clean boxes wait ready, so a review neither waits
+    # on boat's boot nor fails on boat's failed boots.
+    def tick_and_settle(self, now=None):
+        async def go():
+            await boxpool.tick(now)
+            while boxpool._warming:
+                await asyncio.gather(*list(boxpool._warming))
+        self.run_(go())
+
+    def test_no_warm_boxes_while_nobody_is_reviewing(self):
+        self.tick_and_settle()
+        self.assertEqual(self.created, [])
+
+    def test_busy_hours_keep_the_warm_minimum_ready_and_a_review_takes_one(self):
+        first = self.run_(boxpool.acquire())  # a review asked for a box: reviews are coming in
+        for _ in range(3):
+            self.tick_and_settle()  # at most 2 start per pass
+        self.assertEqual(len(boxpool._idle), 3)
+        warm = list(boxpool._idle)
+        self.assertTrue(all(boxpool._boxes[b]["warm"] for b in warm))
+        self.assertTrue(any(c == "sudo touch /tmp/evp_clean && echo WARM" for b, c in self.ssh_calls if b in warm))
+        made = len(self.created)
+        got = self.run_(boxpool.acquire())
+        self.assertIn(got, warm)  # no new start for this review
+        self.assertEqual(len(self.created), made)
+        self.tick_and_settle()  # topped back up
+        self.assertEqual(len(boxpool._idle), 3)
+        self.assertNotIn(first, self.deleted)
+
+    def test_a_failed_warm_boot_costs_no_review_and_leaks_no_box(self):
+        self.run_(boxpool.acquire())
+        self.ready = False  # boat made the box but it never answers
+        self.tick_and_settle()
+        self.assertEqual(boxpool._idle, [])
+        self.assertEqual(sorted(self.deleted), sorted(self.created[1:]))
+        self.assertEqual(boxpool._stats["warm_failed"] >= 2, True)
+
+        async def boom():
+            raise RuntimeError("boat new failed: readiness command did not succeed")
+        with mock.patch.object(boxpool.boatrun, "create_box", boom):
+            self.tick_and_settle()  # logged only
+        self.assertEqual(boxpool._idle, [])
+
+    def test_idle_boxes_beyond_the_minimum_go_and_all_go_when_reviews_stop(self):
+        import time as _t
+        now = _t.time()
+        boxes = [self.run_(boxpool.acquire()) for _ in range(5)]
+        for b in boxes:
+            self.run_(boxpool.release(b, clean=True))
+        for i, b in enumerate(boxes):
+            boxpool._boxes[b]["idle_since"] = now - 600 - i  # all idle past BOX_IDLE_MIN
+        self.tick_and_settle(now)
+        self.assertEqual(len(boxpool._idle), 3)  # busy: the 3 newest stay
+        self.assertEqual(sorted(self.deleted), sorted(boxes[3:]))
+        later = now + 21 * 60  # no review for over BOX_WARM_BUSY_MIN
+        self.tick_and_settle(later)
+        self.assertEqual(boxpool._idle, [])
+        self.assertEqual(sorted(self.deleted), sorted(boxes))
+
+    def test_a_kept_warm_box_on_an_old_snapshot_is_replaced(self):
+        self.run_(boxpool.acquire())
+        for _ in range(2):
+            self.tick_and_settle()
+        old = list(boxpool._idle)
+        self.snapshot = "snap-2"
+        self.tick_and_settle()
+        self.assertTrue(set(old) <= set(self.deleted))
+        self.assertTrue(all(boxpool._boxes[b]["snapshot"] == "snap-2" for b in boxpool._idle))
 
 
 if __name__ == "__main__":

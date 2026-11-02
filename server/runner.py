@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import secrets
+import shlex
 import shutil
 import subprocess
 import time
@@ -173,10 +174,44 @@ def run_cost(run, cc_total):
 
 
 LOADTEST_REPORT_FROM = "917391917391917391917391"  # a real PASS/COMPLETE injection report the stand-in reuses
-MACHINE_TRIES = 3  # review machines tried per run before giving up (failed start or no SSH)
+# Review machines tried per run before giving up (failed start or no SSH), with a growing pause between them
+# (MACHINE_WAIT_S x try, up to MACHINE_WAIT_MAX_S): 3 in a row, back to back, failed 165 reviews in 3 weeks of boat
+# trouble (2026-11-02); now ~7 minutes of retries, and the light reviews then run on this server instead.
+MACHINE_TRIES = 6
+MACHINE_WAIT_S = 30
+MACHINE_WAIT_MAX_S = 120
 
 
-DOCKER_WRAP = 'exec "$@" < /evp_io/in.txt > /evp_io/out.jsonl 2> /evp_io/err.txt'
+DOCKER_WRAP = "bash /evp_io/review.sh"
+# The container's own loop, like boatrun.REVIEW_SH (2026-11-02): a run that ends on a temporary model error (a dropped,
+# refused or reset connection, a 5xx or overloaded answer) resumes the same session up to 3 times, after 1, 2, 3
+# minutes, so its work is kept. Server reviews and chat replies had no retry; 19 chat replies failed on one in 3 weeks.
+DOCKER_REVIEW_SH = r"""#!/bin/bash
+IO=/evp_io
+bash $IO/cmd.sh >> $IO/out.jsonl 2>> $IO/err.txt; rc=$?
+n=0
+while [ -e $IO/resume.sh ] && [ $n -lt 3 ] && tail -n 1 $IO/out.jsonl | grep -q '"is_error":true' \
+   && tail -n 3 $IO/out.jsonl | grep -qE '__RETRY_ERRORS__'; do
+  n=$((n+1))
+  echo "$(date -u +%FT%TZ) model connection failed; resuming the session ($n of 3) in $((${EVP_RETRY_WAIT:-60} * n))s" >> $IO/err.txt
+  sleep $((${EVP_RETRY_WAIT:-60} * n))
+  bash $IO/resume.sh >> $IO/out.jsonl 2>> $IO/err.txt; rc=$?
+done
+exit $rc
+""".replace("__RETRY_ERRORS__", boatrun.RETRY_ERRORS)
+
+
+def write_docker_scripts(io, args):
+    """cmd.sh (the run), resume.sh (the same session again, if it has one) and review.sh (the retry loop) in io."""
+    (io / "cmd.sh").write_text(f"#!/bin/bash\ncd /work\nexec {shlex.join(args)} < /evp_io/in.txt\n")
+    for flag in ("--session-id", "--resume"):
+        if flag in args[:-1]:
+            at = args.index(flag)
+            again = [*args[:at], "--resume", args[at + 1], *args[at + 2:]]
+            (io / "resume.sh").write_text(f"#!/bin/bash\ncd /work\nexec {shlex.join(again)} < /evp_io/resume.txt\n")
+            (io / "resume.txt").write_text(boatrun.RESUME_PROMPT)
+            break
+    (io / "review.sh").write_text(DOCKER_REVIEW_SH)
 
 
 def container_name(run_id):
@@ -554,7 +589,8 @@ class Runner:
                           (attempt, run["created_at"]))
         since = (previous or {}).get("created_at") or 0
         outcome = None
-        for try_number in range(2):
+        moved_to_server = False
+        for try_number in range(3):
             db.update("runs", "id", run_id, session_id=session_id, resumed=int(resume))
             spawn = self._spawn_boat if self.pool_of.get(run_id) == "boat" else self._spawn
             key = admin_key(session_id)  # the key belongs to the session, so rebuild after a retry's new one
@@ -565,6 +601,18 @@ class Runner:
             # resume_missing: the session to continue is gone. session_taken: a new session's ID already has a transcript
             # (a reply cut off by a restart before session_started was saved; 60 chats were stuck on "Session ID ... is
             # already in use", every message failing at once, 2026-11-01). Either way: a fresh session, once.
+            if outcome.get("no_machine") and not moved_to_server and self._can_move_to_server(run):
+                # Boat couldn't give this review a machine after all its tries: a light review runs here instead of
+                # failing (2026-11-02). It holds a server slot until it ends (released by the worker).
+                moved_to_server = True
+                self.pool_of[run_id] = "server"
+                self.server_held.add(run_id)
+                db.update("runs", "id", run_id, runner_box=None, box_ready_at=None, boat_phase="server",
+                          review_started_at=time.time(), error=None)
+                self._push_activity(run_id, attempt, "↺ Review machines are unavailable right now; running this review "
+                                                     "on the portal server instead")
+                log.warning("run %s: no boat machine; running /%s on this server instead", run_id, run["command"])
+                continue
             if (outcome.get("resume_missing") or outcome.get("session_taken")) and try_number == 0:
                 session_id, resume = str(uuid.uuid4()), False
                 if run["kind"] == "followup":
@@ -575,6 +623,19 @@ class Runner:
                 continue
             break
         await self._complete(run_id, outcome)
+
+    def _can_move_to_server(self, run):
+        """A review boat couldn't start may run on this server, under the same limits as place(): a light command, server
+        reviews on, a free slot (SERVER_REVIEW_SLOTS still caps the load when boat is down), no deploy waiting, the
+        review image present, memory to spare."""
+        if run["kind"] != "review" or run["command"] not in config.SERVER_REVIEW_COMMANDS or not server_reviews_enabled():
+            return False
+        if self.cancel_requested(run["id"]) or len(self.server_held) >= config.SERVER_REVIEW_SLOTS or deploy_pending():
+            return False
+        if not runner_image.present():
+            return False
+        free = hostload.mem_available_gb()
+        return free is not None and free >= config.SERVER_REVIEW_MIN_FREE_GB
 
     @staticmethod
     def _is_followup(run_id):
@@ -636,8 +697,8 @@ class Runner:
                        "--network", config.DOCKER_NETWORK, "--add-host", "host.docker.internal:host-gateway", "-w", "/work",
                        *[a for k in passthrough for a in ("-e", k)],
                        *workspace.docker_mounts(attempt), "--mount", f"type=bind,source={io},target=/evp_io",
-                       config.RUNNER_IMAGE, "bash", "-c", DOCKER_WRAP, "evp",
-                       *self._command(chat, session_args, followup=self._is_followup(run_id))]
+                       config.RUNNER_IMAGE, "bash", "-c", DOCKER_WRAP]
+                write_docker_scripts(io, self._command(chat, session_args, followup=self._is_followup(run_id)))
                 started = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.DATA_DIR), env=env,
                                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                 _, err_out = await started.communicate()
@@ -822,8 +883,12 @@ class Runner:
                 except RuntimeError as error:
                     if machine == MACHINE_TRIES or self.cancel_requested(run_id):
                         raise
-                    log.warning("run %s: review machine didn't start, trying another: %s", run_id, str(error)[-200:])
-                    self._push_activity(run_id, attempt, "↺ That machine didn't start; starting another one")
+                    wait = min(MACHINE_WAIT_S * machine, MACHINE_WAIT_MAX_S)
+                    log.warning("run %s: review machine didn't start (try %d/%d), trying another in %ds: %s", run_id, machine,
+                                MACHINE_TRIES, wait, str(error)[-200:])
+                    self._push_activity(run_id, attempt, f"↺ That machine didn't start; trying another in {wait} s "
+                                                         f"({machine} of {MACHINE_TRIES})")
+                    await asyncio.sleep(wait)
                     continue
                 db.update("runs", "id", run_id, runner_box=box, box_ready_at=time.time())  # for the status page
                 if self.cancel_requested(run_id):  # cancelled while the machine was starting: don't start the review
@@ -845,12 +910,15 @@ class Runner:
                                         else "↺ That machine didn't respond; starting another one")
                     asyncio.create_task(boxpool.release(box, clean=False))
                     box = None
+                    await asyncio.sleep(min(MACHINE_WAIT_S * machine, MACHINE_WAIT_MAX_S) // 2)
             payload.unlink(missing_ok=True)
             db.update("runs", "id", run_id, boat_phase="started", review_started_at=time.time())
             self._push_activity(run_id, attempt, "▶️ Review started")
         except Exception as error:  # noqa: BLE001 - surface as a failed run, never leak the box
             if payload:  # a machine that never started or a cancel: the upload package is no use now (8.6 GB piled up by 10-31)
                 payload.unlink(missing_ok=True)
+            if (db.get_run(run_id) or {}).get("boat_phase") != "started" and not self.cancel_requested(run_id):
+                outcome["no_machine"] = True  # the review never started: _execute may run it on this server instead
             if not self.cancel_requested(run_id):
                 log.exception("boat run %s failed", run_id)
                 outcome["stderr_tail"] = f"{outcome.get('stderr_tail', '')}\n{error}"

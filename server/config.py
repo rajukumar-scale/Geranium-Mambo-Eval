@@ -185,6 +185,11 @@ BOAT_STARTS_PER_MIN = _int("BOAT_STARTS_PER_MIN", 12)
 BOX_REUSE_MAX = _int("BOX_REUSE_MAX", 15)
 BOX_MAX_AGE_H = float(_get("BOX_MAX_AGE_H", "8"))
 BOX_IDLE_MIN = float(_get("BOX_IDLE_MIN", "5"))
+# Warm boxes (boxpool.py, 2026-11-02): while reviews are coming in (one started on boat in the last BOX_WARM_BUSY_MIN
+# minutes), keep at least BOX_WARM_MIN clean boxes started and waiting, so a review doesn't wait on boat's boot (or its
+# failed boots). 0 = off. Idle warm boxes cost VM time: ~$0.036 an hour each.
+BOX_WARM_MIN = _int("BOX_WARM_MIN", 3)
+BOX_WARM_BUSY_MIN = float(_get("BOX_WARM_BUSY_MIN", "20"))
 # Slack alert when the boat wallet drops under this many dollars or boat can't start machines (boat_wallet.py; 0 = off).
 BOAT_WALLET_ALERT_USD = float(_get("BOAT_WALLET_ALERT_USD", "20"))
 # Where the eval zips live (the admin page's "Eval files" panel updates from these links).
