@@ -13,7 +13,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, boxpool, config, db, fingerprint, fix_helper, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, workspace
+from . import boatrun, boxpool, config, db, modalrun, fingerprint, fix_helper, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -274,6 +274,18 @@ def deploy_pending():
         return False
 
 
+REMOTE_RUNNERS = ("boat", "modal")  # reviews on their own machine: a boat box or a Modal sandbox
+
+
+def remote_reviews():
+    return config.REVIEW_RUNNER in REMOTE_RUNNERS
+
+
+def remote():
+    """The review-machine backend (boatrun or modalrun, the same contract)."""
+    return boxpool.machines()
+
+
 def server_reviews_enabled():
     return config.REVIEW_RUNNER == "boat" and config.RUNNER_MODE == "docker" and config.SERVER_REVIEW_SLOTS > 0
 
@@ -303,12 +315,12 @@ class Runner:
         for run in db.q("select * from runs where status in ('queued','running') order by created_at"):
             if run["status"] == "queued":
                 self.requeue.append(run["id"])
-            elif (config.REVIEW_RUNNER == "boat" and run["runner_box"] and run["boat_phase"] == "started"
+            elif (remote_reviews() and run["runner_box"] and run["boat_phase"] == "started"
                   and run["proxy_token"]):
                 self.reattach.append(run["id"])
             elif run.get("container") and run["container"] in containers:  # a detached chat reply or server review
                 self.reattach_docker.append(run["id"])
-            elif run["runner_box"] or run["kind"] == "review" and config.REVIEW_RUNNER == "boat":
+            elif run["runner_box"] or run["kind"] == "review" and remote_reviews():
                 # a review still setting up its box: start it over (the half-made box is swept below)
                 db.update("runs", "id", run["id"], status="queued", started_at=None, runner_box=None, boat_phase=None,
                           proxy_token=None)
@@ -336,7 +348,7 @@ class Runner:
             self.workers.append(asyncio.create_task(self._reattach(run_id)))
         for run_id in self.reattach_docker:
             self.workers.append(asyncio.create_task(self._reattach_docker(run_id)))
-        if config.REVIEW_RUNNER == "boat":
+        if remote_reviews():
             self.workers.append(asyncio.create_task(self._start_boat()))
         else:
             self._submit_requeued()
@@ -347,7 +359,7 @@ class Runner:
         """Clear review boxes left by a restart first, so the sweep can't race a new review's box."""
         keep = {r["runner_box"] for r in (db.get_run(i) for i in self.reattach) if r}
         try:
-            await boatrun.sweep_orphans(keep)
+            await remote().sweep_orphans(keep)
         except Exception:  # noqa: BLE001
             log.exception("leftover box cleanup failed")
         for _ in range(config.MAX_BOAT_RUNS):
@@ -400,7 +412,7 @@ class Runner:
         """Where a run goes. Follow-ups: this machine. Reviews: a fresh boat box, except the SERVER_REVIEW_COMMANDS,
         which run here when a server slot is free, enough memory is available and no deploy is waiting; a review is
         never queued for a server slot, it overflows to boat instead."""
-        if not (config.REVIEW_RUNNER == "boat" and run["kind"] == "review"):
+        if not (remote_reviews() and run["kind"] == "review"):
             return "main"
         if (server_reviews_enabled() and run["command"] in config.SERVER_REVIEW_COMMANDS
                 and len(self.server_held) < config.SERVER_REVIEW_SLOTS and not deploy_pending()
@@ -461,13 +473,13 @@ class Runner:
                 proxy.ACTIVE_TOKENS.pop(token, None)
         boat = self.pool_of.get(run_id) == "boat"
         if boat and run["runner_box"] and run["boat_phase"] == "started":
-            asyncio.create_task(boatrun.ssh(run["runner_box"], "sudo pkill -u runner || true", timeout=60))
+            asyncio.create_task(remote().ssh(run["runner_box"], "sudo pkill -u runner || true", timeout=60))
         if config.RUNNER_MODE == "docker" and not boat:
             await asyncio.create_subprocess_exec("docker", "kill", f"evp-{run_id}",
                                                  stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         proc = self.procs.get(run_id)
         if proc and proc.returncode is None:
-            boatrun.kill(proc) if boat else proc.kill()
+            remote().kill(proc) if boat else proc.kill()
         return True
 
     @staticmethod
@@ -902,15 +914,19 @@ class Runner:
                 args, extra = self._command(chat, session_args, followup=self._is_followup(run_id)), None
             scratch = pause.scratch(attempt) if run.get("continuation") and pause.load(attempt) else None
             bundle = await asyncio.to_thread(boatrun.current_bundle)
+            modal = config.REVIEW_RUNNER == "modal"
+            machines = remote()
             payload = await asyncio.to_thread(boatrun.build_payload, run_id, attempt, prompt, args, env, extra, scratch,
-                                              bundle)
+                                              bundle, restrict_egress=not modal)  # no iptables on Modal (config.py)
             self._push_activity(run_id, attempt, "🚤 Starting a fresh review machine")
 
             async def upload_bundle():
-                await boatrun.retrying("bundle upload", lambda: boatrun.scp_to(box, bundle, "/tmp/evp_bundle.tgz"), tries=3)
+                await boatrun.retrying("bundle upload", lambda: machines.scp_to(box, bundle, "/tmp/evp_bundle.tgz"), tries=3)
 
             async def start_review():
-                rc, out = await boatrun.ssh(box, "sudo mkdir -p /tmp/payload && sudo tar xzf /tmp/payload.tgz -C /tmp/payload "
+                if modal and not universe_ready:
+                    await load_universe()
+                rc, out = await machines.ssh(box, "sudo mkdir -p /tmp/payload && sudo tar xzf /tmp/payload.tgz -C /tmp/payload "
                                                  "&& sudo bash /tmp/payload/run.sh")
                 if "BUNDLE_MISSING" in out:  # the pool thought this box held the bundle: send it, then try again
                     await upload_bundle()
@@ -919,6 +935,18 @@ class Runner:
                     raise boatrun.MachineNotReady(f"review machine setup failed: {out[-300:]}")
                 if "STARTED" not in out:
                     raise RuntimeError(f"review machine setup failed: {out[-300:]}")
+
+            universe_ready = False
+
+            async def load_universe():
+                # No universe snapshot on Modal yet (modal-proxy's snapshot call times out at 26 GB): download this
+                # task's universe (its saved date, else both) into the new sandbox, about 7 minutes for one.
+                nonlocal universe_ready
+                which = {"normal": "Normal", "synthcut": "SynthCut"}.get(workspace.universe_date(attempt), "Normal SynthCut")
+                if not modalrun.active_snapshot()[1]:
+                    self._push_activity(run_id, attempt, f"📦 Loading the {which} universe (about 7 minutes)")
+                await modalrun.ensure_universe(box, which, lambda m: log.info("run %s: %s", run_id, m))
+                universe_ready = True
 
             # A box that never accepts SSH (seen in load tests: one bad port on boat's host) is replaced, not retried forever.
             # So is one boat can't finish starting ("readiness command did not succeed", 23 times on 2026-10-26).
@@ -939,7 +967,8 @@ class Runner:
                 if self.cancel_requested(run_id):  # cancelled while the machine was starting: don't start the review
                     raise RuntimeError(CANCELLED)
                 try:
-                    uploads = [boatrun.retrying("upload", lambda: boatrun.scp_to(box, payload, "/tmp/payload.tgz"), tries=3)]
+                    universe_ready = False  # a new machine: its universe isn't there yet
+                    uploads = [boatrun.retrying("upload", lambda: machines.scp_to(box, payload, "/tmp/payload.tgz"), tries=3)]
                     if not boxpool.has_bundle(box, bundle.name):  # a reused box keeps the bundle of its last review
                         uploads.append(upload_bundle())
                     await asyncio.gather(*uploads)
@@ -984,11 +1013,15 @@ class Runner:
         the outcome and the local log exactly."""
         log_path = workspace.attempt_dir(attempt) / "logs" / f"{run_id}.jsonl"
         cancelled = lambda: self.cancel_requested(run_id)  # noqa: E731
+        modal = config.REVIEW_RUNNER == "modal"
+        machines = remote()
         try:
             if replay:
                 self._push_activity(run_id, attempt, "↺ Server updated; reconnected to the review machine")
             with open(log_path, "w" if replay else "a", encoding="utf-8") as raw_log:
-                for reconnect in range(30):
+                if modal:  # no streaming exec on modal-proxy: poll the output file instead of `tail -F` over ssh
+                    await self._poll_modal(run_id, attempt, box, raw_log, outcome, deadline)
+                for reconnect in range(0 if modal else 30):
                     if cancelled():
                         break
                     remaining = deadline - time.time()
@@ -1024,18 +1057,18 @@ class Runner:
                 outcome["lost"] = True
                 log.warning("run %s: lost contact with review box %s", run_id, box)
             if outcome.get("timeout") or cancelled():
-                await boatrun.ssh(box, "sudo pkill -u runner || true", timeout=60)
-            rc, err = await boatrun.ssh(box, "tail -c 2000 /tmp/err.txt", timeout=60)
+                await machines.ssh(box, "sudo pkill -u runner || true", timeout=60)
+            rc, err = await machines.ssh(box, "tail -c 2000 /tmp/err.txt", timeout=60)
             outcome["stderr_tail"] = err
-            await boatrun.ssh(box, "sudo bash /tmp/payload/collect.sh", timeout=600)
+            await machines.ssh(box, "sudo bash /tmp/payload/collect.sh", timeout=600)
             state = workspace.attempt_dir(attempt) / "logs" / f"{run_id}.state.tgz"
-            await boatrun.scp_from(box, "/tmp/state_out.tgz", state)
+            await machines.scp_from(box, "/tmp/state_out.tgz", state)
             await asyncio.to_thread(boatrun.restore_state, attempt, state)
             state.unlink(missing_ok=True)
             if outcome.get("timeout"):  # kept only if the review is paused (see _complete)
                 scratch = workspace.attempt_dir(attempt) / "logs" / f"{run_id}.scratch.tgz"
                 try:
-                    await boatrun.scp_from(box, "/tmp/scratch_out.tgz", scratch)
+                    await machines.scp_from(box, "/tmp/scratch_out.tgz", scratch)
                     outcome["scratch"] = scratch
                 except Exception:  # noqa: BLE001 - no scratch files, or over the size cap
                     scratch.unlink(missing_ok=True)
@@ -1061,6 +1094,53 @@ class Runner:
         if not outcome["init"] and "No conversation found" in outcome["stderr_tail"]:
             outcome["resume_missing"] = True
         return outcome
+
+    async def _poll_modal(self, run_id, attempt, box, raw_log, outcome, deadline):
+        """Follow a review on a Modal sandbox: read /tmp/out.jsonl from where the last read stopped, every few seconds,
+        until the review writes /tmp/claude.exit. About a minute of failed reads means the sandbox is gone. The reads
+        also keep the sandbox's idle clock from running out."""
+        offset, buffer, misses = 0, b"", 0
+
+        def feed(chunk):
+            nonlocal buffer
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                self._handle_line(run_id, attempt, line, raw_log, outcome)
+
+        while True:
+            if self.cancel_requested(run_id):
+                return
+            if time.time() > deadline:
+                outcome["timeout"] = True
+                return
+            chunk = await modalrun.read_from(box, "/tmp/out.jsonl", offset)
+            if chunk is None:
+                misses += 1
+                if misses >= 20:
+                    outcome["box_gone"] = True
+                    return
+                await asyncio.sleep(3)
+                continue
+            misses = 0
+            offset += len(chunk)
+            feed(chunk)
+            if chunk:
+                continue  # more may already be waiting
+            rc, status = await modalrun.ssh(box, "cat /tmp/claude.exit 2>/dev/null || echo RUNNING", timeout=120)
+            last = status.strip().splitlines()[-1].strip() if status.strip() else ""
+            if last.lstrip("-").isdigit():
+                while True:  # whatever was written between the last read and the exit
+                    chunk = await modalrun.read_from(box, "/tmp/out.jsonl", offset)
+                    if not chunk:
+                        break
+                    offset += len(chunk)
+                    feed(chunk)
+                if buffer.strip():
+                    self._handle_line(run_id, attempt, buffer, raw_log, outcome)
+                outcome["returncode"] = int(last)
+                return
+            await asyncio.sleep(3)
 
     def _handle_line(self, run_id, attempt, line, raw_log, outcome):
         try:

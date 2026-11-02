@@ -170,6 +170,20 @@ SERVER_REVIEW_MIN_FREE_GB = float(_get("SERVER_REVIEW_MIN_FREE_GB", 5))
 # Public URL of the metering proxy, as reached from review boxes (e.g. https://<id>-8001.on.boat.dev).
 PROXY_PUBLIC_URL = _get("PROXY_PUBLIC_URL", "").rstrip("/")
 BOAT_RESTRICT_EGRESS = _get("BOAT_RESTRICT_EGRESS", "1") == "1"
+# REVIEW_RUNNER=modal: every review gets its own Modal sandbox through Scale's modal-proxy (server/modalrun.py), started
+# from the image modalrun.build_template records (or MODAL_TEMPLATE_IMAGE, "<base> <universe>"). The proxy is reachable
+# only inside Scale's network, so this needs the portal hosted there. Model calls still go to PROXY_PUBLIC_URL.
+# MAX_BOAT_RUNS caps these too; machine reuse (BOX_REUSE_MAX) and warm boxes are boat-only.
+MODAL_PROXY_URL = _get("MODAL_PROXY_URL", "https://modal-proxy.internal.scale.com").rstrip("/")
+MODAL_AWS_PROFILE = _get("MODAL_AWS_PROFILE", "")  # AWS profile for the s2sauth JWT; empty = default credentials
+MODAL_BASE_IMAGE = _get("MODAL_BASE_IMAGE", "ubuntu:24.04")
+MODAL_TEMPLATE_IMAGE = _get("MODAL_TEMPLATE_IMAGE", "")
+# Every sandbox is billed to a real Scale project (modal-proxy names the Modal app after it): Atlas by default.
+MODAL_PROJECT_ID = _get("MODAL_PROJECT_ID", "6a5595596cf3031de47f0ea2")
+MODAL_CPU = float(_get("MODAL_CPU", "4"))
+MODAL_MEMORY_MB = _int("MODAL_MEMORY_MB", 8192)
+# No egress lock on Modal: its sandboxes run on gVisor, which has no iptables (nft or legacy, checked 2026-11-02), so
+# RUN_SH's lock to the metering proxy can't run there. Restricting egress needs Modal's own network controls.
 # Usage caps are off by default (0 = unlimited); set them only if spend needs a ceiling.
 DAILY_REVIEW_LIMIT = _int("DAILY_REVIEW_LIMIT", 0)
 DAILY_FOLLOWUP_LIMIT = _int("DAILY_FOLLOWUP_LIMIT", 0)
@@ -261,8 +275,10 @@ def check():
             problems.append(f"missing universe folder {EVAL_BASE_DIR / name}")
     if RUNNER_MODE not in ("docker", "local"):
         problems.append("RUNNER_MODE must be docker or local")
-    if REVIEW_RUNNER not in ("", "boat"):
-        problems.append("REVIEW_RUNNER must be empty or boat")
-    if REVIEW_RUNNER == "boat" and not PROXY_PUBLIC_URL:
-        problems.append("REVIEW_RUNNER=boat needs PROXY_PUBLIC_URL")
+    if REVIEW_RUNNER not in ("", "boat", "modal"):
+        problems.append("REVIEW_RUNNER must be empty, boat or modal")
+    if REVIEW_RUNNER in ("boat", "modal") and not PROXY_PUBLIC_URL:
+        problems.append(f"REVIEW_RUNNER={REVIEW_RUNNER} needs PROXY_PUBLIC_URL")
+    if REVIEW_RUNNER == "modal" and not re.fullmatch(r"[0-9a-f]{24}", MODAL_PROJECT_ID):
+        problems.append("REVIEW_RUNNER=modal needs MODAL_PROJECT_ID, a real 24-hex Scale project id")
     return problems
