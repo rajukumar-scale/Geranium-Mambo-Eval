@@ -72,7 +72,21 @@ function renderTiles(d) {
       <div class="tile-label"><span class="st ${s.cls}">${s.icon} ${esc(s.label)}</span></div>
       <div class="tile-value">${fmtInt(counts[k])}</div>
       <div class="tile-sub">${esc(split)}${k === "offboard" || k === "needs_training" ? `<br>${usd(st.spend || 0)} portal spend` : ""}</div></button>`;
-  }).join("");
+  }).join("") + submittersTile(d);
+}
+
+// Everyone who has ever submitted, whatever their status, ranked best first (best_rank from the server).
+const SUBMITTED_VIEW = "_submitted";
+function submittersTile(d) {
+  const subs = d.people.filter(p => p.submitted > 0);
+  const split = GROUPS.map(g => { const n = subs.filter(p => p.group === g.key).length; return n ? `${n} ${g.label.toLowerCase()}` : ""; })
+    .filter(Boolean).join(" · ") || "none";
+  const tasks = subs.reduce((n, p) => n + p.submitted, 0);
+  return `<button type="button" class="tile cbs-tile ${S.status === SUBMITTED_VIEW ? "on" : ""}" data-status="${SUBMITTED_VIEW}"
+      title="Everyone with at least one submitted task, any status, ranked best first: highest submit rate, then lowest $ per submitted task, then fewest hours per submitted task, then not 2 bad claims in a row">
+      <div class="tile-label"><span class="st st-efficient">📤 Ever submitted</span></div>
+      <div class="tile-value">${fmtInt(subs.length)}</div>
+      <div class="tile-sub">${esc(split)}<br>${fmtInt(tasks)} tasks submitted · best first</div></button>`;
 }
 
 function barLine(name, b) {
@@ -255,8 +269,10 @@ function sortPeople(list) {
 
 function renderPeople(d) {
   const q = S.search.trim().toLowerCase();
-  const list = sortPeople(d.people.filter(p => (!S.status || p.status === S.status) && (!S.group || p.group === S.group)
-    && (!q || p.email.toLowerCase().includes(q) || p.user.includes(q))));
+  const subView = S.status === SUBMITTED_VIEW;
+  const shown = d.people.filter(p => (subView ? p.submitted > 0 : !S.status || p.status === S.status) && (!S.group || p.group === S.group)
+    && (!q || p.email.toLowerCase().includes(q) || p.user.includes(q)));
+  const list = sortPeople(subView ? shown.slice().sort((a, b) => a.best_rank - b.best_rank) : shown);
   const head = PEOPLE_COLS.map(c => {
     const on = S.sort?.key === c.key, arrow = on ? (S.sort.dir === "desc" ? " ↓" : " ↑") : "";
     return `<th class="${c.num ? "num " : ""}sortable" scope="col" aria-sort="${on ? (S.sort.dir === "desc" ? "descending" : "ascending") : "none"}"
@@ -264,11 +280,11 @@ function renderPeople(d) {
   }).join("");
   const g = Object.fromEntries(GROUPS.map(x => [x.key, x]));
   $("#people-card").innerHTML = `<div class="cc-head"><h2>4 · Contributors: training and offboarding</h2>
-    <p class="muted">Needs action first; inside each status the worst come first (Rank 1): lowest submit rate, then highest $ per submitted task, then most hours per submitted task, then the last 2 claims both went badly. Click a column name to sort by it (highest first, click again for lowest). Click a row for their tasks. Grace = their first 2 tasks; Needs training after that when the
+    <p class="muted">Needs action first; inside each status the worst come first (Rank 1): lowest submit rate, then highest $ per submitted task, then most hours per submitted task, then the last 2 claims both went badly. <b>Ever submitted</b> lists everyone with a submitted task, best first (Rank 1 = the best). Click a column name to sort by it (highest first, click again for lowest). Click a row for their tasks. Grace = their first 2 tasks; Needs training after that when the
       last 2 closed claims had no submit or the last 2 submitted tasks were over the Flag bar; Offboard only after training. Offboarded = tagged mcp_ac_temp_block (synced daily), listed last.</p></div>
     <div class="cost-filters">
       <div class="seg" id="status-pick" role="group" aria-label="Status"><button type="button" data-status="" class="${S.status ? "" : "on"}">All</button>${
-        Object.entries(STATUSES).map(([k, s]) => `<button type="button" data-status="${k}" class="${S.status === k ? "on" : ""}">${esc(s.label)}</button>`).join("")}</div>
+        Object.entries(STATUSES).map(([k, s]) => `<button type="button" data-status="${k}" class="${S.status === k ? "on" : ""}">${esc(s.label)}</button>`).join("")}<button type="button" data-status="${SUBMITTED_VIEW}" class="${subView ? "on" : ""}" title="Everyone who submitted at least once, best first">Ever submitted · best first</button></div>
       <div class="seg" id="group-pick" role="group" aria-label="Group"><button type="button" data-group="" class="${S.group ? "" : "on"}">All groups</button>${
         GROUPS.map(x => `<button type="button" data-group="${x.key}" class="${S.group === x.key ? "on" : ""}">${x.label}</button>`).join("")}</div>
       <input type="search" id="search" placeholder="Search email or user ID" value="${esc(S.search)}">
@@ -284,7 +300,7 @@ function renderPeople(d) {
           <td><div>${esc(p.email || p.user)}</div><div class="muted mono small">${esc(p.user)}</div></td>
           <td><span class="sw ${g[p.group].cls}"></span>${g[p.group].label}</td>
           <td><span class="st ${s.cls}" title="${esc(s.tip)}">${s.icon} ${esc(s.label)}</span>${p.reason ? `<div class="muted small">${esc(p.reason)}</div>` : ""}</td>
-          <td class="num">#${fmtInt(p.rank)}${p.recent_bad ? ` <span title="The last 2 closed claims both went badly">⚑</span>` : ""}</td>
+          <td class="num">#${fmtInt(subView ? p.best_rank : p.rank)}${p.recent_bad ? ` <span title="The last 2 closed claims both went badly">⚑</span>` : ""}</td>
           <td class="num">${p.submit_rate == null ? "–" : Math.round(100 * p.submit_rate) + "%"}</td>
           <td class="num">${usd(p.spend_per_submit)}</td><td class="num">${hrs(p.hours_per_submit)}</td>
           <td class="num">${fmtInt(p.claims)}</td><td class="num">${fmtInt(p.untouched)}</td><td class="num">${fmtInt(p.submitted)}</td><td class="num">${fmtInt(p.working)}</td>

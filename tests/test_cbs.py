@@ -159,6 +159,9 @@ class ReportTest(unittest.TestCase):
         first = ranked[0]
         self.assertEqual((first["submit_rate"], first["spend_per_submit"], first["recent_bad"]), (0.0, 200.0, True))
         self.assertEqual((ranked[2]["spend_per_submit"], ranked[2]["hours_per_submit"]), (200.0, 40.0))
+        best = sorted((p for p in d["people"] if p.get("best_rank")), key=lambda p: p["best_rank"])
+        self.assertEqual([p["user"][0] for p in best], ["1", "5", "4"])  # 50% first; then cheaper, fewer hours
+        self.assertNotIn("best_rank", next(p for p in d["people"] if p["user"][0] == "2"))  # never submitted
 
 
 if __name__ == "__main__":

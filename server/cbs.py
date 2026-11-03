@@ -249,6 +249,14 @@ def rank_key(p):
             0 if p["recent_bad"] else 1, -p["last"])
 
 
+def best_key(p):
+    """Best first among people who submitted: highest submit rate, then lowest $ per submit, then fewest hours per
+    submit (unmeasured last), then not 2 bad claims in a row."""
+    hours = p["hours_per_submit"]
+    return (-(p["submit_rate"] or 0), p["spend_per_submit"], hours if hours is not None else float("inf"),
+            1 if p["recent_bad"] else 0, -p["last"])
+
+
 def _training():
     return {r["user_id"]: r for r in db.q("select user_id, email, trained_at, trained_by, note from cb_training")}
 
@@ -346,6 +354,11 @@ def report(rows, training, now=None):
     for p in people:  # 1 = the worst in their status group
         seen[p["status"]] += 1
         p["rank"] = seen[p["status"]]
+    # Everyone who has ever submitted, whatever their status, best first (Evan, 2026-11-03): the same four factors
+    # the other way round. 1 = the best.
+    submitters = sorted((p for p in people if p["submitted"] > 0), key=best_key)
+    for i, p in enumerate(submitters, 1):
+        p["best_rank"] = i
     return {"start": START, "bars": BARS, "recent_bars": recent_bars, "recent_days": RECENT_DAYS, "recent_n": len(recent),
             "groups": groups, "weeks": weeks, "curve": curve, "paired": paired, "conversion": conversion,
             "statuses": dict(statuses), "people": people}
