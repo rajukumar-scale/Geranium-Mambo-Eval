@@ -290,6 +290,7 @@ button.danger-solid:hover { border-color: var(--ink); }
 .proof .code { text-align: center; padding: 9px 16px; border-top: 1px solid var(--line); font-size: 12px; }
 .proof .foot { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); background: var(--grey-95); }
 .proof .foot .grow { flex: 1; font-size: 13px; color: var(--muted); }
+.proof .foot.risky .grow { color: #7A2E0E; }
 
 /* chat lists: sidebar sections, sort + filter chips, rows */
 .side-sec + .side-sec { margin-top: 22px; }

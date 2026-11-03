@@ -247,6 +247,16 @@ function spelledCode(code) {
   const whole = code.match(/^.*? - (.*)$/s);
   return [`${whole ? "Characters after the hyphen" : "Spelled out"}: ${spellChars(whole ? whole[1] : code)}`];
 }
+// Symbols the reader still misreads off a screenshot, even with the spelled-out lines: it read the tail "{}')" as
+// "{')" in 12 of 16 screenshots on 8 screen sizes, while the "Download image" file read right 9 of 9 (2026-11-03,
+// attempt 6adfee3b47f7621feba5b96c). When the first or last characters have brackets, braces or quotes, the card
+// says to upload the downloaded image instead of a screenshot.
+const RISKY_CHARS = /[()[\]{}<>'"`]/;
+function screenshotRisky(code) {
+  if (!code || code.startsWith("(empty")) return false;
+  const cut = code.match(/^.*? - (.*?) \.\.\. (.*)$/s) || code.match(/^.*? - (.*)$/s);
+  return !!cut && cut.slice(1).some(part => RISKY_CHARS.test(part));
+}
 function rubricWeights(fp) {
   const rubric = (fp || "").match(RUBRIC_FP);
   return rubric ? rubric[3] : "";
@@ -266,6 +276,7 @@ function proofHtml(p, opts = {}) {
   const hashes = Object.entries(p.report_hashes || {}).slice(0, 4)
     .map(([k, v]) => `<div class="wide"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
   const verifyUrl = `${location.origin}/verify/${encodeURIComponent(p.code)}`;
+  const risky = !!p.fingerprint && screenshotRisky(shortFp(p.fingerprint));
   const stage = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" }[p.stage] || p.stage;
   // Screenshot-safe (2026-10-27): the taxonomy reads the code off a screenshot with GPT-4o, and it misread small
   // text in tall cards. So the card is short (header, the code large, four IDs) and everything else is folded
@@ -312,10 +323,13 @@ function proofHtml(p, opts = {}) {
     </div>
     ${p.fingerprint ? "" : `<div class="code muted">Check this pass at <span class="mono">${esc(verifyUrl)}</span></div>`}
     </details>
-    ${opts.foot === false ? "" : `<div class="foot"><div class="grow">📸 <b>Screenshot this card</b> and upload it in your Outlier task.
-      Or download the image, which is checked with Outlier's reader first.</div>
+    ${opts.foot === false ? "" : `<div class="foot${risky ? " risky" : ""}"><div class="grow">${risky
+        ? `⚠ <b>Don't screenshot this one.</b> Outlier's reader often misreads the brackets or quotes in this code.
+      Click <b>Download image</b> and upload that file in your Outlier task.`
+        : `📸 <b>Screenshot this card</b> and upload it in your Outlier task.
+      Or download the image, which is checked with Outlier's reader first.`}</div>
       ${COPYABLE.has(p.stage) && p.fingerprint ? `<button data-copypass>Copy what passed</button>` : ""}
-      <button data-dlpass>⬇ Download image</button><button data-close>Close</button></div>
+      <button data-dlpass${risky ? ` class="primary"` : ""}>⬇ Download image</button><button data-close>Close</button></div>
       <div class="dlnote muted" data-dlnote hidden></div>`}
   </div>`;
 }

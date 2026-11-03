@@ -99,5 +99,34 @@ process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, "utf8")).map(s
                 self.assertEqual(shown, reader_line(case))
 
 
+@unittest.skipUnless(shutil.which("node"), "node not installed here")
+class ScreenshotRiskyTest(unittest.TestCase):
+    """Codes whose shown characters have brackets, braces or quotes steer to the downloaded image (2026-11-03)."""
+    CASES = {
+        "3057 chars - INSE ... {}')": True,          # read as "{')" in 12 of 16 screenshots
+        "607 chars - Hey  ... .79)": True,
+        "1998 chars - INSE ... Z');": True,
+        "746 chars - Can  ... ank.": False,          # a period alone reads fine
+        "12 chars - abc 'x' def": True,              # short text, shown whole
+        "12 criteria, weight 18 | Titles 548 letters - TheA ... nli": False,
+        "(empty - no injection)": False,
+        "": False,
+    }
+
+    def test_flags_brackets_and_quotes(self):
+        script = """
+const fs = require("fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+const f = new Function(src.slice(src.indexOf("const RISKY_CHARS"), src.indexOf("function rubricWeights")) + "; return screenshotRisky;")();
+process.stdout.write(JSON.stringify(JSON.parse(fs.readFileSync(0, "utf8")).map(f)));
+"""
+        codes = list(self.CASES)
+        out = subprocess.run(["node", "-e", script, str(ROOT / "web" / "common.js")], input=json.dumps(codes),
+                             capture_output=True, text=True, check=True).stdout
+        for code, got in zip(codes, json.loads(out)):
+            with self.subTest(code=code):
+                self.assertEqual(got, self.CASES[code])
+
+
 if __name__ == "__main__":
     unittest.main()
