@@ -48,14 +48,17 @@ class CountTest(unittest.TestCase):
         self.assertIsNone(tn.task_type("Persona: Frederick"))
 
     def test_note_only_below_the_minimum(self):
-        self.assertIn("at risk of failing", tn.note_text(61, "long-horizon"))
+        self.assertIsNone(tn.note_text(61, "long-horizon"))  # under 90%: /hardness itself fails it
+        self.assertIsNone(tn.note_text(89, "long-horizon"))
+        self.assertIn("at risk of failing", tn.note_text(90, "long-horizon"))
         self.assertIn("**100+**", tn.note_text(99, "long-horizon"))
         self.assertIsNone(tn.note_text(100, "long-horizon"))
         self.assertIsNone(tn.note_text(109, "long-horizon"))
-        self.assertIn("at risk of failing", tn.note_text(40, "normal"))
+        self.assertIsNone(tn.note_text(40, "normal"))
+        self.assertIn("at risk of failing", tn.note_text(45, "normal"))
         self.assertIsNone(tn.note_text(50, "normal"))
         self.assertIsNone(tn.note_text(130, "normal"))
-        self.assertIn("(/?guide=toolcalls)", tn.note_text(10, "normal"))
+        self.assertIn("(/?guide=toolcalls)", tn.note_text(47, "normal"))
 
 class AfterReviewTest(unittest.TestCase):
     def setUp(self):
@@ -91,11 +94,11 @@ class AfterReviewTest(unittest.TestCase):
         return [m for m in db.q("select content, meta from messages where attempt_id='a1' and role='system'")]
 
     def test_posts_after_hardness_when_short(self):
-        self.setup(61)
+        self.setup(95)
         msg = self.run_review()
         self.assertIsNotNone(msg)
         self.assertEqual(len(self.notes()), 1)
-        self.assertIn("61", self.notes()[0]["content"])
+        self.assertIn("95", self.notes()[0]["content"])
         self.assertIn('"toolcall_note": true', self.notes()[0]["meta"])
 
     def test_silent_when_comfortably_above(self):
@@ -104,14 +107,14 @@ class AfterReviewTest(unittest.TestCase):
         self.assertEqual(self.notes(), [])
 
     def test_only_finished_hardness_reviews(self):
-        self.setup(10)
+        self.setup(95)
         self.assertIsNone(self.run_review(command="prompt"))
         self.assertIsNone(self.run_review(status="failed"))
         self.assertIsNone(self.run_review(actor_admin=1))
         self.assertEqual(self.notes(), [])
 
     def test_flag_off_or_missing_files(self):
-        self.setup(10)
+        self.setup(95)
         with mock.patch.object(config, "TOOLCALL_NOTE_PILOT", []):
             self.assertIsNone(self.run_review())
         (self.inputs / "opus" / "trajectory.json").unlink()
