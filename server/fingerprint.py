@@ -117,6 +117,8 @@ def rubric(criteria):
     taxonomy's rubric builder stores titles as rich text (emails and sites become [x](mailto:x) links, characters
     get backslash-escaped, quotes and line breaks differ), so only letters and digits are compared, after dropping
     link targets. Same as the taxonomy's rubric transformer since 2026-10-17 ("letters")."""
+    if isinstance(criteria, dict) and isinstance(criteria.get("criteria"), list):
+        criteria = criteria["criteria"]  # the chat bot can save {"criteria": [...]}; the taxonomy holds just the list
     if not isinstance(criteria, list) or not criteria:
         return EMPTY["rubric"]
     weights = []
