@@ -347,6 +347,29 @@ function showProof(p) {
       <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
     const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
     tick.onchange = () => { show.disabled = !tick.checked; };
+    show.onclick = INJECT_REMINDER_STAGES.has(p.stage) ? injectStep : card;
+  };
+  // After a /prompt or /hardness pass the next step happens in sandboxes (Universe Explorer, Agent Runner), and CBs kept
+  // forgetting to run their injection SQL there first (Evan, 2026-11-03). One more step, every such pass.
+  const injectStep = () => {
+    const shot = (n, file, text) => `<li><p>${text}</p><img src="/static/img/${file}" alt="${esc(text.replace(/<[^>]+>/g, ""))}" loading="lazy"></li>`;
+    wrap.innerHTML = `<div class="taxo-step inject-step" role="alertdialog" aria-labelledby="inject-title">
+      <div class="taxo-head"><span class="taxo-icon" aria-hidden="true">💉</span><span id="inject-title">Inject your SQL in every sandbox</span></div>
+      <div class="taxo-body">
+        <p><b>Every time you open a sandbox</b> (the <b>Universe Explorer</b> or the <b>Agent Runner</b>), run your injection SQL in it
+          <b>before you do anything else</b>. Each sandbox starts from the plain universe, so without it your injected records aren't there.
+          Not needed in the Rubric Verifier.</p>
+        <ol class="inject-steps">
+          ${shot(1, "inject_1_query_tab.png", "Open the <b>Database</b> tab (1), then the <b>Query</b> tab (2).")}
+          ${shot(2, "inject_2_run_query.png", "Paste your whole injection SQL, the version that passed <b class=\"mono\">/injection</b> (3), and press <b>Run Query</b> (4).")}
+          ${shot(3, "inject_3_no_records.png", "<b>No records found</b> (5) is normal: an insert or update returns no rows. It is not an error.")}
+          ${shot(4, "inject_4_changelog.png", "To check it worked, open <b>Tables → _changelog</b> (6): one row for each change you made (7).")}
+        </ol>
+        <label class="taxo-check"><input type="checkbox"> I'll run my injection SQL in every sandbox I open</label>
+      </div>
+      <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
+    const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
+    tick.onchange = () => { show.disabled = !tick.checked; };
     show.onclick = card;
   };
   step();
@@ -366,6 +389,7 @@ function showProof(p) {
 // plain characters with its first and last characters spelled out (spelledCode), then the details. Before the download it's read with the taxonomy's own reader and prompt
 // (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
 const COPYABLE = new Set(["injection", "prompt", "oe"]);
+const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness"]);  // their pass screen reminds them to inject in every sandbox
 const CHECKABLE = new Set(["injection", "prompt", "oe", "rubric"]);
 const PASS_IMAGE_SIZES = [44, 56, 68];  // code font sizes, px, tried in order
 const STAGE_NAMES = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" };
