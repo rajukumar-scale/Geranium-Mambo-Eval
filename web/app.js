@@ -742,19 +742,19 @@ function guideStepsHtml() {
       Type <b class="mono">/admin</b> and a message to reach a person.</p>
     <h4>4 · What to screenshot</h4>
     <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run; for <b>/oe</b> only a <b>PASS</b> counts), a <b>pass screen</b> pops up with a verification
-      code. Screenshot that card and upload it in the taxonomy: one for each passing review. Keep the whole card in the shot and
-      don't zoom far out. You can also click <b>⬇ Download image</b>: that image is checked with the taxonomy's reader before you get it.</p>
+      code. Screenshot that card and upload it in your Outlier task: one for each passing review. Keep the whole card in the shot and
+      don't zoom far out. You can also click <b>⬇ Download image</b>: that image is checked with Outlier's reader before you get it.</p>
     <p>For the injection, prompt and oracle events, <b>Copy what passed</b> copies the exact text that review graded, so what you
-      paste into the taxonomy matches the pass.</p>
-    <p>⚠ Before the pass screen opens, you'll be asked to confirm you've put the <b>latest version you fixed</b> into the taxonomy.
-      The pass is only for the exact version you sent, so don't forget to update it. If the taxonomy doesn't match, we will know and the task will be flagged.</p>
+      paste into your Outlier task matches the pass.</p>
+    <p>⚠ Before the pass screen opens, you'll be asked to confirm you've put the <b>latest version you fixed</b> into your Outlier task.
+      The pass is only for the exact version you sent, so don't forget to update it. If your Outlier task doesn't match, we will know and the task will be flagged.</p>
     <div class="guide-sample proof"><div class="head"><div class="left"><div class="brandline">Original Conference Eval Portal</div>
       <div class="verdict"><span class="vbadge PASS">PASS</span><span>Score 5</span></div><div class="sub">/prompt · Prompt review · COMPLETE</div></div>
       </div>
-      <div class="fpband"><div class="k">🔏 Verification code · the Prompt fingerprint, as the taxonomy shows it</div>
+      <div class="fpband"><div class="k">🔏 Verification code · the Prompt fingerprint, as your Outlier task shows it</div>
       <div class="fp">712 chars - hey  ... anks</div></div></div>
     <p>The <b>🔏 verification code</b> on a pass is the character count and the first and last 4 characters of the exact input
-      that review graded, taken from the same fingerprint the taxonomy shows reviewers for that step. If what's in the taxonomy
+      that review graded, taken from the same fingerprint your Outlier task shows reviewers for that step. If what's in your Outlier task
       is different, they won't match.</p>
     <p>Closed it by accident? Reopen it from <b>Passes</b> in the sidebar, or with <b>Show pass screen</b> in the chat.
       Report cards, chat messages and FAIL results don't count as proof, only the pass screen does.</p>

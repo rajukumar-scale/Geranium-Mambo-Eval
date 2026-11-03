@@ -283,7 +283,7 @@ function proofHtml(p, opts = {}) {
       ${p.fingerprint ? "" : `<div class="codebox"><div class="k">Verification code</div><div class="c">${esc(p.code)}</div></div>`}
     </div>
     ${staleBand(p)}
-    ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as the taxonomy shows it</div>
+    ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as your Outlier task shows it</div>
       <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div>
       ${spelledCode(shortFp(p.fingerprint)).map(l => `<div class="spell">${esc(l)}</div>`).join("")}</div>` : ""}
     <div class="grid ids">
@@ -312,8 +312,8 @@ function proofHtml(p, opts = {}) {
     </div>
     ${p.fingerprint ? "" : `<div class="code muted">Check this pass at <span class="mono">${esc(verifyUrl)}</span></div>`}
     </details>
-    ${opts.foot === false ? "" : `<div class="foot"><div class="grow">📸 <b>Screenshot this card</b> and upload it in the taxonomy.
-      Or download the image, which is checked with the taxonomy's reader first.</div>
+    ${opts.foot === false ? "" : `<div class="foot"><div class="grow">📸 <b>Screenshot this card</b> and upload it in your Outlier task.
+      Or download the image, which is checked with Outlier's reader first.</div>
       ${COPYABLE.has(p.stage) && p.fingerprint ? `<button data-copypass>Copy what passed</button>` : ""}
       <button data-dlpass>⬇ Download image</button><button data-close>Close</button></div>
       <div class="dlnote muted" data-dlnote hidden></div>`}
@@ -330,7 +330,7 @@ function showProof(p) {
   wrap.className = "overlay";
   const card = () => {
     wrap.innerHTML = `<div class="proof-stack">${proofHtml(p)}
-      <div class="taxo-strip" role="note"><span class="taxo-icon" aria-hidden="true">⚠</span><div><b>Reminder:</b> the taxonomy must have
+      <div class="taxo-strip" role="note"><span class="taxo-icon" aria-hidden="true">⚠</span><div><b>Reminder:</b> your Outlier task must have
         this exact <b class="mono">${cmd}</b> version. Update it before you submit; a mismatch gets your task flagged.</div></div></div>`;
   };
   const step = () => {
@@ -339,10 +339,10 @@ function showProof(p) {
       <div class="taxo-body">
         ${p.outdated ? `<p class="taxo-warn">⚠ This pass is outdated. ${esc(p.outdated.message)}</p>` : ""}
         <p>This pass is for the exact <b class="mono">${cmd}</b> you sent in this review.</p>
-        <p>If you fixed it here to pass, put that <b>latest fixed version into the taxonomy</b>. Don't forget to update it.</p>
-        <p class="taxo-warn">If the taxonomy doesn't match the version that passed here, we will know, and your task will be flagged.</p>
+        <p>If you fixed it here to pass, put that <b>latest fixed version into your Outlier task</b>. Don't forget to update it.</p>
+        <p class="taxo-warn">If your Outlier task doesn't match the version that passed here, we will know, and your task will be flagged.</p>
         <p class="taxo-note">If you change it again, run <b class="mono">${cmd}</b> again.</p>
-        <label class="taxo-check"><input type="checkbox"> I've updated the taxonomy</label>
+        <label class="taxo-check"><input type="checkbox"> I've updated my Outlier task</label>
       </div>
       <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
     const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
@@ -439,7 +439,7 @@ async function passImage(p, codeSize) {
   // the verification code
   ctx.fillStyle = "#F6FAF7"; ctx.fillRect(0, y, W, codeH);
   ctx.fillStyle = "#575757"; ctx.font = `22px ${mono}`;
-  ctx.fillText(p.fingerprint ? `🔏 VERIFICATION CODE · THE ${stage.toUpperCase()} FINGERPRINT, AS THE TAXONOMY SHOWS IT` : "VERIFICATION CODE", pad, y + 52);
+  ctx.fillText(p.fingerprint ? `🔏 VERIFICATION CODE · THE ${stage.toUpperCase()} FINGERPRINT, AS YOUR OUTLIER TASK SHOWS IT` : "VERIFICATION CODE", pad, y + 52);
   ctx.fillStyle = "#000000"; ctx.font = codeFont;
   codeLines.forEach((l, i) => ctx.fillText(l, pad, y + 72 + codeSize + i * Math.round(codeSize * 1.3)));
   ctx.fillStyle = "#333333"; ctx.font = `24px ${sans}`;
@@ -465,12 +465,12 @@ async function downloadPassImage(p, root) {
   const say = (html, cls = "") => { note.hidden = false; note.className = `dlnote ${cls}`; note.innerHTML = html; };
   const name = `pass-${p.stage}-${p.attempt_id}.png`;
   const save = url => { const a = document.createElement("a"); a.href = url; a.download = name; a.click(); };
-  if (PASS_IMAGE_OK[p.code]) { save(PASS_IMAGE_OK[p.code]); return say("✓ Downloaded. Upload this image in the taxonomy.", "ok"); }
+  if (PASS_IMAGE_OK[p.code]) { save(PASS_IMAGE_OK[p.code]); return say("✓ Downloaded. Upload this image in your Outlier task.", "ok"); }
   button.disabled = true;
   let url = null, last = null;
   try {
     for (const size of PASS_IMAGE_SIZES) {
-      say(`Checking the image with the taxonomy's reader…`);
+      say(`Checking the image with Outlier's reader…`);
       url = (await passImage(p, size)).toDataURL("image/png");
       last = await api(`/api/proofs/${encodeURIComponent(p.code)}/reader-check`, { json: { image: url } });
       if (last.ok !== false) break;  // read correctly, or the check couldn't run
@@ -483,12 +483,12 @@ async function downloadPassImage(p, root) {
   save(url);
   if (last.ok) {
     PASS_IMAGE_OK[p.code] = url;
-    say("✓ Downloaded. The taxonomy's reader reads this image correctly. Upload it in the taxonomy.", "ok");
+    say("✓ Downloaded. Outlier's reader reads this image correctly. Upload it in your Outlier task.", "ok");
   } else if (last.ok === null) {
-    say("Downloaded. The reader check couldn't run right now, but this image is made for it. Upload it in the taxonomy.");
+    say("Downloaded. The reader check couldn't run right now, but this image is made for it. Upload it in your Outlier task.");
   } else {
     say(`Downloaded, but in our check the reader read <span class="mono">${esc(last.read || "nothing")}</span> instead of
-      <span class="mono">${esc(last.expected)}</span>. If the taxonomy blocks it, type <b class="mono">/admin</b> with your attempt ID.`, "bad");
+      <span class="mono">${esc(last.expected)}</span>. If Outlier blocks it, type <b class="mono">/admin</b> with your attempt ID.`, "bad");
   }
 }
 
@@ -499,7 +499,7 @@ async function copyPassInput(p, root) {
     const text = await api(`/api/proofs/${encodeURIComponent(p.code)}/input`);
     await navigator.clipboard.writeText(text);
     say(`✓ Copied the exact ${esc(STAGE_NAMES[p.stage] || p.stage)} this pass graded (${fmtInt(text.length)} characters).
-      In the taxonomy field press <b>Ctrl/⌘+A</b>, then paste, so nothing old is left.`, "ok");
+      In that field in your Outlier task press <b>Ctrl/⌘+A</b>, then paste, so nothing old is left.`, "ok");
   } catch (e) {
     say(esc(e.message), "bad");
   }
@@ -522,11 +522,11 @@ function showTaxoCheck(p) {
 
 function openTaxoCheck(p, root) {
   const panel = root.querySelector("[data-checkpanel]");
-  const what = p.stage === "rubric" ? "the rubric's whole <b>JSON view</b> from the taxonomy"
-    : `the whole <b>${esc(STAGE_NAMES[p.stage] || p.stage)}</b> field from the taxonomy (Ctrl/⌘+A, copy)`;
+  const what = p.stage === "rubric" ? "the rubric's whole <b>JSON view</b> from your Outlier task"
+    : `the whole <b>${esc(STAGE_NAMES[p.stage] || p.stage)}</b> field from your Outlier task (Ctrl/⌘+A, copy)`;
   panel.hidden = false;
-  panel.innerHTML = `<div class="k">Check my taxonomy</div>
-    <p>Paste ${what}. This checks it the same way the taxonomy's linter does.</p>
+  panel.innerHTML = `<div class="k">Check my task in Outlier</div>
+    <p>Paste ${what}. This checks it the same way Outlier's check does.</p>
     <textarea data-checktext rows="6" spellcheck="false" placeholder="Paste here"></textarea>
     <div class="row"><button class="primary" data-runcheck>Check</button><button data-close>Close</button><span class="muted" data-checkresult></span></div>
     <p class="muted">/${esc(p.stage)} pass · <span class="mono">${esc(shortFp(p.fingerprint))}</span></p>`;
@@ -536,12 +536,12 @@ function openTaxoCheck(p, root) {
 // Which rubric rows differ (server taxo_check.rubric_rows): formatting, escapes and links already ignored.
 function rubricRowsHtml(d) {
   const t = s => `<span class="mono">“${esc(s || "")}”</span>`;
-  const line = r => r.kind === "changed" ? `<li><b>Row ${r.taxonomy_row}</b> in the taxonomy differs from row ${r.passed_row} that passed:
-        <div>Taxonomy: ${t(r.taxonomy_title)}</div><div>Passed: ${t(r.passed_title)}</div></li>`
-    : r.kind === "extra" ? `<li><b>Row ${r.taxonomy_row}</b> is in the taxonomy but not in what passed: ${t(r.taxonomy_title)}</li>`
-    : r.kind === "missing" ? `<li>Row ${r.passed_row} that passed is <b>missing from the taxonomy</b>: ${t(r.passed_title)}</li>`
-    : `<li><b>Row ${r.taxonomy_row}</b>: weight ${esc(r.taxonomy_weight)} in the taxonomy, ${esc(r.passed_weight)} in what passed: ${t(r.taxonomy_title)}</li>`;
-  return `<br>Rows: ${fmtInt(d.taxonomy_count)} in the taxonomy, ${fmtInt(d.passed_count)} passed.
+  const line = r => r.kind === "changed" ? `<li><b>Row ${r.taxonomy_row}</b> in your Outlier task differs from row ${r.passed_row} that passed:
+        <div>Outlier task: ${t(r.taxonomy_title)}</div><div>Passed: ${t(r.passed_title)}</div></li>`
+    : r.kind === "extra" ? `<li><b>Row ${r.taxonomy_row}</b> is in your Outlier task but not in what passed: ${t(r.taxonomy_title)}</li>`
+    : r.kind === "missing" ? `<li>Row ${r.passed_row} that passed is <b>missing from your Outlier task</b>: ${t(r.passed_title)}</li>`
+    : `<li><b>Row ${r.taxonomy_row}</b>: weight ${esc(r.taxonomy_weight)} in your Outlier task, ${esc(r.passed_weight)} in what passed: ${t(r.taxonomy_title)}</li>`;
+  return `<br>Rows: ${fmtInt(d.taxonomy_count)} in your Outlier task, ${fmtInt(d.passed_count)} passed.
     ${d.total ? `<ul class="rows">${d.rows.map(line).join("")}</ul>${d.total > d.rows.length ? `<div>…and ${fmtInt(d.total - d.rows.length)} more.</div>` : ""}`
       : "<br>Every row's title matches; the difference is in the weights."}`;
 }
@@ -549,26 +549,26 @@ function rubricRowsHtml(d) {
 async function runTaxoCheck(p, root) {
   const panel = root.querySelector("[data-checkpanel]");
   const text = panel.querySelector("[data-checktext]").value, out = panel.querySelector("[data-checkresult]");
-  if (!text.trim()) { out.textContent = "Paste the taxonomy text first."; return; }
+  if (!text.trim()) { out.textContent = "Paste the text from your Outlier task first."; return; }
   out.className = "muted"; out.textContent = "Checking…";
   try {
     const r = await api(`/api/proofs/${encodeURIComponent(p.code)}/check-input`, { json: { text } });
     if (r.match) {
       out.className = "ok";
       out.innerHTML = r.links_ignored
-        ? `✓ Matches this pass: same rows, titles and weights. Links aren't compared, because the taxonomy's JSON view shortens them.`
-        : `✓ Matches this pass. The taxonomy's code will be <span class="mono">${esc(r.taxonomy)}</span>.`;
+        ? `✓ Matches this pass: same rows, titles and weights. Links aren't compared, because Outlier's JSON view shortens them.`
+        : `✓ Matches this pass. Your Outlier task's code will be <span class="mono">${esc(r.taxonomy)}</span>.`;
       return;
     }
     const d = r.difference;
     const mark = (s, at) => `${esc(s.slice(0, at))}<mark>${esc(s.slice(at, at + 1) || "∅")}</mark>${esc(s.slice(at + 1))}`;
     out.className = "bad";
-    out.innerHTML = `✗ Doesn't match. Taxonomy: <span class="mono">${esc(r.taxonomy)}</span> · this pass: <span class="mono">${esc(r.passed)}</span>.
-      ${d ? `<br>First difference at character ${fmtInt(d.at)} (taxonomy ${fmtInt(d.taxonomy_chars)} chars, passed ${fmtInt(d.passed_chars)}):
-        <div class="diff"><div><b>Taxonomy</b> <span class="mono">…${mark(d.taxonomy_text, d.offset)}…</span></div>
+    out.innerHTML = `✗ Doesn't match. Your Outlier task: <span class="mono">${esc(r.taxonomy)}</span> · this pass: <span class="mono">${esc(r.passed)}</span>.
+      ${d ? `<br>First difference at character ${fmtInt(d.at)} (Outlier task ${fmtInt(d.taxonomy_chars)} chars, passed ${fmtInt(d.passed_chars)}):
+        <div class="diff"><div><b>Outlier task</b> <span class="mono">…${mark(d.taxonomy_text, d.offset)}…</span></div>
         <div><b>Passed</b> <span class="mono">…${mark(d.passed_text, d.offset)}…</span></div></div>` : ""}
       ${r.rubric_rows ? rubricRowsHtml(r.rubric_rows) : p.stage === "rubric" ? "<br>Your saved rubric here has changed since this pass, so the rows can't be listed." : ""}
-      ${COPYABLE.has(p.stage) ? "<br>Use <b>Copy what passed</b> and paste it over the whole taxonomy field." : "<br>Fix those rows in the taxonomy so they match what passed, or run the review again on what's there."}`;
+      ${COPYABLE.has(p.stage) ? "<br>Use <b>Copy what passed</b> and paste it over the whole field in your Outlier task." : "<br>Fix those rows in your Outlier task so they match what passed, or run the review again on what's there."}`;
   } catch (e) {
     out.className = "bad"; out.textContent = e.message;
   }
@@ -630,7 +630,7 @@ function messageHtml(m, opts = {}) {
   if (m.role === "proof") {
     const stale = meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "";
     return `<div class="msg system"><div class="bubble proofcard${meta.outdated ? " stale" : ""}"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? " (admin override)" : ""}</b>${meta.outdated ? ` <span class="pill OUTDATED">OUTDATED</span>` : ""}
-      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}${CHECKABLE.has(meta.stage) && meta.fingerprint ? `<button data-taxocheck="${m.id}">Check my taxonomy</button>` : ""}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
+      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}${CHECKABLE.has(meta.stage) && meta.fingerprint ? `<button data-taxocheck="${m.id}">Check my task in Outlier</button>` : ""}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
   }
   const kickoff = meta.kickoff ? " kickoff" : "";  // the plan-your-task card (server/plan.py): solid, not a dashed note
   const warn = m.meta && (m.meta.spend_flag || m.meta.warn) ? " warnnote" : "";
