@@ -619,6 +619,8 @@ button.danger-solid:hover { border-color: var(--ink); }
 .st-training { background: #fbefd2; border-color: #e6c46e; color: #6b4a00; }
 :root[data-theme="dark"] .st-training { background: #3d3216; border-color: #8a6d1f; color: #f0d48a; }
 .st-efficient { background: #e3f3e6; border-color: #9ccfa6; color: #1f5a33; }
+.st-acceptable { background: #eef4dc; border-color: #bdd08a; color: #4a5a1c; }
+:root[data-theme="dark"] .st-acceptable { background: #2b3319; border-color: #6b7f35; color: #d2e0a3; }
 :root[data-theme="dark"] .st-efficient { background: #1d3524; border-color: #3f7a4f; color: #a8dcb3; }
 .cbs-bars { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; font-size: 13px; }
 .cbs-bars p { margin: 4px 0 0; font-size: 12px; }

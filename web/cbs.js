@@ -13,7 +13,8 @@ const STATUSES = {
   needs_training: { label: "Needs training", icon: "⚠", cls: "st-training", tip: "Past the first 2 tasks: the last 2 closed claims had no submit, or the last 2 submitted tasks were over the Flag bar" },
   trained: { label: "Trained", icon: "🎓", cls: "st-trained", tip: "Trained; watching their next 2 claims" },
   grace: { label: "Grace", icon: "🌱", cls: "st-grace", tip: "Their first 2 tasks: no flags yet" },
-  efficient: { label: "Efficient", icon: "✓", cls: "st-efficient", tip: "Submitted a task within the Acceptable bar (hours and $)" },
+  efficient: { label: "Efficient", icon: "✓", cls: "st-efficient", tip: "Submitted a task within the Efficient bar (hours and $)" },
+  acceptable: { label: "Acceptable", icon: "◐", cls: "st-acceptable", tip: "Submitted a task within the Acceptable bar (hours and $), none within the Efficient bar yet" },
   ok: { label: "No flag", icon: "·", cls: "st-ok", tip: "Past grace, no flag, no task within the Acceptable bar yet" },
   offboarded: { label: "Offboarded", icon: "🚫", cls: "st-ok", tip: "Tagged mcp_ac_temp_block (already offboarded); the tag syncs daily" },
 };
@@ -213,16 +214,16 @@ function renderConv(d) {
     <div class="funnel-track"><div class="funnel-bar" style="width:${of ? Math.max(1, (100 * n) / c.claimed) : 0}%"></div></div>
     <div class="funnel-num"><b>${fmtInt(n)}</b> ${of ? `· ${pct(n, of)}${note ? ` ${note}` : ""}` : ""}</div></div>`;
   $("#conv-card").innerHTML = `<div class="cc-head"><h2>3 · Trusted conversion</h2>
-    <p class="muted">External contributors (not QMA) who worked on a task since Oct 13. Efficient = submitted a task within the
+    <p class="muted">External contributors (not QMA) who worked on a task since Oct 13. Acceptable or better = submitted a task within the
       Acceptable bar (≤${d.bars.acceptable.hours} h and ≤${usd(d.bars.acceptable.cost)}).</p></div>
     <div class="funnel">
       ${step("Claimed", c.claimed, c.claimed)}
       ${step("Submitted a task", c.submitted, c.claimed, "of claimed")}
-      ${step("Efficient", c.efficient, c.submitted, `of submitters · ${pct(c.efficient, c.claimed)} overall`)}
+      ${step("Acceptable or better", c.efficient, c.submitted, `of submitters · ${pct(c.efficient, c.claimed)} overall`)}
     </div>
     <p class="muted">${fmtInt(c.measured)} of the ${fmtInt(c.submitted)} submitters have full portal timing. For comparison,
       <b>${fmtInt(c.qma_efficient)} of ${fmtInt(c.qma)}</b> QMAs meet the same bar.</p>
-    <div class="table-wrap"><table class="cost-table"><thead><tr><th>First claim</th><th class="num">Claimed</th><th class="num">Submitted</th><th class="num">Efficient</th></tr></thead>
+    <div class="table-wrap"><table class="cost-table"><thead><tr><th>First claim</th><th class="num">Claimed</th><th class="num">Submitted</th><th class="num">Acceptable or better</th></tr></thead>
       <tbody>${c.cohorts.map(w => `<tr><th scope="row">${esc(weekName(w.week))}</th><td class="num">${fmtInt(w.claimed)}</td>
         <td class="num">${fmtInt(w.submitted)} · ${pct(w.submitted, w.claimed)}</td><td class="num">${fmtInt(w.efficient)} · ${pct(w.efficient, w.claimed)}</td></tr>`).join("")}</tbody></table></div>`;
 }
@@ -232,7 +233,7 @@ function taskRows(p) {
   return `<tr class="cbs-detail"><td colspan="17"><table class="cost-table"><thead><tr><th>#</th><th>Task</th><th>Opened</th><th>Outcome</th>
     <th class="num">Hours</th><th class="num">$</th><th class="num">Reviews</th><th>Tries to pass</th></tr></thead><tbody>
     ${p.tasks.map(t => `<tr><td>${t.n}</td><td class="mono">${esc(t.task)}</td><td>${esc(day(t.first_open))}</td>
-      <td>${esc(OUTCOME[t.outcome])}${t.over_flag ? ` <span class="st st-offboard">⚑ over Flag bar</span>` : t.acceptable ? ` <span class="st st-efficient">✓ acceptable</span>` : ""}</td>
+      <td>${esc(OUTCOME[t.outcome])}${t.over_flag ? ` <span class="st st-offboard">⚑ over Flag bar</span>` : t.efficient ? ` <span class="st st-efficient">✓ efficient</span>` : t.acceptable ? ` <span class="st st-acceptable">◐ acceptable</span>` : ""}</td>
       <td class="num">${hrs(t.hours)}</td><td class="num">${usd(t.cost)}</td><td class="num">${fmtInt(t.reviews)}</td>
       <td>${esc(Object.entries(t.tries).map(([k, v]) => `/${k} ${v}`).join(", ") || "–")}</td></tr>`).join("")}
     </tbody></table></td></tr>`;

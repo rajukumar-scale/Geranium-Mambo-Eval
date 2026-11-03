@@ -71,7 +71,8 @@ class StatusTest(unittest.TestCase):
     def test_needs_training_on_two_slow_submits(self):
         slow = row("submitted", 60, 200)
         self.assertEqual(cbs.status_of([row("dropped"), slow, slow])[0], "needs_training")
-        self.assertEqual(cbs.status_of([row("dropped"), slow, row("submitted", 30, 300)])[0], "efficient")
+        self.assertEqual(cbs.status_of([row("dropped"), slow, row("submitted", 30, 300)])[0], "acceptable")  # 30 h, $300
+        self.assertEqual(cbs.status_of([row("dropped"), slow, row("submitted", 25, 250)])[0], "efficient")  # 25 h, $250
 
     def test_offboard_only_after_training(self):
         before = [row("dropped", t=T0), row("dropped", t=T0 + H), row("dropped", t=T0 + 2 * H)]

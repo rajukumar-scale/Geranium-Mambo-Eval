@@ -26,7 +26,9 @@ Statuses (Evan, 2026-10-30), checked in this order:
   the last 2 submitted tasks were both over the Flag bar (hours, $ or reviews).
 - Trained: trained, fewer than 2 claims closed since.
 - Grace: 2 claims or fewer.
-- Efficient: at least one submitted task within the Acceptable bar (hours and $).
+- Efficient: at least one submitted task within the Efficient bar (hours and $).
+- Acceptable: at least one submitted task within the Acceptable bar (hours and $), none within the Efficient bar
+  (Evan, 2026-11-03: split out of Efficient, which until then meant the Acceptable bar).
 - No flag: everyone else.
 A claim went badly = dropped, or submitted over the Flag bar. Nobody goes straight to Offboard without being trained.
 
@@ -198,6 +200,11 @@ def within_acceptable(row):
     return row["outcome"] == "submitted" and row["hours"] is not None and row["hours"] <= acc["hours"] and row["cost"] <= acc["cost"]
 
 
+def within_efficient(row):
+    eff = BARS["efficient"]
+    return row["outcome"] == "submitted" and row["hours"] is not None and row["hours"] <= eff["hours"] and row["cost"] <= eff["cost"]
+
+
 def went_badly(row):
     return row["outcome"] == "dropped" or over_flag(row)
 
@@ -222,7 +229,9 @@ def status_of(claims, trained_at=None):
     if len(claims) <= GRACE and not trained_at:
         return "grace", f"Grace period: {len(claims)} of {GRACE} tasks"
     if any(within_acceptable(r) for r in claims):
-        return "efficient", "Submitted a task within the Acceptable bar"
+        if any(within_efficient(r) for r in claims):
+            return "efficient", "Submitted a task within the Efficient bar"
+        return "acceptable", "Submitted a task within the Acceptable bar (none within the Efficient bar yet)"
     return "ok", ""
 
 
@@ -333,7 +342,8 @@ def report(rows, training, now=None):
             "first": claims[0]["first_open"], "last": claims[-1]["first_open"],
             "trained": t and {"at": t["trained_at"], "by": t["trained_by"], "note": t["note"]},
             "tasks": [{k: r[k] for k in ("task", "first_open", "outcome", "hours", "cost", "reviews", "tries", "n")}
-                      | {"over_flag": over_flag(r), "acceptable": within_acceptable(r)} for r in reversed(claims)]})
+                      | {"over_flag": over_flag(r), "acceptable": within_acceptable(r), "efficient": within_efficient(r)}
+                      for r in reversed(claims)]})
     ext_people = [p for p in people if p["group"] != "QMA"]
     eff = lambda p: any(t["acceptable"] for t in p["tasks"])
     cohorts = []
@@ -348,7 +358,8 @@ def report(rows, training, now=None):
     for p in people:
         statuses[p["status"]][p["group"]] += 1
         statuses[p["status"]]["spend"] += p["spend"]
-    order = {"offboard": 0, "needs_training": 1, "trained": 2, "grace": 3, "ok": 4, "efficient": 5, "offboarded": 6}
+    order = {"offboard": 0, "needs_training": 1, "trained": 2, "grace": 3, "ok": 4, "acceptable": 5, "efficient": 6,
+             "offboarded": 7}
     people.sort(key=lambda p: (order[p["status"]], *rank_key(p)))
     seen = defaultdict(int)
     for p in people:  # 1 = the worst in their status group
