@@ -61,12 +61,60 @@ def flag(attempt_id):
     return db.one("select * from attempt_spend_flags where attempt_id=?", (attempt_id,))
 
 
+def limit_for(attempt_id):
+    """This attempt's budget: CB_SPEND_LIMIT_USD, or more if an admin approved more (attempt_budget). 0 = no limit."""
+    base = config.CB_SPEND_LIMIT_USD
+    if not base:
+        return 0
+    row = db.one("select limit_usd from attempt_budget where attempt_id=?", (attempt_id,))
+    return max(base, (row or {}).get("limit_usd") or 0)
+
+
 def status(chat):
-    """The spend bar on a chat: this attempt's spend against the limit."""
+    """The spend bar on a chat: this attempt's spend against its budget. over = new runs need an admin's approval."""
     spent = attempt_spend(chat["attempt_id"])
     flagged = flag(chat["attempt_id"])
-    return {**spent, "limit": config.CB_SPEND_LIMIT_USD, "over": bool(config.CB_SPEND_LIMIT_USD) and
-            spent["usd"] >= config.CB_SPEND_LIMIT_USD, "flagged_at": flagged["flagged_at"] if flagged else None}
+    limit = limit_for(chat["attempt_id"])
+    approved = db.one("select limit_usd, approved_by, approved_at from attempt_budget where attempt_id=?", (chat["attempt_id"],))
+    return {**spent, "limit": limit, "base_limit": config.CB_SPEND_LIMIT_USD, "over": bool(limit) and spent["usd"] >= limit,
+            "flagged_at": flagged["flagged_at"] if flagged else None, "approved": approved}
+
+
+def over_budget(attempt_id):
+    """(spent, limit) when this attempt has used its budget: no new run until an admin approves more (Evan, 2026-11-03)."""
+    limit = limit_for(attempt_id)
+    if not limit:
+        return None
+    spent = attempt_spend(attempt_id)["usd"]
+    return (spent, limit) if spent >= limit else None
+
+
+def approve(attempt_id, add_usd, by, note=""):
+    """An admin lets this attempt spend add_usd more: the new budget is the higher of its budget and its spend, plus that."""
+    spent = attempt_spend(attempt_id)["usd"]
+    new_limit = round(max(limit_for(attempt_id), spent) + add_usd, 2)
+    db.ex("insert or replace into attempt_budget(attempt_id, limit_usd, approved_by, approved_at, note) values (?,?,?,?,?)",
+          (attempt_id, new_limit, by, time.time(), (note or "")[:300]))
+    return new_limit, spent
+
+
+BUDGET_NOTICE = ("💰 **Budget for this task: ${limit:,.0f}.** Every review and reply here costs model spend (a /prompt is about "
+                 "$11, a /rubric about $23, a reply about $1). Plan before you run, fix everything a report raised before "
+                 "you run it again, and **don't go over ${limit:,.0f}**. At ${limit:,.0f} new reviews and replies stop "
+                 "until an admin approves more: type `/admin` with a short note if you need it.")
+
+
+def maybe_notice(chat):
+    """The budget warning, once per chat, the first time it is opened (existing chats get it on their next open)."""
+    if not config.CB_SPEND_LIMIT_USD or not chat or chat.get("task_id") == "loadtest" or chat.get("archived_from"):
+        return None
+    if db.one("select 1 from messages where attempt_id=? and role='system' and meta like '%\"budget_notice\"%'",
+              (chat["attempt_id"],)):
+        return None
+    msg = db.add_message(chat["attempt_id"], "system", BUDGET_NOTICE.format(limit=limit_for(chat["attempt_id"])),
+                         {"budget_notice": True, "warn": True})
+    hub.publish(chat["attempt_id"], "message", msg)
+    return msg
 
 
 def flagged_attempts():
@@ -74,30 +122,31 @@ def flagged_attempts():
 
 
 async def check_limit(attempt_id):
-    """After each run: the first time an attempt's spend reaches the limit, flag it, warn the contributor
-    in that chat and tell the admins. Runs are never blocked."""
-    limit = config.CB_SPEND_LIMIT_USD
+    """After each run: the first time an attempt's spend reaches its budget (again after each approved raise), flag it,
+    tell the contributor that new runs now need an admin's approval, and tell the admins."""
+    limit = limit_for(attempt_id)
     chat = db.get_chat(attempt_id)
     if not limit or not chat or chat.get("task_id") == "loadtest":
         return
     spent = attempt_spend(attempt_id)["usd"]
     if spent < limit:
         return
-    with db._lock:  # two runs can finish at the same moment: flag (and warn) once
-        if flag(attempt_id):
+    with db._lock:  # two runs can finish at the same moment: flag (and warn) once per budget
+        old = flag(attempt_id)
+        if old and (old["limit_usd"] or 0) >= limit:
             return
-        db.ex("insert into attempt_spend_flags(attempt_id, user_id, email, spend_usd, limit_usd, flagged_at)"
+        db.ex("insert or replace into attempt_spend_flags(attempt_id, user_id, email, spend_usd, limit_usd, flagged_at)"
               " values (?,?,?,?,?,?)", (attempt_id, chat["user_id"], chat["email"], spent, limit, time.time()))
-    log.warning("attempt %s is over the spend limit: $%.2f of $%.0f", attempt_id, spent, limit)
+    log.warning("attempt %s reached its budget: $%.2f of $%.0f", attempt_id, spent, limit)
     msg = db.add_message(attempt_id, "system",
-                         f"⚠️ **Spend limit reached.** This attempt's eval spend is now **${spent:,.2f}**, over the "
-                         f"**${limit:,.0f}** limit for each attempt. Your account has been flagged and the admins have "
-                         "been told. You'll be warned, and your account may be disabled. Type `/admin` with a short "
-                         "note if you think this is a mistake.", {"spend_flag": True})
+                         f"⛔ **Budget reached.** This task's eval spend is now **${spent:,.2f}** of its **${limit:,.0f}** "
+                         "budget, so new reviews and replies are paused. The admins have been told. If you need more, "
+                         "type `/admin` with a short note on what's left to do; an admin can approve more budget.",
+                         {"spend_flag": True})
     hub.publish(attempt_id, "message", msg)
     hub.publish(attempt_id, "spend", status(chat))
     detail = f" · {chat['email']}" if config.SLACK_ALERT_DETAIL else ""
-    sent = await notify.slack(f":triangular_flag_on_post: An attempt went over the ${limit:,.0f} eval spend limit "
+    sent = await notify.slack(f":triangular_flag_on_post: An attempt reached its ${limit:,.0f} eval budget; its runs are paused until an admin approves more "
                               f"(${spent:,.2f}, attempt `{attempt_id[:8]}…`{detail}). "
                               f"Open it on the admin page: {notify.admin_link(attempt_id)}")
     db.update("attempt_spend_flags", "attempt_id", attempt_id, notified=int(bool(sent)))

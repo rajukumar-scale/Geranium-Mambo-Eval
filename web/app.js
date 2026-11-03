@@ -683,11 +683,11 @@ function renderSpend(sp) {
   $("#spend-amount").textContent = money(sp.usd);
   $("#spend-of").textContent = "of " + limitText();
   $("#spend-rule").textContent = admin
-    ? (sp.over ? `This attempt is over the ${limitText()} limit and is flagged.`
-      : "Their runs on this attempt only; each attempt has its own limit. Runs you start as admin are billed to you, not to them.")
-    : sp.over ? `This attempt is over the ${limitText()} limit. Your account is flagged: you'll be warned and may be disabled.`
-      : pct >= 80 ? `This attempt is close to the ${limitText()} limit. Going over it flags your account: you'll be warned and may be disabled.`
-      : `Don't go over ${limitText()} on this attempt (a new attempt starts at $0). If you do, your account is flagged: you'll be warned and may be disabled.`;
+    ? (sp.over ? `This attempt used its ${limitText()} budget: their new runs are paused until an admin approves more (admin page).`
+      : "Their runs on this attempt only; each attempt has its own budget. Runs you start as admin are billed to you, not to them.")
+    : sp.over ? `Budget reached: new reviews and replies are paused. Type /admin with a short note if you need more; an admin can approve it.`
+      : pct >= 80 ? `Close to this task's ${limitText()} budget. At ${limitText()} new reviews and replies stop until an admin approves more.`
+      : `Don't go over this task's ${limitText()} budget. At ${limitText()} new reviews and replies stop until an admin approves more.`;
 }
 
 async function pollSpend() {

@@ -825,6 +825,7 @@ function renderDetail(fresh = true) {
       ${d.blocked ? `<span class="chip flag" title="${esc(blockTitle(d.blocked))}">⛔ chat blocked</span>` : ""}
       <span class="spacer"></span>
       <button class="hidden adm-jumpbtn" data-jumpadmin title="Scroll to the user's /admin message in this chat (click again for the next one)">↓ Jump to /admin</button>
+      ${d.spend && d.spend.limit ? `<button data-budget title="Let this attempt spend more: its runs stop at the budget until an admin approves more">Approve more budget…</button>` : ""}
       ${(d.override_options || []).length ? `<button data-override title="Issue a pass card for a review that got none (it didn't pass, or passed but PARTIAL). It's marked as an admin override, with your name and reason, on the pass screen and on /verify.">Issue pass (override)…</button>` : ""}
       ${d.blocked ? `<button data-unblock="attempt" data-key="${esc(d.attempt_id)}">Unblock chat</button>`
         : `<button class="danger" data-block="attempt">Block chat</button>`}
@@ -880,6 +881,23 @@ document.addEventListener("input", e => { if (e.target.id === "ov-reason") (S.la
 document.addEventListener("change", e => { if (e.target.name === "ov-pick") (S.lastOverride = S.lastOverride || {}).index = +e.target.value; });
 
 $("#detail-head").addEventListener("click", async e => {
+  if (e.target.closest("[data-budget]")) {
+    const sp = S.detail.spend || {};
+    const shown = uiDialog({ title: "Approve more budget", ok: "Approve", cancel: "Cancel", html: `<p style="margin-top:0">
+      Spent <b>$${Number(sp.usd || 0).toFixed(2)}</b> of a <b>$${sp.limit}</b> budget. The contributor sees your approval in the chat.</p>
+      <label class="muted small" for="bud-add">Approve this much more ($)</label><input id="bud-add" type="number" min="1" max="5000" step="1" value="100">
+      <label class="muted small" for="bud-note" style="display:block;margin-top:8px">Note (optional, kept with the approval)</label>
+      <input id="bud-note" type="text" maxlength="300" placeholder="e.g. last /rubric round after the OE fix">` });
+    let add = "100", note = "";
+    document.querySelector("#bud-add").addEventListener("input", ev => { add = ev.target.value; });
+    document.querySelector("#bud-note").addEventListener("input", ev => { note = ev.target.value; });
+    if (!(await shown)) return;
+    try {
+      await api(`/api/admin/chat/${S.selected}/budget`, { json: { add_usd: Number(add), note } });
+      await select(S.selected);
+    } catch (err) { uiAlert("Couldn't approve", err.message || "Please try again."); }
+    return;
+  }
   const blk = e.target.closest("[data-block]"), unblk = e.target.closest("[data-unblock]");
   if (e.target.closest("[data-override]")) return askOverride();
   if (blk) return askBlock(blk.dataset.block, { attempt_id: S.selected, who: S.detail.email });

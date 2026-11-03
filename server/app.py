@@ -531,6 +531,11 @@ def me(request: Request):
         plan.maybe_kickoff(session, db.get_chat(session["attempt_id"]))
     except Exception:  # noqa: BLE001 - the card must never stop the chat from opening
         log.exception("plan kickoff failed for %s", session["attempt_id"])
+    if not session.get("admin"):
+        try:  # the budget warning, once per chat (Evan, 2026-11-03)
+            spend.maybe_notice(db.get_chat(session["attempt_id"]))
+        except Exception:  # noqa: BLE001
+            log.exception("budget notice failed for %s", session["attempt_id"])
     return for_viewer(session, {**chat_state(session["attempt_id"]), "admin": session.get("admin"),
                                 "cost_access": bool(session.get("admin")) and admin_role(session["admin"]) == "owner",
                                 "spend": spend.status(db.get_chat(session["attempt_id"])),
@@ -890,6 +895,11 @@ async def send(body: SendBody, request: Request):
     pending = db.get_run(chat["pending_review_run"]) if chat.get("pending_review_run") and not command else None
     if db.active_run(attempt_id):
         raise HTTPException(409, "A run is already in progress for this attempt. Wait for it to finish or cancel it.")
+    over = None if session.get("admin") else spend.over_budget(attempt_id)
+    if over:  # Evan, 2026-11-03: past the budget, runs need an admin's approval (/admin and /help still work)
+        raise HTTPException(402, f"This task reached its ${over[1]:,.0f} budget (${over[0]:,.2f} spent), so new reviews and "
+                                 "replies are paused. Type /admin with a short note on what's left to do; an admin can "
+                                 "approve more budget.")
     limit = config.DAILY_REVIEW_LIMIT if kind == "review" else config.DAILY_FOLLOWUP_LIMIT
     if limit and db.runs_today(attempt_id, kind) >= limit:  # an answer to a review's question counts as a follow-up
         raise HTTPException(429, f"You've reached today's limit of {limit} {'reviews' if kind == 'review' else 'messages'} "
@@ -1676,6 +1686,32 @@ def admin_reply(attempt_id: str, body: AdminReply, request: Request):
     msg = db.add_message(attempt_id, "admin", body.text.strip(), {"admin": admin["email"]})
     hub.publish(attempt_id, "message", msg)
     return {"ok": True}
+
+
+class BudgetBody(BaseModel):
+    add_usd: float
+    note: str = ""
+
+
+@app.post("/api/admin/chat/{attempt_id}/budget")
+async def admin_budget_raise(attempt_id: str, body: BudgetBody, request: Request):
+    """Approve more budget for one attempt (its runs stop at the budget until an admin does this)."""
+    admin = current_admin(request)
+    chat = db.get_chat(attempt_id)
+    if not chat:
+        raise HTTPException(404, "No such chat.")
+    if not 0 < body.add_usd <= 5000:
+        raise HTTPException(400, "Approve between $1 and $5,000 at a time.")
+    new_limit, spent = spend.approve(attempt_id, body.add_usd, admin["email"], body.note)
+    log.info("admin %s approved $%.0f more budget for %s: now $%.0f ($%.2f spent)", admin["email"], body.add_usd,
+             attempt_id, new_limit, spent)
+    msg = db.add_message(attempt_id, "system", f"✅ An admin approved **${body.add_usd:,.0f}** more budget for this task. "
+                                               f"Its budget is now **${new_limit:,.0f}** (${spent:,.2f} spent). Please use it "
+                                               "carefully: plan before you run, and fix everything a report raised first.",
+                         {"admin": admin["email"], "budget_raise": body.add_usd})
+    hub.publish(attempt_id, "message", msg)
+    hub.publish(attempt_id, "spend", spend.status(chat))
+    return spend.status(chat)
 
 
 @app.post("/api/admin/chat/{attempt_id}/resolve")

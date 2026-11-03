@@ -69,6 +69,9 @@ create table if not exists attempt_spend_flags (
   attempt_id text primary key, user_id text, email text,
   spend_usd real, limit_usd real, flagged_at real, notified integer default 0
 );
+create table if not exists attempt_budget (
+  attempt_id text primary key, limit_usd real, approved_by text, approved_at real, note text
+);
 create table if not exists broadcasts (
   id integer primary key autoincrement, title text, body text, audience text,
   created_by text, created_at real, ended_at real, ended_by text
