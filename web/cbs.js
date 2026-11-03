@@ -215,7 +215,7 @@ function renderConv(d) {
 
 const OUTCOME = { submitted: "Submitted", working: "Working", dropped: "No submit" };
 function taskRows(p) {
-  return `<tr class="cbs-detail"><td colspan="13"><table class="cost-table"><thead><tr><th>#</th><th>Task</th><th>Opened</th><th>Outcome</th>
+  return `<tr class="cbs-detail"><td colspan="17"><table class="cost-table"><thead><tr><th>#</th><th>Task</th><th>Opened</th><th>Outcome</th>
     <th class="num">Hours</th><th class="num">$</th><th class="num">Reviews</th><th>Tries to pass</th></tr></thead><tbody>
     ${p.tasks.map(t => `<tr><td>${t.n}</td><td class="mono">${esc(t.task)}</td><td>${esc(day(t.first_open))}</td>
       <td>${esc(OUTCOME[t.outcome])}${t.over_flag ? ` <span class="st st-offboard">⚑ over Flag bar</span>` : t.acceptable ? ` <span class="st st-efficient">✓ acceptable</span>` : ""}</td>
@@ -229,6 +229,10 @@ function taskRows(p) {
 const PEOPLE_COLS = [
   { key: "email", label: "Contributor", text: true }, { key: "group", label: "Group", text: true },
   { key: "status", label: "Status", text: true, value: p => Object.keys(STATUSES).indexOf(p.status) },
+  { key: "rank", label: "Rank", num: true, tip: "Within their status, 1 = worst: lowest submit rate, then highest $ per submitted task, then most hours per submitted task, then the last 2 claims both went badly" },
+  { key: "submit_rate", label: "Submit rate", num: true, tip: "Submitted ÷ claims" },
+  { key: "spend_per_submit", label: "$ / submit", num: true, tip: "Portal spend ÷ submitted tasks (all their spend if none submitted)" },
+  { key: "hours_per_submit", label: "Hours / submit", num: true, tip: "Portal hours ÷ submitted tasks (all their hours if none submitted)" },
   { key: "claims", label: "Claims", num: true, tip: "Claims they worked on (a review or a submit), plus live claims" },
   { key: "untouched", label: "Untouched", num: true, tip: "Closed claims with no review and no submit" },
   { key: "submitted", label: "Submitted", num: true }, { key: "working", label: "Live", num: true },
@@ -260,7 +264,7 @@ function renderPeople(d) {
   }).join("");
   const g = Object.fromEntries(GROUPS.map(x => [x.key, x]));
   $("#people-card").innerHTML = `<div class="cc-head"><h2>4 · Contributors: training and offboarding</h2>
-    <p class="muted">Needs action first; click a column name to sort by it (highest first, click again for lowest). Click a row for their tasks. Grace = their first 2 tasks; Needs training after that when the
+    <p class="muted">Needs action first; inside each status the worst come first (Rank 1): lowest submit rate, then highest $ per submitted task, then most hours per submitted task, then the last 2 claims both went badly. Click a column name to sort by it (highest first, click again for lowest). Click a row for their tasks. Grace = their first 2 tasks; Needs training after that when the
       last 2 closed claims had no submit or the last 2 submitted tasks were over the Flag bar; Offboard only after training. Offboarded = tagged mcp_ac_temp_block (synced daily), listed last.</p></div>
     <div class="cost-filters">
       <div class="seg" id="status-pick" role="group" aria-label="Status"><button type="button" data-status="" class="${S.status ? "" : "on"}">All</button>${
@@ -280,10 +284,13 @@ function renderPeople(d) {
           <td><div>${esc(p.email || p.user)}</div><div class="muted mono small">${esc(p.user)}</div></td>
           <td><span class="sw ${g[p.group].cls}"></span>${g[p.group].label}</td>
           <td><span class="st ${s.cls}" title="${esc(s.tip)}">${s.icon} ${esc(s.label)}</span>${p.reason ? `<div class="muted small">${esc(p.reason)}</div>` : ""}</td>
+          <td class="num">#${fmtInt(p.rank)}${p.recent_bad ? ` <span title="The last 2 closed claims both went badly">⚑</span>` : ""}</td>
+          <td class="num">${p.submit_rate == null ? "–" : Math.round(100 * p.submit_rate) + "%"}</td>
+          <td class="num">${usd(p.spend_per_submit)}</td><td class="num">${hrs(p.hours_per_submit)}</td>
           <td class="num">${fmtInt(p.claims)}</td><td class="num">${fmtInt(p.untouched)}</td><td class="num">${fmtInt(p.submitted)}</td><td class="num">${fmtInt(p.working)}</td>
           <td class="num">${hrs(p.hours_p50)}</td><td class="num">${usd(p.cost_p50)}</td><td class="num">${num(p.reviews_p50)}</td>
           <td class="num">${usd(p.spend)}</td><td>${esc(day(p.last))}</td><td class="nowrap">${training}</td></tr>${S.open.has(p.user) ? taskRows(p) : ""}`;
-      }).join("") || `<tr><td colspan="13" class="muted">Nobody matches.</td></tr>`}</tbody></table></div>`;
+      }).join("") || `<tr><td colspan="17" class="muted">Nobody matches.</td></tr>`}</tbody></table></div>`;
 }
 
 async function markTrained(uid) {

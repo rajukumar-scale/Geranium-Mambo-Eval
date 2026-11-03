@@ -226,6 +226,29 @@ def status_of(claims, trained_at=None):
     return "ok", ""
 
 
+def performance(claims):
+    """The four ranking factors (Evan, 2026-11-03), most important first:
+    1. submit rate: submitted / claims (lower = worse);
+    2. spend per submitted task: portal spend / submitted, the whole spend with no submit (higher = worse);
+    3. hours per submitted task: portal hours / submitted, all the hours with no submit (higher = worse);
+    4. recent: the last 2 closed claims both went badly (no submit, or over the Flag bar) = worse."""
+    submitted = sum(r["outcome"] == "submitted" for r in claims)
+    spend = sum(r["cost"] or 0 for r in claims)
+    measured = [r["hours"] for r in claims if r["hours"] is not None]  # portal hours exist once all 4 stages passed
+    hours = sum(measured)
+    closed = [r for r in claims if r["outcome"] != "working"]
+    return {"submit_rate": round(submitted / len(claims), 3) if claims else None,
+            "spend_per_submit": round(spend / submitted if submitted else spend, 1),
+            "hours_per_submit": round(hours / submitted if submitted else hours, 1) if measured else None,
+            "recent_bad": len(closed) >= 2 and went_badly(closed[-1]) and went_badly(closed[-2])}
+
+
+def rank_key(p):
+    """Worst first inside a status group: each factor only breaks ties in the one before it."""
+    return (p["submit_rate"] if p["submit_rate"] is not None else 1, -p["spend_per_submit"], -(p["hours_per_submit"] or 0),
+            0 if p["recent_bad"] else 1, -p["last"])
+
+
 def _training():
     return {r["user_id"]: r for r in db.q("select user_id, email, trained_at, trained_by, note from cb_training")}
 
@@ -293,7 +316,7 @@ def report(rows, training, now=None):
         t = training.get(uid)
         status, reason = status_of(claims, t["trained_at"] if t else None)
         done = [r for r in claims if r["outcome"] == "submitted" and r["portal"]]
-        people.append({
+        people.append({**performance(claims),
             "user": uid, "email": claims[0]["email"], "group": grp, "status": status, "reason": reason,
             "claims": len(claims), "submitted": sum(r["outcome"] == "submitted" for r in claims),
             "working": sum(r["outcome"] == "working" for r in claims), "untouched": untouched.get(uid, 0),
@@ -318,7 +341,11 @@ def report(rows, training, now=None):
         statuses[p["status"]][p["group"]] += 1
         statuses[p["status"]]["spend"] += p["spend"]
     order = {"offboard": 0, "needs_training": 1, "trained": 2, "grace": 3, "ok": 4, "efficient": 5, "offboarded": 6}
-    people.sort(key=lambda p: (order[p["status"]], -p["last"]))
+    people.sort(key=lambda p: (order[p["status"]], *rank_key(p)))
+    seen = defaultdict(int)
+    for p in people:  # 1 = the worst in their status group
+        seen[p["status"]] += 1
+        p["rank"] = seen[p["status"]]
     return {"start": START, "bars": BARS, "recent_bars": recent_bars, "recent_days": RECENT_DAYS, "recent_n": len(recent),
             "groups": groups, "weeks": weeks, "curve": curve, "paired": paired, "conversion": conversion,
             "statuses": dict(statuses), "people": people}

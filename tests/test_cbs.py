@@ -139,6 +139,27 @@ class ReportTest(unittest.TestCase):
         d = cbs.report(rows, cbs._training(), now=T0 + 20 * H)
         self.assertEqual({p["user"]: p["status"] for p in d["people"]}[NEW], "needs_training")
 
+    def test_needs_training_is_ranked_worst_first_by_the_four_factors(self):
+        # Evan 2026-11-03: 1 submit rate, 2 spend per submit, 3 hours per submit, 4 the last 2 claims went badly
+        def person(uid, outcomes, cost, hours=None):
+            return [{"task": f"{uid[:3]}{i}", "user": uid, "email": f"{uid[:3]}@x.com", "group": "non-trusted",
+                     "first_open": T0 + i * H, "outcome": o, "submitted_at": None, "portal": True,
+                     "hours": hours if o == "submitted" else None, "cost": cost, "reviews": 3, "tries": {},
+                     "runs_per_stage": {}} for i, o in enumerate(outcomes)]
+        d_ = "dropped"
+        rows = (person("1" * 24, ["submitted", "submitted", d_, d_], 50, 10)      # 50% submitted
+                + person("2" * 24, [d_, d_, d_, d_], 30)                           # 0%, $120 total
+                + person("3" * 24, [d_, d_, d_, d_, d_], 40)                       # 0%, $200 total: worst
+                + person("4" * 24, ["submitted", d_, d_, d_], 50, 40)              # 25%, $200/submit
+                + person("5" * 24, ["submitted", d_, d_, d_], 50, 10))             # 25%, $200/submit, fewer hours
+        d = cbs.report(rows, cbs._training(), now=T0 + 30 * H)
+        ranked = [p for p in d["people"] if p["status"] == "needs_training"]
+        self.assertEqual([p["user"][0] for p in ranked], ["3", "2", "4", "5", "1"])
+        self.assertEqual([p["rank"] for p in ranked], [1, 2, 3, 4, 5])
+        first = ranked[0]
+        self.assertEqual((first["submit_rate"], first["spend_per_submit"], first["recent_bad"]), (0.0, 200.0, True))
+        self.assertEqual((ranked[2]["spend_per_submit"], ranked[2]["hours_per_submit"]), (200.0, 40.0))
+
 
 if __name__ == "__main__":
     unittest.main()
