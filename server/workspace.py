@@ -308,7 +308,7 @@ def prepare_local_workspace(log=print):
              "--exclude", "__pycache__/", "--exclude", ".DS_Store"]
     subprocess.run(rsync + [f"{base}/Evals/", f"{LOCAL_WS}/Evals/"], check=True)
     subprocess.run(rsync + [f"{base}/claude/", f"{LOCAL_WS}/claude/"], check=True)
-    subprocess.run(rsync + ["--include", "*.md", "--include", "*.py", "--exclude", "*", f"{config.GUIDELINES_DIR}/", f"{LOCAL_WS}/guidelines/"],
+    subprocess.run(rsync + ["--include", "*.md", "--exclude", "*", f"{config.GUIDELINES_DIR}/", f"{LOCAL_WS}/guidelines/"],
                    check=True)
     skill_effort.apply(LOCAL_WS / "claude" / "skills", config.EVAL_EFFORT)
     subprocess.run(["python3", str(LOCAL_WS / "claude" / "install.py")], check=True, capture_output=True)

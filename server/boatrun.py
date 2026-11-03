@@ -219,7 +219,7 @@ def _pack_bundle():
     # In-place edits (skill effort, refreshed hash pins) don't touch the top folders' mtimes, so include them.
     watched = [base / "Evals", base / "claude", *(base / "Evals" / "references").glob("*.json"),
                *(base / "claude" / "skills").glob("*/SKILL.md")]
-    guides = sorted([*config.GUIDELINES_DIR.glob("*.md"), *config.GUIDELINES_DIR.glob("*.py")])  # portal-owned: a guideline change is a portal deploy
+    guides = sorted(config.GUIDELINES_DIR.glob("*.md"))  # portal-owned, so a guideline change is a portal deploy
     key = f"{base}|{max(int(p.stat().st_mtime_ns) for p in watched)}|" + hashlib.sha256(
         b"".join(g.name.encode() + g.read_bytes() for g in guides)).hexdigest()[:12]
     path = _bundle_cache.get(key)

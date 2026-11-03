@@ -41,6 +41,9 @@ class CountTest(unittest.TestCase):
         self.assertEqual(tn.task_type(ASSIGN.format(t="long-horizon")), "long-horizon")
         self.assertEqual(tn.task_type("Task Type: Normal"), "normal")
         self.assertEqual(tn.task_type("Task type - Long Horizon"), "long-horizon")
+        self.assertEqual(tn.task_type("Persona: Julia Lawson\nHorizon: Long-Horizon\n"), "long-horizon")
+        self.assertEqual(tn.task_type("Task skill: Actions\nHorizon: Long\n"), "long-horizon")
+        self.assertEqual(tn.task_type("Horizon: Normal"), "normal")
         self.assertIsNone(tn.task_type("Persona: Frederick"))
 
     def test_note_bands(self):

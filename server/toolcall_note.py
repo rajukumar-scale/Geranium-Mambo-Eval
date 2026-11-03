@@ -5,8 +5,10 @@ the task type's minimum, say so in the chat with a link to the Tool calls guide.
 
 - Count: tool_use blocks in the saved run (Evals/task_inputs/opus/trajectory.json, the stream-json export /hardness
   reads). Subagents' own calls aren't in the export and aren't counted. Unknown formats post nothing.
-- Minimum: Normal 50 (and 100 at most), Long-Horizon 100+, from the saved assignment's Task Type. Baseline QC averages
-  the six baseline runs, so a single run near the line is a warning, not a verdict.
+- Minimum: Normal 50 (and 100 at most), Long-Horizon 100+, from the saved assignment's "Task Type" or "Horizon" line.
+  Baseline QC averages six runs; on the 174 submitted tasks with both, the uploaded run's count matched the six-run mean
+  closely (median ratio 1.02), and "below the minimum" caught all 4 tool-call baseline failures (and 9 of 12 that
+  contributors reported in chat) while flagging 9% of tasks. Within 20% above the minimum is a softer heads-up.
 - Advice only: never changes a verdict or blocks anything. Off for admins' runs, load tests, archived chats, and anyone
   outside TOOLCALL_NOTE_PILOT ("*" = everyone, the default).
 """
@@ -51,7 +53,7 @@ def count_tool_calls(text):
 
 def task_type(text):
     t = (text or "").lower()
-    m = re.search(r"task type[^a-z]*(super[- ]long[- ]horizon|long[- ]horizon|normal)", t)
+    m = re.search(r"(?:task type|horizon)[^a-z]*(super[- ]long[- ]horizon|long[- ]horizon|long|normal)", t)
     if not m:
         return None
     return "long-horizon" if "long" in m.group(1) else "normal"
