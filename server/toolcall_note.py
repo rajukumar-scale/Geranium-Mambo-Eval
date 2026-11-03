@@ -24,6 +24,7 @@ log = logging.getLogger("portal.toolcall_note")
 TRAJECTORY = "opus/trajectory.json"
 ASSIGNMENT = "00_Task_Assigned_Inputs.md"
 GUIDE = "[Tool calls guide](/?guide=toolcalls)"
+FAIL_BELOW = 0.9  # under this share of the minimum, /hardness itself fails the run (eval 1A tool-call rule)
 
 
 def count_tool_calls(text):
@@ -69,12 +70,12 @@ def in_pilot(chat):
 
 
 def note_text(n, kind):
-    """The warning when the run is below the task type's minimum, else None. Measured 2026-11-02 on 174 submitted tasks
-    against their real six-run baseline: 93% accurate, caught 4/4 tool-call failures, about 1 in 4 warned tasks really
-    failed (so "at risk", not "will fail"). A softer "close to the minimum" band added 55 false alarms and no catches,
-    so there is none."""
+    """The warning when the run is between 90% of the task type's minimum and the minimum, else None. Under 90% the
+    /hardness review itself scores FAIL 2 ("Why Easy (tool calls)", eval 1A, 2026-11-02): on 174 submitted tasks every
+    run under 90% really failed the baseline's tool-call check, so the review fails it and this note stays quiet.
+    Between 90% and the minimum about 1 in 4 failed, so it's a warning ("at risk")."""
     low, label, rng = (100, "Long-Horizon", "100+") if kind == "long-horizon" else (50, "Normal", "50–100")
-    if n >= low:
+    if n >= low or n < low * FAIL_BELOW:
         return None
     return (f"⚠ **Tool calls: your Opus run made {n}.** A {label} task needs **{rng}** on average across the six "
             f"baseline runs, so this task is at risk of failing the baseline's tool-call check. Better to fix it now, "
