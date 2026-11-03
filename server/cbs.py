@@ -24,13 +24,13 @@ Statuses (Evan, 2026-10-30), checked in this order:
 - Offboard: trained, and the last 2 claims closed since the training date both went badly.
 - Needs training: not trained, past the first 2 claims (grace), and the last 2 closed claims ended with no submit, or
   the last 2 submitted tasks were both over the Flag bar (hours, $ or reviews).
-  Also when their whole record is over the Flag bar: portal spend or portal hours per submitted task above it
-  (Evan, 2026-11-03).
+  Also when they submit under 1 in 5 claims and their whole record is over the Flag bar (portal spend or hours per
+  submitted task above it; Evan, 2026-11-03).
 - Trained: trained, fewer than 2 claims closed since.
 - Grace: 2 claims or fewer.
-- Efficient: at least one submitted task within the Efficient bar (hours and $).
-- Acceptable: at least one submitted task within the Acceptable bar (hours and $), none within the Efficient bar
-  (Evan, 2026-11-03: split out of Efficient, which until then meant the Acceptable bar).
+- Efficient: their whole record within the Efficient bar ($ and hours per submitted task).
+- Acceptable: submitted at least once and not Efficient (Evan, 2026-11-03); the reason says whether their whole
+  record is within the Acceptable bar or over it.
 - No flag: everyone else.
 A claim went badly = dropped, or submitted over the Flag bar. Nobody goes straight to Offboard without being trained.
 
@@ -207,6 +207,9 @@ def within_efficient(row):
     return row["outcome"] == "submitted" and row["hours"] is not None and row["hours"] <= eff["hours"] and row["cost"] <= eff["cost"]
 
 
+LOW_SUBMIT_RATE = 0.2  # under 1 in 5 claims submitted (with an overall record over the Flag bar): needs training
+
+
 def claims_in_bar(perf, bar):
     """Their whole record within a bar (Evan, 2026-11-03: "9 claims 1 submit is not efficient"): portal spend per
     submitted task and portal hours per submitted task both within it. Dropped claims count, since their spend and
@@ -238,17 +241,22 @@ def status_of(claims, trained_at=None):
         if len(done) >= 2 and over_flag(done[-1]) and over_flag(done[-2]):
             return "needs_training", "The last 2 submitted tasks were both over the Flag bar"
         perf, flag = performance(claims), BARS["flag"]
-        if done and (perf["spend_per_submit"] > flag["cost"] or (perf["hours_per_submit"] or 0) > flag["hours"]):
-            # Evan, 2026-11-03: "1 of 9, $1,486 per submit is crazy, it should fall to needs training"
-            return "needs_training", (f"Overall over the Flag bar: ${perf['spend_per_submit']:,.0f} and "
+        if done and perf["submit_rate"] < LOW_SUBMIT_RATE and (perf["spend_per_submit"] > flag["cost"]
+                                                              or (perf["hours_per_submit"] or 0) > flag["hours"]):
+            # Evan, 2026-11-03: "1 of 9, $1,486 per submit is crazy, it should fall to needs training" (scarano, ignax)
+            return "needs_training", (f"Submits under 1 in 5 claims ({sum(r['outcome'] == 'submitted' for r in claims)} of "
+                                      f"{len(claims)}) and over the Flag bar: ${perf['spend_per_submit']:,.0f} and "
                                       f"{perf['hours_per_submit'] or 0:.1f} h per submitted task")
     if len(claims) <= GRACE and not trained_at:
         return "grace", f"Grace period: {len(claims)} of {GRACE} tasks"
     perf = performance(claims)
     if claims_in_bar(perf, "efficient"):
         return "efficient", "Overall within the Efficient bar ($ and hours per submitted task)"
-    if claims_in_bar(perf, "acceptable"):
-        return "acceptable", "Overall within the Acceptable bar ($ and hours per submitted task)"
+    if any(r["outcome"] == "submitted" for r in claims):  # Evan, 2026-11-03: everyone else who submitted is Acceptable
+        if claims_in_bar(perf, "acceptable"):
+            return "acceptable", "Overall within the Acceptable bar ($ and hours per submitted task)"
+        return "acceptable", (f"Submitted; overall over the Acceptable bar: ${perf['spend_per_submit']:,.0f} and "
+                              f"{perf['hours_per_submit'] or 0:.1f} h per submitted task")
     return "ok", ""
 
 

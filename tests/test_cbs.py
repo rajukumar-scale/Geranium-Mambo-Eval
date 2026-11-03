@@ -74,12 +74,18 @@ class StatusTest(unittest.TestCase):
         # Efficient / Acceptable judge the whole record, $ and hours per submitted task (Evan, 2026-11-03)
         self.assertEqual(cbs.status_of([row("dropped"), row("submitted", 30, 300), row("submitted", 32, 320)])[0], "acceptable")
         self.assertEqual(cbs.status_of([row("dropped"), row("submitted", 25, 250), row("submitted", 20, 200)])[0], "efficient")
-        self.assertEqual(cbs.status_of([row("dropped"), slow, row("submitted", 25, 250)])[0], "ok")  # 42.5 h per submit
+        status, reason = cbs.status_of([row("dropped"), slow, row("submitted", 25, 250)])  # 42.5 h per submit
+        self.assertEqual(status, "acceptable")  # everyone who submitted and isn't Efficient (Evan, 2026-11-03)
+        self.assertIn("over the Acceptable bar", reason)
         # one fast task among many dropped, expensive claims: overall over the Flag bar -> needs training
         scarano = [row("dropped", cost=170, t=T0 + i * H) for i in range(8)] + [row("submitted", 20, 120, t=T0 + 9 * H)]
         status, reason = cbs.status_of(scarano)
         self.assertEqual(status, "needs_training")
-        self.assertIn("Overall over the Flag bar: $1,480", reason)
+        self.assertIn("Submits under 1 in 5 claims (1 of 9) and over the Flag bar: $1,480", reason)
+        # over the Flag bar but submitting 1 in 3: Acceptable, not needs training
+        pricey = [row("dropped", cost=400, t=T0), row("dropped", cost=400, t=T0 + H), row("submitted", 20, 300, t=T0 + 2 * H),
+                  row("submitted", 20, 300, t=T0 + 3 * H)]
+        self.assertEqual(cbs.status_of(pricey)[0], "acceptable")
 
     def test_offboard_only_after_training(self):
         before = [row("dropped", t=T0), row("dropped", t=T0 + H), row("dropped", t=T0 + 2 * H)]
@@ -115,7 +121,8 @@ class StatusTest(unittest.TestCase):
         self.assertEqual(rows[TRUSTED]["offboarded"], "2026-10-30")
 
     def test_live_claims_dont_count_as_drops(self):
-        self.assertEqual(cbs.status_of([row("submitted", 50, 400), row("dropped"), row("working")])[0], "ok")
+        # the live claim isn't a 2nd drop, so not needs training; they submitted, so Acceptable (Evan, 2026-11-03)
+        self.assertEqual(cbs.status_of([row("submitted", 50, 400), row("dropped"), row("working")])[0], "acceptable")
 
 
 class ReportTest(unittest.TestCase):
