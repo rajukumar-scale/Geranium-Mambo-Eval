@@ -32,7 +32,10 @@ async def serve(mode):
     # On its own, a meter restart waits for in-flight model calls (a review's call can stream for minutes).
     servers = {"meter": [_meter(600)], "portal": [_portal()]}.get(mode) or [_portal(), _meter(3)]
     from . import db, stallwatch
-    db.start_background(pin=mode != "meter")  # WAL checkpoints off the request path; the portal pins the database in RAM
+    # WAL checkpoints off the request path. The database pin (mlock) is OFF by default since 2026-11-03 07:34: under a
+    # boat snapshot's memory spike its 1.1 GB of locked pages couldn't be reclaimed and made the portal the OOM killer's
+    # pick. DB_PIN=1 turns it back on.
+    db.start_background(pin=mode != "meter" and os.environ.get("DB_PIN") == "1")
     stallwatch.start(asyncio.get_running_loop())
     await asyncio.gather(*(s.serve() for s in servers))
 

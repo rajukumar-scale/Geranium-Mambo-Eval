@@ -22,5 +22,9 @@ LimitNOFILE=65536
 # The portal keeps portal.db (~1 GB) locked in RAM (db._Pin), so a disk the boat snapshot saturates can't stall reads.
 LimitMEMLOCK=3G
 
+# Under memory pressure (boat snapshots use ~5 GB) the kernel kills a chat container or a snapshot process first,
+# not the portal or the meter (2026-11-03 07:34 the portal was OOM-killed).
+OOMScoreAdjust=-800
+
 [Install]
 WantedBy=multi-user.target
