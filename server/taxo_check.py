@@ -55,7 +55,7 @@ def _criteria(pasted):
     except ValueError:
         data = _lenient_criteria(pasted)
         if not data:
-            raise ValueError("That isn't the rubric's JSON. Open the rubric's JSON view in the taxonomy and paste all of it.")
+            raise ValueError("That isn't the rubric's JSON. Open the rubric's JSON view in your Outlier task and paste all of it.")
     if isinstance(data, dict):
         data = data.get("criteria", data.get("rubric", data))
     if not isinstance(data, list):
