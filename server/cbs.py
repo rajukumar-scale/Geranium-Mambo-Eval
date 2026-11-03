@@ -24,6 +24,8 @@ Statuses (Evan, 2026-10-30), checked in this order:
 - Offboard: trained, and the last 2 claims closed since the training date both went badly.
 - Needs training: not trained, past the first 2 claims (grace), and the last 2 closed claims ended with no submit, or
   the last 2 submitted tasks were both over the Flag bar (hours, $ or reviews).
+  Also when their whole record is over the Flag bar: portal spend or portal hours per submitted task above it
+  (Evan, 2026-11-03).
 - Trained: trained, fewer than 2 claims closed since.
 - Grace: 2 claims or fewer.
 - Efficient: at least one submitted task within the Efficient bar (hours and $).
@@ -205,6 +207,15 @@ def within_efficient(row):
     return row["outcome"] == "submitted" and row["hours"] is not None and row["hours"] <= eff["hours"] and row["cost"] <= eff["cost"]
 
 
+def claims_in_bar(perf, bar):
+    """Their whole record within a bar (Evan, 2026-11-03: "9 claims 1 submit is not efficient"): portal spend per
+    submitted task and portal hours per submitted task both within it. Dropped claims count, since their spend and
+    hours are divided by the submits; one fast task no longer makes someone Efficient."""
+    b = BARS[bar]
+    return (perf["submit_rate"] or 0) > 0 and perf["spend_per_submit"] <= b["cost"] \
+        and perf["hours_per_submit"] is not None and perf["hours_per_submit"] <= b["hours"]
+
+
 def went_badly(row):
     return row["outcome"] == "dropped" or over_flag(row)
 
@@ -226,12 +237,18 @@ def status_of(claims, trained_at=None):
         done = [r for r in closed if r["outcome"] == "submitted"]
         if len(done) >= 2 and over_flag(done[-1]) and over_flag(done[-2]):
             return "needs_training", "The last 2 submitted tasks were both over the Flag bar"
+        perf, flag = performance(claims), BARS["flag"]
+        if done and (perf["spend_per_submit"] > flag["cost"] or (perf["hours_per_submit"] or 0) > flag["hours"]):
+            # Evan, 2026-11-03: "1 of 9, $1,486 per submit is crazy, it should fall to needs training"
+            return "needs_training", (f"Overall over the Flag bar: ${perf['spend_per_submit']:,.0f} and "
+                                      f"{perf['hours_per_submit'] or 0:.1f} h per submitted task")
     if len(claims) <= GRACE and not trained_at:
         return "grace", f"Grace period: {len(claims)} of {GRACE} tasks"
-    if any(within_acceptable(r) for r in claims):
-        if any(within_efficient(r) for r in claims):
-            return "efficient", "Submitted a task within the Efficient bar"
-        return "acceptable", "Submitted a task within the Acceptable bar (none within the Efficient bar yet)"
+    perf = performance(claims)
+    if claims_in_bar(perf, "efficient"):
+        return "efficient", "Overall within the Efficient bar ($ and hours per submitted task)"
+    if claims_in_bar(perf, "acceptable"):
+        return "acceptable", "Overall within the Acceptable bar ($ and hours per submitted task)"
     return "ok", ""
 
 

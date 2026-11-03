@@ -71,8 +71,15 @@ class StatusTest(unittest.TestCase):
     def test_needs_training_on_two_slow_submits(self):
         slow = row("submitted", 60, 200)
         self.assertEqual(cbs.status_of([row("dropped"), slow, slow])[0], "needs_training")
-        self.assertEqual(cbs.status_of([row("dropped"), slow, row("submitted", 30, 300)])[0], "acceptable")  # 30 h, $300
-        self.assertEqual(cbs.status_of([row("dropped"), slow, row("submitted", 25, 250)])[0], "efficient")  # 25 h, $250
+        # Efficient / Acceptable judge the whole record, $ and hours per submitted task (Evan, 2026-11-03)
+        self.assertEqual(cbs.status_of([row("dropped"), row("submitted", 30, 300), row("submitted", 32, 320)])[0], "acceptable")
+        self.assertEqual(cbs.status_of([row("dropped"), row("submitted", 25, 250), row("submitted", 20, 200)])[0], "efficient")
+        self.assertEqual(cbs.status_of([row("dropped"), slow, row("submitted", 25, 250)])[0], "ok")  # 42.5 h per submit
+        # one fast task among many dropped, expensive claims: overall over the Flag bar -> needs training
+        scarano = [row("dropped", cost=170, t=T0 + i * H) for i in range(8)] + [row("submitted", 20, 120, t=T0 + 9 * H)]
+        status, reason = cbs.status_of(scarano)
+        self.assertEqual(status, "needs_training")
+        self.assertIn("Overall over the Flag bar: $1,480", reason)
 
     def test_offboard_only_after_training(self):
         before = [row("dropped", t=T0), row("dropped", t=T0 + H), row("dropped", t=T0 + 2 * H)]
