@@ -235,6 +235,9 @@ PLAN_PILOT = _list("PLAN_PILOT", "")
 # Who gets the /prompt fix helper (server/fix_helper.py): the fix-help offer from the 2nd /prompt FAIL on, its hidden
 # rules note on their answer, and the "start your Opus run" step after a pass. Same format and matching as PLAN_PILOT.
 FIX_HELPER_PILOT = _list("FIX_HELPER_PILOT", "")
+# Tool-call note after /hardness (server/toolcall_note.py, 2026-11-02): emails or Outlier IDs, "*" = everyone (the
+# default), empty = off.
+TOOLCALL_NOTE_PILOT = _list("TOOLCALL_NOTE_PILOT", "*")
 
 DEFAULT_MODEL = _get("DEFAULT_MODEL", "claude-opus-5-5")
 # Thinking effort for every run. The bundled skills pin xhigh; the portal rewrites that in its own copy.
