@@ -1598,6 +1598,76 @@ class AdminReply(BaseModel):
     text: str
 
 
+# ---- images in admin replies (Evan, 2026-11-03): point a contributor at a part of their task visually ----------------
+CHAT_IMAGE_MAX = 8 * 1024 * 1024
+CHAT_IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}  # no SVG (scripts)
+CHAT_IMAGE_NAME = re.compile(r"[0-9a-f]{32}\.(png|jpg|gif|webp)")
+
+
+def chat_images_dir(attempt_id):
+    """Kept outside the attempt folder: a handover archives or copies that, and the image links name the attempt."""
+    return config.DATA_DIR / "chat_images" / attempt_id
+
+
+def image_kind(data):
+    """The image type from its first bytes (the browser's name and content type are not trusted), or None."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+@app.post("/api/admin/chat/{attempt_id}/image")
+async def admin_chat_image(attempt_id: str, request: Request, file: UploadFile = File(...)):
+    """An image for an admin reply: stored, and its link returned for the message (Markdown ![image](link))."""
+    current_admin(request)
+    if not re.fullmatch(r"[0-9a-zA-Z]{1,64}", attempt_id) or not db.get_chat(attempt_id):
+        raise HTTPException(404, "No such chat.")
+    data = await file.read(CHAT_IMAGE_MAX + 1)
+    if len(data) > CHAT_IMAGE_MAX:
+        raise HTTPException(413, "Images can be up to 8 MB.")
+    kind = image_kind(data)
+    if not kind:
+        raise HTTPException(415, "Only PNG, JPEG, GIF or WebP images.")
+    name = f"{uuid.uuid4().hex}.{kind}"
+    folder = chat_images_dir(attempt_id)
+    await asyncio.to_thread(lambda: (folder.mkdir(parents=True, exist_ok=True), (folder / name).write_bytes(data)))
+    url = f"/api/chat-image/{attempt_id}/{name}"
+    return {"url": url, "markdown": f"![image]({url})"}
+
+
+def may_see_chat_images(request, attempt_id):
+    """Admins, the contributor signed in to that chat, and the previous holder whose archived chat came from it."""
+    if viewer_is_admin(request):
+        return True
+    session = auth.unsign(request.cookies.get(auth.USER_COOKIE, ""), config.SESSION_DAYS * 86400)
+    if not session:
+        return False
+    if session.get("attempt_id") == attempt_id:
+        return True
+    uid = session.get("user_id")
+    return bool(uid and db.one("select 1 from chats where archived_from=? and user_id=?", (attempt_id, uid)))
+
+
+@app.get("/api/chat-image/{attempt_id}/{name}")
+def chat_image(attempt_id: str, name: str, request: Request):
+    if not CHAT_IMAGE_NAME.fullmatch(name) or not re.fullmatch(r"[0-9a-zA-Z]{1,64}", attempt_id):
+        raise HTTPException(404, "Not found.")
+    if not may_see_chat_images(request, attempt_id):
+        raise HTTPException(403, "Not your chat.")
+    path = chat_images_dir(attempt_id) / name
+    if not path.is_file():
+        raise HTTPException(404, "Not found.")
+    return FileResponse(path, media_type=CHAT_IMAGE_TYPES[name.rsplit(".", 1)[1]],
+                        headers={"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff",
+                                 "Content-Security-Policy": "default-src 'none'; img-src 'self'"})
+
+
 @app.post("/api/admin/chat/{attempt_id}/reply")
 def admin_reply(attempt_id: str, body: AdminReply, request: Request):
     admin = current_admin(request)

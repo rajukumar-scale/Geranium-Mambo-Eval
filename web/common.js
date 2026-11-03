@@ -677,3 +677,11 @@ function applyTheme(theme) {
 document.querySelectorAll("[data-theme-toggle]").forEach(b =>
   b.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark")));
 applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+
+// An image in a message (an admin's screenshot): click to open it full size in a new tab.
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("click", e => {
+    const img = e.target.closest?.(".bubble img");
+    if (img && img.src && new URL(img.src, location.href).origin === location.origin) window.open(img.src, "_blank", "noopener");
+  });
+}

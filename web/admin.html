@@ -77,8 +77,11 @@
         <div class="messages" id="messages"></div>
         <div class="composer hidden" id="composer">
           <div class="inner">
-            <textarea id="reply" rows="2" placeholder="Reply to the user as Admin (Markdown). Enter to send, Shift+Enter for a new line."></textarea>
+            <div id="reply-images" class="reply-images hidden" aria-label="Images to send"></div>
+            <textarea id="reply" rows="2" placeholder="Reply to the user as Admin (Markdown). Enter to send, Shift+Enter for a new line. Paste or attach a screenshot to show them something."></textarea>
             <div class="actions">
+              <input type="file" id="reply-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+              <button type="button" id="attach" title="Attach an image (or paste one into the box)">🖼 Image</button>
               <div class="hint" id="detail-hint"></div>
               <button id="resolve">Mark resolved</button>
               <button class="primary" id="send">Send as Admin</button>

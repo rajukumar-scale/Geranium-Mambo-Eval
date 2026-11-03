@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -95,7 +96,9 @@ def _clip(text, n):
 def _admin_line(row, key):
     who = json.loads(row["meta"] or "{}").get("admin") or "an admin"
     when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(row["created_at"]))
-    return f"[portal-admin {key}] {when}, {who}: {_clip(row['content'], 1500)}"
+    # An image in the reply (![image](/api/chat-image/...)) is for the contributor's eyes; the assistant can't open it.
+    text = re.sub(r"!\[[^\]]*\]\(/api/chat-image/[^)]+\)", "[image attached by the admin]", row["content"] or "")
+    return f"[portal-admin {key}] {when}, {who}: {_clip(text, 1500)}"
 
 
 def admin_block(attempt_id, since, key):

@@ -730,6 +730,7 @@ $("#chats").addEventListener("click", e => { const row = e.target.closest("[data
 // Re-selecting the open chat (a run finished, a block changed) refreshes its header and leaves the messages alone.
 let selectSeq = 0;
 async function select(attempt) {
+  if (attempt !== S.selected) clearReplyImages();  // images attached for another chat aren't sent here
   const seq = ++selectSeq;
   const fresh = attempt !== S.selected || !S.detail;
   S.selected = attempt;
@@ -904,11 +905,59 @@ $("#detail-head").addEventListener("click", async e => {
 wireMessageClicks($("#messages"), id => S.detail.messages.find(m => m.id === id),
   m => `${S.selected}_${REPORT_FILE[m.meta.stage] || "report.md"}`);
 
+// Images in a reply (2026-11-03): pasted or attached, uploaded at once, shown as thumbnails, sent as Markdown images
+// after the text. The contributor sees them in the message; the assistant only sees "[image attached by the admin]".
+const replyImages = [];  // {url, local} for the chat being answered
+function renderReplyImages() {
+  const box = $("#reply-images");
+  box.classList.toggle("hidden", !replyImages.length);
+  box.innerHTML = replyImages.map((im, i) => `<span class="reply-image"><img src="${esc(im.local || im.url)}" alt="">${
+    im.url ? "" : '<span class="muted small">uploading…</span>'}<button type="button" class="ghost small" data-unattach="${i}" title="Remove">✕</button></span>`).join("");
+}
+async function attachImages(files) {
+  if (!S.selected) return;
+  for (const file of files) {
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) { uiAlert("Can't attach that", "Only PNG, JPEG, GIF or WebP images."); continue; }
+    if (file.size > 8 * 1024 * 1024) { uiAlert("Image too big", "Images can be up to 8 MB."); continue; }
+    const im = { url: null, local: URL.createObjectURL(file), chat: S.selected };
+    replyImages.push(im);
+    renderReplyImages();
+    try {
+      const form = new FormData();
+      form.append("file", file, file.name || "pasted.png");
+      im.url = (await api(`/api/admin/chat/${im.chat}/image`, { method: "POST", body: form })).url;
+    } catch (err) {
+      replyImages.splice(replyImages.indexOf(im), 1);
+      uiAlert("Couldn't upload the image", err.message || "Please try again.");
+    }
+    renderReplyImages();
+  }
+}
+function clearReplyImages() {
+  replyImages.forEach(im => im.local && URL.revokeObjectURL(im.local));
+  replyImages.length = 0;
+  renderReplyImages();
+}
+$("#attach").onclick = () => $("#reply-file").click();
+$("#reply-file").addEventListener("change", e => { attachImages([...e.target.files]); e.target.value = ""; });
+$("#reply").addEventListener("paste", e => {
+  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
+  if (files.length) { e.preventDefault(); attachImages(files); }
+});
+$("#reply-images").addEventListener("click", e => {
+  const b = e.target.closest("[data-unattach]");
+  if (b) { const [im] = replyImages.splice(+b.dataset.unattach, 1); if (im?.local) URL.revokeObjectURL(im.local); renderReplyImages(); }
+});
+
 async function sendReply() {
   const text = $("#reply").value.trim();
-  if (!text || !S.selected) return;
-  await api(`/api/admin/chat/${S.selected}/reply`, { json: { text } });
+  if (!S.selected || replyImages.some(im => !im.url)) return;  // wait for uploads
+  const images = replyImages.filter(im => im.chat === S.selected).map(im => `![image](${im.url})`);
+  const body = [text, ...images].filter(Boolean).join("\n\n");
+  if (!body) return;
+  await api(`/api/admin/chat/${S.selected}/reply`, { json: { text: body } });
   $("#reply").value = "";
+  clearReplyImages();
 }
 $("#send").onclick = sendReply;
 $("#reply").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); } });
