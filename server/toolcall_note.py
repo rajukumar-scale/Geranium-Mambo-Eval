@@ -1,14 +1,14 @@
 """Tool-call note after /hardness (2026-11-02, Evan): no portal stage checked the tool-call minimum, so contributors found
 out only at the platform baseline, after finishing every stage. The Opus run they upload for /hardness already shows
-its tool-call count: after a /hardness review finishes, count it (no model involved) and, when it's below or close to
-the task type's minimum, say so in the chat with a link to the Tool calls guide.
+its tool-call count: after a /hardness review finishes, count it (no model involved) and, when it's below the task
+type's minimum, say so in the chat with a link to the Tool calls guide.
 
 - Count: tool_use blocks in the saved run (Evals/task_inputs/opus/trajectory.json, the stream-json export /hardness
   reads). Subagents' own calls aren't in the export and aren't counted. Unknown formats post nothing.
 - Minimum: Normal 50 (and 100 at most), Long-Horizon 100+, from the saved assignment's "Task Type", "Horizon" or "Horizon Type" line.
   Baseline QC averages six runs; on the 174 submitted tasks with both, the uploaded run's count matched the six-run mean
-  closely (median ratio 1.02), and "below the minimum" caught all 4 tool-call baseline failures (and 9 of 12 that
-  contributors reported in chat) while flagging 9% of tasks. Within 20% above the minimum is a softer heads-up.
+  closely (median ratio 1.02), and "below the minimum" was 93% accurate: it caught all 4 tool-call baseline failures
+  (and 9 of 12 that contributors reported in chat) while flagging 9% of tasks.
 - Advice only: never changes a verdict or blocks anything. Off for admins' runs, load tests, archived chats, and anyone
   outside TOOLCALL_NOTE_PILOT ("*" = everyone, the default).
 """
@@ -21,7 +21,6 @@ from . import config, db, hub, workspace
 
 log = logging.getLogger("portal.toolcall_note")
 
-CLOSE = 1.2  # within 20% above the minimum: the six-run average can dip under it
 TRAJECTORY = "opus/trajectory.json"
 ASSIGNMENT = "00_Task_Assigned_Inputs.md"
 GUIDE = "[Tool calls guide](/?guide=toolcalls)"
@@ -70,23 +69,16 @@ def in_pilot(chat):
 
 
 def note_text(n, kind):
-    if kind == "long-horizon":
-        low, label, rng = 100, "Long-Horizon", "100+"
-    else:
-        low, label, rng = 50, "Normal", "50–100"
-    if n < low:
-        return (f"⚠ **Tool calls: your Opus run made {n}.** A {label} task needs **{rng}** on average across the six "
-                f"baseline runs, so the baseline would likely fail the tool-call check. Plan more record-level work "
-                f"before /oe and /rubric: see the {GUIDE}.")
-    if n < low * CLOSE:
-        return (f"Heads up: **your Opus run made {n} tool calls**, close to the {label} minimum of {low}. The baseline "
-                f"averages six runs and runs vary, so it could dip under. Consider adding record-level work now, before "
-                f"/oe and /rubric: see the {GUIDE}.")
-    if kind == "normal" and n > 100:
-        return (f"Heads up: **your Opus run made {n} tool calls**, above the Normal range of 50–100 that baseline QC "
-                f"checks. If the six baseline runs average over 100, the task may need trimming or a Long-Horizon "
-                f"assignment: see the {GUIDE}.")
-    return None
+    """The warning when the run is below the task type's minimum, else None. Measured 2026-11-02 on 174 submitted tasks
+    against their real six-run baseline: 93% accurate, caught 4/4 tool-call failures, about 1 in 4 warned tasks really
+    failed (so "at risk", not "will fail"). A softer "close to the minimum" band added 55 false alarms and no catches,
+    so there is none."""
+    low, label, rng = (100, "Long-Horizon", "100+") if kind == "long-horizon" else (50, "Normal", "50–100")
+    if n >= low:
+        return None
+    return (f"⚠ **Tool calls: your Opus run made {n}.** A {label} task needs **{rng}** on average across the six "
+            f"baseline runs, so this task is at risk of failing the baseline's tool-call check. Better to fix it now, "
+            f"before /oe and /rubric: plan more record-level work with the {GUIDE}.")
 
 
 def after_review(chat, run, status):

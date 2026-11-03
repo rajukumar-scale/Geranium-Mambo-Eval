@@ -1,5 +1,5 @@
 """Tool-call note after /hardness (server/toolcall_note.py, 2026-11-02): counts the uploaded Opus run's tool calls and
-warns when they're below or close to the task type's minimum. Advice only, never for admins or with the flag off."""
+warns when they're below the task type's minimum. Advice only, never for admins or with the flag off."""
 
 import json
 import tempfile
@@ -47,16 +47,15 @@ class CountTest(unittest.TestCase):
         self.assertEqual(tn.task_type("📋 Horizon Type\nlong-horizon\n"), "long-horizon")
         self.assertIsNone(tn.task_type("Persona: Frederick"))
 
-    def test_note_bands(self):
-        self.assertIn("would likely fail", tn.note_text(61, "long-horizon"))
-        self.assertIn("close to the Long-Horizon minimum of 100", tn.note_text(109, "long-horizon"))
-        self.assertIsNone(tn.note_text(140, "long-horizon"))
-        self.assertIn("would likely fail", tn.note_text(40, "normal"))
-        self.assertIn("close to the Normal minimum of 50", tn.note_text(55, "normal"))
-        self.assertIsNone(tn.note_text(80, "normal"))
-        self.assertIn("above the Normal range", tn.note_text(130, "normal"))
+    def test_note_only_below_the_minimum(self):
+        self.assertIn("at risk of failing", tn.note_text(61, "long-horizon"))
+        self.assertIn("**100+**", tn.note_text(99, "long-horizon"))
+        self.assertIsNone(tn.note_text(100, "long-horizon"))
+        self.assertIsNone(tn.note_text(109, "long-horizon"))
+        self.assertIn("at risk of failing", tn.note_text(40, "normal"))
+        self.assertIsNone(tn.note_text(50, "normal"))
+        self.assertIsNone(tn.note_text(130, "normal"))
         self.assertIn("(/?guide=toolcalls)", tn.note_text(10, "normal"))
-
 
 class AfterReviewTest(unittest.TestCase):
     def setUp(self):
