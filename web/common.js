@@ -76,11 +76,11 @@ function fmtAgo(t) {
 // Active = neither idle (still theirs, no work for a while) nor archived (submitted, released, or with someone else);
 // those two only show under their own chips. pick = the admin page's funnel pick: count and list everything in it.
 const CHAT_SORTS = [["recent", "Latest activity"], ["spend", "Highest spend"]];
-const CHAT_CHIPS = [["all", "Active"], ["running", "Running"], ["admin", "/admin open"], ["passed", "Passed"], ["flagged", "Blocked / flagged"],
+const CHAT_CHIPS = [["all", "Active"], ["running", "Running"], ["admin", "/admin open"], ["budget", "Over budget"], ["passed", "Passed"], ["flagged", "Blocked / flagged"],
   ["idle", "Idle"], ["archived", "Archived"]];
 const chipMatch = (chip, c, pick = false) => chip === "archived" ? !!c.archived : chip === "idle" ? !c.archived && c.idle_days != null
   : (pick || !c.archived) && ((chip === "all" && (pick || c.idle_days == null))
-  || (chip === "running" && c.running) || (chip === "admin" && c.admin_open)
+  || (chip === "running" && c.running) || (chip === "admin" && c.admin_open) || (chip === "budget" && c.budget_open)
   || (chip === "passed" && c.passes > 0) || (chip === "flagged" && (c.blocked || c.disabled || c.over)));
 const ARCHIVE_TIPS = { submitted: "They submitted this task after their last work here", released: "They no longer hold this task and didn't submit it",
   "with someone else": "This task is now with another contributor" };
@@ -131,7 +131,8 @@ function chatRowHtml(c, { attr, current = false, god = false, preview = "" }) {
     : `<span class="cr-none">no reviews yet</span>`;
   const badges = [
     c.admin_open && `<span class="badge alert" title="Open /admin request">● /admin</span>`,
-    c.over && `<span class="badge flag" title="This attempt is over the spend limit">⚑ over</span>`,
+    c.budget_open ? `<span class="badge flag" title="At or over its $${esc(Math.round(c.budget_limit || 0))} budget, no increase approved yet: new reviews and replies are paused">⚑ over budget</span>`
+      : c.over && `<span class="badge" title="Reached its budget earlier; an admin approved more">⚑ budget raised</span>`,
     c.archived_from ? `<span class="badge" title="The task was re-assigned: this is the earlier holder's chat for attempt ${esc(c.archived_from)}, kept read-only">🗄 archived · earlier holder</span>`
       : c.archived && `<span class="badge archived" title="${esc(ARCHIVE_TIPS[c.archived] || "")}">🗄 ${esc(c.archived)}</span>`,
     c.idle_days != null && `<span class="badge idle" title="Still theirs, but no review or edit for ${esc(c.idle_days)} days">⏸ idle ${Math.floor(c.idle_days)}d</span>`,

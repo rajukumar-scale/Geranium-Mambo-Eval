@@ -581,7 +581,7 @@ async function loadChats() {
   const st = res.stats_24h;
   $("#stats").innerHTML = `<span class="sb-label">Last 24 h</span><span>${st.runs} runs · ${fmtInt(st.calls)} model calls · ~$${Number(st.cost).toFixed(2)}</span>
     <span class="sb-label">Now</span><span>${res.running} running · ${res.queued} queued</span>`
-    + (res.spend_limit && res.flagged ? `<span class="chip flag">⚑ ${res.flagged} attempt${res.flagged === 1 ? "" : "s"} over the $${res.spend_limit} limit</span>` : "");
+    + (res.spend_limit && res.budget_open ? `<span class="chip flag">⚑ ${res.budget_open} chat${res.budget_open === 1 ? "" : "s"} over budget, waiting for an increase</span>` : "");
   $("#slack").textContent = res.slack ? "Slack alerts on" : "Slack alerts off";
   $("#slack").className = "slack-status " + (res.slack ? "on" : "off");
   renderFunnel(res.steps);
@@ -696,7 +696,21 @@ function renderAdminRequests() {
   const n = openRequests().length;
   $("#adminreq-n").textContent = n;
   $("#adminreq-btn").classList.toggle("alert", n > 0);
+  const b = (S.chats || []).filter(c => c.budget_open).length;  // over budget, no increase approved yet
+  $("#budgetreq-n").textContent = b;
+  $("#budgetreq-btn").classList.toggle("alert", b > 0);
 }
+$("#budgetreq-btn").onclick = () => {
+  S.funnelPick = null;
+  saveChatListPrefs({ chip: "budget" });
+  const search = $("#list-tools .list-search");
+  if (search) search.value = "";
+  if (S.steps) renderFunnel(S.steps);
+  renderChats();
+  $("#chats").scrollTop = 0;
+  const first = $("#chats [data-a]");
+  if (first && !(S.chats || []).some(c => c.budget_open && c.attempt_id === S.selected)) select(first.dataset.a);
+};
 $("#adminreq-btn").onclick = () => {
   S.funnelPick = null;
   saveChatListPrefs({ chip: "admin" });

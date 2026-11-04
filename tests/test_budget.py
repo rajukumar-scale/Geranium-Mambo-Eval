@@ -100,6 +100,27 @@ class BudgetTest(unittest.TestCase):
         asyncio.run(spend.check_limit("a1"))  # no repeat for the same budget
         self.assertEqual(len(db.q("select 1 from messages where attempt_id='a1' and meta like '%spend_flag%'")), 2)
 
+    def test_the_admin_list_shows_who_is_waiting_for_an_increase(self):
+        """Evan, 2026-11-04: the chats over their budget with no increase approved yet, counted and filterable."""
+        def admin_list():
+            portal._admin_chats_cache.update(data=None, at=0.0)  # the list is cached for a few seconds
+            r = self.client(admin=True).get("/api/admin/chats")
+            self.assertEqual(r.status_code, 200, r.text)
+            return r.json()["budget_open"], {c["attempt_id"]: c for c in r.json()["chats"]}["a1"]
+        n, row = admin_list()
+        self.assertEqual((n, row["budget_open"]), (0, False))
+        self.spent(405.0)
+        asyncio.run(spend.check_limit("a1"))
+        n, row = admin_list()
+        self.assertEqual((n, row["budget_open"], row["budget_limit"]), (1, True, 400.0))
+        spend.approve("a1", 100, "evan@scale.com")  # approved: no longer waiting, even though it was flagged
+        n, row = admin_list()
+        self.assertEqual((n, row["budget_open"], row["budget_limit"]), (0, False, 505.0))
+        self.assertIsNotNone(row["spend_flag"])
+        self.spent(101.0, rid="r1")  # used the raise up too: waiting again
+        self.assertEqual(admin_list()[0], 1)
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1374,6 +1374,7 @@ def _build_admin_chats():
         rows = _chat_list_rows()
         flagged = spend.flagged_attempts()
         totals = spend.attempt_totals()
+        raised = {r["attempt_id"]: r["limit_usd"] or 0 for r in db.q("select attempt_id, limit_usd from attempt_budget")}
         all_blocks = blocks.everything()
         states = _chat_states()
         for r in rows:
@@ -1385,13 +1386,20 @@ def _build_admin_chats():
             r["disabled"] = any((blocks.PERSON, k) in all_blocks for k in blocks.person_keys(r["user_id"], r["email"]))
             hit = flagged.get(r["attempt_id"])
             r["spend_flag"] = {"spend_usd": hit["spend_usd"], "flagged_at": hit["flagged_at"]} if hit else None
+            # waiting for a budget increase: at or over this attempt's budget (the base, or what an admin approved),
+            # still the holder's live chat (not archived, re-served or finished)
+            limit = max(config.CB_SPEND_LIMIT_USD or 0, raised.get(r["attempt_id"], 0)) if config.CB_SPEND_LIMIT_USD else 0
+            r["budget_limit"] = limit
+            r["budget_open"] = bool(limit and r["spend_usd"] >= limit and not r.get("archived_from") and not r["archived"]
+                                    and r.get("task_id") != "loadtest")
         since = time.time() - 86400
         stats = db.one("select count(*) runs, coalesce(sum(cost_estimate),0) cost, coalesce(sum(calls),0) calls "
                        "from runs where created_at>?", (since,))
         running = db.one("select count(*) n from runs where status='running'")["n"]
         steps = step_funnel(states)
     return {"chats": rows, "stats_24h": stats, "running": running, "slack": notify.configured(),
-            "spend_limit": config.CB_SPEND_LIMIT_USD, "flagged": len(flagged), "steps": steps}
+            "spend_limit": config.CB_SPEND_LIMIT_USD, "flagged": len(flagged),
+            "budget_open": sum(1 for r in rows if r["budget_open"]), "steps": steps}
 
 
 class BustAdminChats:
