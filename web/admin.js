@@ -800,7 +800,8 @@ function renderDetail(fresh = true) {
     <td>${stopping(r) ? "stopping…" : esc(r.status)}${r.error && !stopping(r) ? ` <span class="muted">(${esc(r.error)})</span>` : ""}</td><td>${r.verdict ? pill(r.verdict) : ""}</td>
     <td>${fmtInt(r.calls)}</td><td>${fmtInt((r.input_tokens || 0) + (r.output_tokens || 0) + (r.cache_read_tokens || 0) + (r.cache_creation_tokens || 0))}</td>
     <td>$${Number(r.cost_estimate || 0).toFixed(2)}</td>
-    <td><a href="/api/admin/runs/${r.id}/log">log</a>${["queued", "running"].includes(r.status) && !stopping(r) ? ` · <a href="#" data-cancel="${r.id}">cancel</a>` : ""}</td></tr>`).join("");
+    <td><a href="/api/admin/runs/${r.id}/log">log</a>${["queued", "running"].includes(r.status) && !stopping(r) ? ` · <a href="#" data-cancel="${r.id}">cancel</a>` : ""}${
+      r.kind === "review" && r.status === "done" && !r.verdict ? ` · <a href="#" data-recover="${r.id}" title="It finished but no report card was posted: post its report (and pass card) from the saved report file">recover report</a>` : ""}</td></tr>`).join("");
   // A request can be a whole pasted SQL file: show one line, the full text in its own scroll box on demand.
   const openReqs = fresh ? new Set() : new Set([...document.querySelectorAll("#detail-head details[data-req][open]")].map(e => e.dataset.req));
   const requests = d.admin_requests.filter(r => r.status === "open").map(r => {
@@ -881,6 +882,16 @@ document.addEventListener("input", e => { if (e.target.id === "ov-reason") (S.la
 document.addEventListener("change", e => { if (e.target.name === "ov-pick") (S.lastOverride = S.lastOverride || {}).index = +e.target.value; });
 
 $("#detail-head").addEventListener("click", async e => {
+  const rec = e.target.closest("[data-recover]");
+  if (rec) {
+    e.preventDefault();
+    try {
+      const out = await api(`/api/admin/runs/${rec.dataset.recover}/recover-report`, { method: "POST" });
+      uiAlert("Report recovered", `Posted the report (${esc(out.verdict || "no verdict")}${out.score != null ? ", score " + out.score : ""})${out.pass ? " and its pass card" : ""} in the chat.`);
+      await select(S.selected);
+    } catch (err) { uiAlert("Couldn't recover it", err.message || "Please try again."); }
+    return;
+  }
   if (e.target.closest("[data-budget]")) {
     const sp = S.detail.spend || {};
     const shown = uiDialog({ title: "Approve more budget", ok: "Approve", cancel: "Cancel", html: `<p style="margin-top:0">

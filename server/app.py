@@ -1730,6 +1730,19 @@ def admin_resolve(attempt_id: str, request: Request):
     return {"ok": True}
 
 
+@app.post("/api/admin/runs/{run_id}/recover-report")
+def admin_recover_report(run_id: str, request: Request):
+    """A finished review whose report the portal missed (e.g. a restart in the seconds it finished): post it, and
+    its pass card if it passed (Runner.recover_report)."""
+    admin = current_admin(request)
+    try:
+        out = RUNNER.recover_report(run_id)
+    except ValueError as error:
+        raise HTTPException(409, str(error))
+    log.info("admin %s recovered the report of run %s", admin["email"], run_id)
+    return out
+
+
 @app.post("/api/admin/runs/{run_id}/cancel")
 async def admin_cancel(run_id: str, request: Request):
     current_admin(request)

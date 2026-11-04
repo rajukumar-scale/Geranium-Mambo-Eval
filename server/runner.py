@@ -118,6 +118,25 @@ INJECTION_STALE = re.compile(
     r"(?:loaded|in the run|in the sandbox)", re.I)
 
 
+def _before_path(attempt_id, run_id):
+    return workspace.attempt_dir(attempt_id) / "logs" / f"{run_id}.before.json"
+
+
+def save_before(attempt_id, run_id, snapshot):
+    try:
+        _before_path(attempt_id, run_id).write_text(json.dumps(snapshot))
+    except OSError:
+        log.warning("couldn't save the report snapshot for run %s", run_id)
+
+
+def load_before(attempt_id, run_id):
+    """The run's start-time report snapshot, else (an older run) the current one."""
+    try:
+        return json.loads(_before_path(attempt_id, run_id).read_text())
+    except (OSError, ValueError):
+        return workspace.report_snapshot(attempt_id)
+
+
 def date_note(attempt_id):
     """The task date as saved right now, for every chat reply. Set with the portal's date picker, it never reached a
     resumed chat session: the assistant went on asking for it from memory, ~18 replies with no lookups (2026-11-03,
@@ -427,8 +446,12 @@ class Runner:
             self.pool_of[run_id] = "boat"
             self.activity[run_id] = []
             proxy.ACTIVE_TOKENS[run["proxy_token"]] = run_id
+            # The reports as they were when the review STARTED (saved by _spawn_boat). A fresh snapshot here was wrong when
+            # the old process had already copied the finished review's files back before it stopped: the new report
+            # was in the "before" set, so the run looked report-less and its PASS never got a card (2026-11-04 05:09
+            # deploy, attempt 6adfee3a4b2b…).
             outcome = {"events": 0, "result": None, "texts": [], "init": False, "stderr_tail": "",
-                       "before": workspace.report_snapshot(attempt)}  # server-side reports only change when a run ends
+                       "before": load_before(attempt, run_id)}
             deadline = (run["started_at"] or time.time()) + config.RUN_TIMEOUT_MIN * 60
             outcome = await self._follow_boat(run_id, attempt, run["runner_box"], run["proxy_token"], outcome,
                                               deadline, replay=True)
@@ -976,6 +999,7 @@ class Runner:
         box = payload = None
         try:
             outcome["before"] = workspace.report_snapshot(attempt)
+            save_before(attempt, run_id, outcome["before"])
             run = db.get_run(run_id)
             if run.get("loadtest"):
                 report = workspace.read_report(LOADTEST_REPORT_FROM, "0_injection.md") or ""
@@ -1413,6 +1437,58 @@ class Runner:
         self._stale_notice(attempt, run_id)
         self.activity.pop(run_id, None)
         await self._check_spend(attempt)
+
+    def recover_report(self, run_id):
+        """Post a finished review's report that the portal missed (no card, no pass), through the same path as
+        _complete. Only the report of the run's own command, written while the run was going, not posted before, and
+        with no input changed since it was written. Returns what was posted, or raises ValueError with the reason."""
+        run = db.get_run(run_id)
+        if not run or run["kind"] != "review" or run["status"] != "done":
+            raise ValueError("Only a finished review can be recovered.")
+        if run.get("report_stage"):
+            raise ValueError("This review already has its report.")
+        attempt, chat = run["attempt_id"], db.get_chat(run["attempt_id"])
+        name = next((n for n, s in workspace.STAGE_BY_FILE.items() if s == run["command"]), None)
+        path = workspace.task_inputs(attempt) / "reports" / (name or "-")
+        if not name or not path.is_file():
+            raise ValueError(f"No /{run['command']} report file.")
+        written = path.stat().st_mtime
+        if not ((run["started_at"] or 0) <= written <= (run["finished_at"] or 0) + 300):
+            raise ValueError("The report on disk wasn't written by this review.")
+        text = workspace.read_report(attempt, name)
+        info = workspace.parse_report(run["command"], text)
+        info.pop("parsed", None)
+        if db.one("select 1 from messages where attempt_id=? and role='report' and meta like ?",
+                  (attempt, f'%"sha256": "{info["sha256"]}"%')):
+            raise ValueError("That report was already posted.")
+        changed = [i["key"] for i in workspace.saved_inputs(attempt) for f in i["files"]
+                   if (p := workspace.task_inputs(attempt) / (f.get("path") or "").removeprefix("Evals/task_inputs/")).is_file()
+                   and p.stat().st_mtime > written]
+        if changed:
+            raise ValueError(f"Inputs changed after the report was written ({', '.join(sorted(set(changed)))}): "
+                             "it no longer matches them, so run the review again.")
+        info["file"] = name
+        info["fingerprint"] = fingerprint.for_attempt(attempt, run["command"])
+        msg = db.add_message(attempt, "report", text, {"run_id": run_id, **info, "recovered": True})
+        hub.publish(attempt, "message", msg)
+        db.update("runs", "id", run_id, report_stage=run["command"], report_file=name, report_sha=info["sha256"],
+                  verdict=info.get("verdict"), score=info.get("score"), exec_status=info.get("exec_status"))
+        if chat.get("pending_review_run") == run_id:
+            db.update("chats", "attempt_id", attempt, pending_review_run=None)
+        try:
+            rerun_guard.record(run_id, attempt, run["command"])
+        except Exception:  # noqa: BLE001
+            log.exception("recording the graded inputs failed for %s", run_id)
+        out = {"verdict": info.get("verdict"), "score": info.get("score"), "pass": False}
+        if config.passing(run["command"], info.get("verdict")) and info.get("exec_status") == "COMPLETE":
+            payload = proofs.create(db.get_run(run_id), chat, info | {"stage": run["command"]},
+                                    inputs=staleness.snapshot(attempt))
+            pmsg = db.add_message(attempt, "proof", f"{payload['stage']} {payload['verdict']}", payload)
+            hub.publish(attempt, "message", pmsg)
+            hub.publish(attempt, "proof", payload)
+            out.update(passed=True, code=payload.get("code"), **{"pass": True})
+        log.info("recovered the /%s report of run %s (%s %s)", run["command"], run_id, info.get("verdict"), info.get("score"))
+        return out
 
     def _stale_notice(self, attempt, run_id):
         """Any run can change saved inputs (a follow-up saving a fix, a review saving what was pasted with it):
