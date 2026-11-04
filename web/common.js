@@ -411,7 +411,7 @@ function injectGuideHtml({ lead = "", check, ok, cancel = "Close" }) {
         ran it in this sandbox (or since your last Opus run), don't run the new version on top of the old one, and don't try to
         delete the old rows by hand: inserts with the same ids fail and updates apply twice, so the run still won't match your task.</p>
         <p>Open the <b>Settings</b> tab (1), keep <b>Universe this environment was deployed with</b> selected, and press
-        <b>Redeploy Environment</b> (2). It takes about 5 minutes and gives you a clean sandbox from the plain universe. Then run
+        <b>Redeploy Environment</b> (2). It can take about 30 minutes and gives you a clean sandbox from the plain universe. Then run
         your <b>current</b> SQL once (steps 1–4 above), check <b>_changelog</b>, and make your Opus run there.</p>
         <img src="/static/img/inject_5_redeploy.png" alt="Settings tab (1), then Redeploy Environment (2)" loading="lazy"></div>
       ${check ? `<label class="taxo-check"><input type="checkbox"> ${esc(check)}</label>` : ""}
@@ -470,7 +470,7 @@ function envGuideHtml() {
           </ul>
           <p class="taxo-note">If it says <i>your browser can't reach the environment's host</i>, turn off your VPN or ad-blocker for the site, then refresh.</p></li>
         <li><p><b>Redeploy the sandbox.</b> Open the <b>Settings</b> tab (1), keep <b>Universe this environment was deployed with</b> selected,
-          and press <b>Redeploy Environment</b> (2). Wait until it finishes (about 5 minutes); don't press it again meanwhile.</p>
+          and press <b>Redeploy Environment</b> (2). It can take about <b>30 minutes</b>: wait until it finishes and don't press it again meanwhile.</p>
           <img src="/static/img/inject_5_redeploy.png" alt="Settings tab (1), then Redeploy Environment (2)" loading="lazy"></li>
         <li><p><b>Run your injection SQL again</b> in the new sandbox: it starts from the plain universe, so your records are gone.
           Paste your <b>current</b> SQL in <b>Database → Query</b>, press <b>Run Query</b> once, and check <b>Tables → _changelog</b>.
