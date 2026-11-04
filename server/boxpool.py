@@ -59,7 +59,7 @@ def _get_lock():
 
 
 def enabled():
-    return config.BOX_REUSE_MAX > 0 and config.REVIEW_RUNNER != "modal"  # a Modal sandbox starts in seconds: no reuse
+    return config.BOX_REUSE_MAX > 0 and config.REVIEW_RUNNER != "modal"
 
 
 def machines():

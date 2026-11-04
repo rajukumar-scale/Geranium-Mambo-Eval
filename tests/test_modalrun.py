@@ -23,7 +23,7 @@ class FakeModalProxy:
     """A virtual sandbox filesystem behind the endpoints modalrun uses (one sandbox is enough here)."""
 
     def __init__(self):
-        self.files = {}  # path -> bytes
+        self.files = {}
         self.requests = []
         self.terminated = []
 
@@ -110,7 +110,7 @@ class MachineContractTest(ModalTest):
         data = os.urandom(3500)
         src, dst = self.tmp / "in.bin", self.tmp / "out.bin"
         src.write_bytes(data)
-        with mock.patch.object(modalrun, "CHUNK", 1000):  # several chunks
+        with mock.patch.object(modalrun, "CHUNK", 1000):
             asyncio.run(modalrun.scp_to("sb-test", src, "/tmp/payload.tgz"))
             self.assertEqual(self.fake.files["/tmp/payload.tgz"], data)
             asyncio.run(modalrun.scp_from("sb-test", "/tmp/payload.tgz", dst))
@@ -160,15 +160,15 @@ class PollTest(ModalTest):
                  {"type": "assistant", "message": {"content": [{"type": "text", "text": "Reviewing the oracle events"}]}},
                  {"type": "result", "subtype": "success", "total_cost_usd": 1.5}]
         stream = "".join(json.dumps(x) + "\n" for x in lines).encode()
-        self.fake.files["/tmp/out.jsonl"] = stream[:40]  # a review mid-line
+        self.fake.files["/tmp/out.jsonl"] = stream[:40]
         calls = {"n": 0}
 
         async def sleep(seconds):
             calls["n"] += 1
             if calls["n"] == 1:
-                self.fake.files["/tmp/out.jsonl"] = stream  # the rest arrives
+                self.fake.files["/tmp/out.jsonl"] = stream
             elif calls["n"] == 2:
-                self.fake.files["/tmp/claude.exit"] = b"0\n"  # then the review ends
+                self.fake.files["/tmp/claude.exit"] = b"0\n"
 
         outcome = self.poll(sleep)
         self.assertEqual(outcome["events"], 3)
@@ -300,16 +300,16 @@ class SpawnTest(unittest.TestCase):
         self.assertIn("ANTHROPIC_BASE_URL=https://meter.example", self.uploads["run.env"])
         self.assertIn("ANTHROPIC_AUTH_TOKEN=evp-", self.uploads["run.env"])
         self.assertNotIn("sk-secret-key", self.uploads["run.env"])
-        self.assertEqual(self.uploads["proxy_host"], "")  # no iptables lock on Modal (gVisor has none)
+        self.assertEqual(self.uploads["proxy_host"], "")
         self.assertEqual(self.calls, ["create", "upload /tmp/payload.tgz", "upload /tmp/evp_bundle.tgz", "universe sb-1",
                                       "start sb-1", "follow sb-1"])
 
     def test_a_retried_start_doesnt_load_the_universe_again_but_a_new_machine_does(self):
-        self.run_spawn(["not yet", "STARTED"])  # a retried start on the same machine
+        self.run_spawn(["not yet", "STARTED"])
         self.assertEqual([c for c in self.calls if c.startswith(("universe", "start"))],
                          ["universe sb-1", "start sb-1", "start sb-1"])
         self.calls.clear()
-        self.run_spawn(["CLAUDE_NOT_READY", "STARTED"])  # that machine is replaced
+        self.run_spawn(["CLAUDE_NOT_READY", "STARTED"])
         self.assertEqual([c for c in self.calls if c.startswith(("universe", "start", "delete"))],
                          ["universe sb-1", "start sb-1", "delete sb-1", "universe sb-2", "start sb-2"])
 

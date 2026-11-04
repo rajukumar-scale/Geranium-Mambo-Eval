@@ -331,7 +331,7 @@ def deploy_pending():
         return False
 
 
-REMOTE_RUNNERS = ("boat", "modal")  # reviews on their own machine: a boat box or a Modal sandbox
+REMOTE_RUNNERS = ("boat", "modal")
 
 
 def remote_reviews():
@@ -1029,7 +1029,7 @@ class Runner:
             modal = config.REVIEW_RUNNER == "modal"
             machines = remote()
             payload = await asyncio.to_thread(boatrun.build_payload, run_id, attempt, prompt, args, env, extra, scratch,
-                                              bundle, restrict_egress=not modal)  # no iptables on Modal (config.py)
+                                              bundle, restrict_egress=not modal)
             self._push_activity(run_id, attempt, "🚤 Starting a fresh review machine")
 
             async def upload_bundle():
@@ -1051,8 +1051,6 @@ class Runner:
             universe_ready = False
 
             async def load_universe():
-                # No universe snapshot on Modal yet (modal-proxy's snapshot call times out at 26 GB): download this
-                # task's universe (its saved date, else both) into the new sandbox, about 7 minutes for one.
                 nonlocal universe_ready
                 which = {"normal": "Normal", "synthcut": "SynthCut"}.get(workspace.universe_date(attempt), "Normal SynthCut")
                 if not modalrun.active_snapshot()[1]:
@@ -1081,7 +1079,7 @@ class Runner:
                     box = None
                     raise RuntimeError(CANCELLED)
                 try:
-                    universe_ready = False  # a new machine: its universe isn't there yet
+                    universe_ready = False
                     uploads = [boatrun.retrying("upload", lambda: machines.scp_to(box, payload, "/tmp/payload.tgz"), tries=3)]
                     if not boxpool.has_bundle(box, bundle.name):  # a reused box keeps the bundle of its last review
                         uploads.append(upload_bundle())
@@ -1133,7 +1131,7 @@ class Runner:
             if replay:
                 self._push_activity(run_id, attempt, "↺ Server updated; reconnected to the review machine")
             with open(log_path, "w" if replay else "a", encoding="utf-8") as raw_log:
-                if modal:  # no streaming exec on modal-proxy: poll the output file instead of `tail -F` over ssh
+                if modal:
                     await self._poll_modal(run_id, attempt, box, raw_log, outcome, deadline)
                 for reconnect in range(0 if modal else 30):
                     if cancelled():
@@ -1240,11 +1238,11 @@ class Runner:
             offset += len(chunk)
             feed(chunk)
             if chunk:
-                continue  # more may already be waiting
+                continue
             rc, status = await modalrun.ssh(box, "cat /tmp/claude.exit 2>/dev/null || echo RUNNING", timeout=120)
             last = status.strip().splitlines()[-1].strip() if status.strip() else ""
             if last.lstrip("-").isdigit():
-                while True:  # whatever was written between the last read and the exit
+                while True:
                     chunk = await modalrun.read_from(box, "/tmp/out.jsonl", offset)
                     if not chunk:
                         break

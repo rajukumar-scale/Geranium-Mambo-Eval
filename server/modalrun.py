@@ -31,7 +31,7 @@ log = logging.getLogger("portal.modal")
 
 S2SAUTH_URL = "https://s2sauth.internal.scale.com"
 STS_URL = "https://sts.us-west-2.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15"
-CHUNK = 6 * 1024 * 1024  # bytes per exec when reading a file back (base64 grows it by a third)
+CHUNK = 6 * 1024 * 1024
 _jwt = {"token": None, "at": 0.0}
 _client = None
 
@@ -80,18 +80,18 @@ async def api(method, path, *, json_body=None, params=None, content=None, timeou
 
 def _create_body(image_id, timeout, tags, universe_id=None):
     body = {
-        "image": config.MODAL_BASE_IMAGE,          # authorizes the snapshot; the review boots from image_id
+        "image": config.MODAL_BASE_IMAGE,
         "snapshot_image_id": image_id,
-        "tunnel_port": 8080,                       # required by the API; nothing listens on it
+        "tunnel_port": 8080,
         "timeout": timeout,
         "cpu": config.MODAL_CPU,
         "memory": config.MODAL_MEMORY_MB,
-        "idle_timeout": 30 * 60,                   # the platform cap; the runner's polling execs keep it alive
-        "project_id": config.MODAL_PROJECT_ID,     # Modal spend is attributed to this project (AGENTS.md)
+        "idle_timeout": 30 * 60,
+        "project_id": config.MODAL_PROJECT_ID,
         "product": "atlas-eval",
         "tags": {"app": "atlas-eval", **tags},
     }
-    if universe_id:  # the universes, mounted where the base image's /work/Universe_* symlinks point
+    if universe_id:
         body["directory_snapshots"] = [{"snapshot_image_id": universe_id, "mount_path": UNIVERSE_MOUNT}]
     return body
 
@@ -112,7 +112,7 @@ async def create_box(tags=None):
     base, universe = active_snapshot()
     if not base:
         raise RuntimeError("no Modal review image yet: build one with modalrun.build_template()")
-    timeout = config.RUN_TIMEOUT_MIN * 60 + 1800  # backstop if the server dies mid-run, as with boat's ttl
+    timeout = config.RUN_TIMEOUT_MIN * 60 + 1800
     created = await api("POST", "/sandbox", json_body=_create_body(base, timeout, tags or {}, universe or None),
                         timeout=600)
     return created["sandbox_id"]
@@ -186,14 +186,7 @@ def kill(proc):
     return None
 
 
-# Builds the review image in a fresh sandbox, as deploy/build_runner_template.sh does on a boat box, in two
-# parts: BASE_SH (Claude Code, the tools, the `runner` user, /work/Universe_* symlinks into UNIVERSE_MOUNT),
-# snapshotted as the filesystem; then UNIVERSE_SH (the universes under UNIVERSE_MOUNT), snapshotted as a directory.
-# Runs as root (no sudo in the base image; sudo is installed for run.sh).
 UNIVERSE_MOUNT = "/universe"
-# How long modal-proxy may let Modal take over a snapshot (its maximum). Needs the modal-proxy change that passes
-# `timeout` through (phase0-sandbox-eval/modal-proxy-snapshot-timeout.patch); until it's deployed the field is
-# ignored, the universe snapshot times out at Modal's 55s default, and reviews download the universe at start.
 SNAPSHOT_TIMEOUT = 30 * 60
 
 BASE_SH = r"""#!/usr/bin/env bash
