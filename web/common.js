@@ -443,6 +443,7 @@ const INJECT_AFTER_LEAD = {
     blue box below), run your current SQL there, make a new Opus run, upload it, and send /hardness again.</p>`,
 };
 function showInjectGuideAfterHardness(kind = "missing") {
+  if (kind === "steps") return showInjectGuide({ ok: "Got it", cancel: "Close" });
   return showInjectGuide({ lead: INJECT_AFTER_LEAD[kind] || INJECT_AFTER_LEAD.missing, ok: "Got it", cancel: "Close" });
 }
 if (typeof document !== "undefined" && document.addEventListener) {
@@ -451,6 +452,50 @@ if (typeof document !== "undefined" && document.addEventListener) {
     if (b) { e.preventDefault(); showInjectGuideAfterHardness(b.dataset.injectguide || "missing"); }
   });
 }  // their pass screen reminds them to inject in every sandbox
+// "Sandbox not working?" (Evan, 2026-11-04): Snapshot failed (502), a run stuck at Loading data, 500s, an expired
+// environment. Same fix almost every time: hard refresh, then Settings → Redeploy Environment, then the SQL again.
+// Opens on the reply to an /admin request that reads like one (server/env_help.py) and from its button.
+function envGuideHtml() {
+  const keys = (...k) => k.map(x => `<kbd>${x}</kbd>`).join(" + ");
+  return `<div class="taxo-step inject-step" role="alertdialog" aria-labelledby="env-title">
+    <div class="taxo-head"><span class="taxo-icon" aria-hidden="true">🛠️</span><span id="env-title">Sandbox not working? Do these in order</span></div>
+    <div class="taxo-body">
+      <p>For <b>Snapshot failed (502)</b>, a run stuck at <b>Loading data</b> or <b>Waiting for the agent's first steps</b>,
+        <b>500 / 502 errors</b> in the Universe Explorer, or an <b>expired</b> environment. Try the next step only if the one before didn't fix it.</p>
+      <ol class="inject-steps env-steps">
+        <li><p><b>Hard refresh the page</b> (the Universe Explorer or Agent Runner tab), then try again:</p>
+          <ul class="env-keys">
+            <li><b>Mac:</b> ${keys("⌘ Cmd", "⇧ Shift", "R")}</li>
+            <li><b>Windows / Linux:</b> ${keys("Ctrl", "Shift", "R")} &nbsp;or&nbsp; ${keys("Ctrl", "F5")}</li>
+          </ul>
+          <p class="taxo-note">If it says <i>your browser can't reach the environment's host</i>, turn off your VPN or ad-blocker for the site, then refresh.</p></li>
+        <li><p><b>Redeploy the sandbox.</b> Open the <b>Settings</b> tab (1), keep <b>Universe this environment was deployed with</b> selected,
+          and press <b>Redeploy Environment</b> (2). Wait until it finishes (about 5 minutes); don't press it again meanwhile.</p>
+          <img src="/static/img/inject_5_redeploy.png" alt="Settings tab (1), then Redeploy Environment (2)" loading="lazy"></li>
+        <li><p><b>Run your injection SQL again</b> in the new sandbox: it starts from the plain universe, so your records are gone.
+          Paste your <b>current</b> SQL in <b>Database → Query</b>, press <b>Run Query</b> once, and check <b>Tables → _changelog</b>.
+          Then start your run.</p>
+          <p><button class="small" data-injectguide="steps">Show the injection steps</button></p></li>
+        <li><p><b>Still broken?</b> Type <b class="mono">/admin</b> with the exact error text, which button you pressed, and the
+          <b>Sandbox ID</b> from the Settings tab. Tell us what you already tried (steps 1–3).</p></li>
+      </ol>
+    </div>
+    <div class="taxo-foot"><button class="primary" data-close>Got it</button></div></div>`;
+}
+function showEnvGuide() {
+  if (typeof document === "undefined" || document.querySelector(".env-steps")) return;  // one at a time
+  const wrap = document.createElement("div");
+  wrap.className = "overlay";
+  wrap.innerHTML = envGuideHtml();
+  wrap.addEventListener("click", e => { if (e.target === wrap || e.target.closest("[data-close]")) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("click", e => {
+    const b = e.target.closest?.("[data-envguide]");
+    if (b) { e.preventDefault(); showEnvGuide(); }
+  });
+}
 const CHECKABLE = new Set(["injection", "prompt", "oe", "rubric"]);
 const PASS_IMAGE_SIZES = [44, 56, 68];  // code font sizes, px, tried in order
 const STAGE_NAMES = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" };
@@ -723,7 +768,8 @@ function messageHtml(m, opts = {}) {
   }
   const kickoff = meta.kickoff ? " kickoff" : "";  // the plan-your-task card (server/plan.py): solid, not a dashed note
   const warn = m.meta && (m.meta.spend_flag || m.meta.warn) ? " warnnote" : "";
-  return `<div class="msg system"><div class="bubble${warn}${kickoff}">${md(m.content)}<div class="ts-row">${ts}</div></div></div>`;
+  const envBtn = meta.env_guide ? `<p><button class="small" data-envguide>Sandbox fix steps</button></p>` : "";
+  return `<div class="msg system"><div class="bubble${warn}${kickoff}">${md(m.content)}${envBtn}<div class="ts-row">${ts}</div></div></div>`;
 }
 
 function wireMessageClicks(container, getMessage, reportName) {

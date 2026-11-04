@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import assignment, auth, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import assignment, auth, env_help, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -887,7 +887,9 @@ async def send(body: SendBody, request: Request):
         reply = ("Thanks, the admins have been notified and will reply here. You can keep using the eval meanwhile."
                  if sent else "Your request is saved and the admins will see it in their dashboard. (Slack notifications "
                               "aren't set up yet, so a reply may take longer.)")
-        msg = db.add_message(attempt_id, "system", reply)
+        env_guide = env_help.is_sandbox_trouble(note)  # a broken sandbox: the fix steps open right away
+        msg = db.add_message(attempt_id, "system", reply + (env_help.REPLY_NOTE if env_guide else ""),
+                             {"env_guide": True} if env_guide else None)
         hub.publish(attempt_id, "message", msg)
         hub.publish(attempt_id, "admin_request", {"attempt_id": attempt_id, "message": note})
         return {"ok": True}

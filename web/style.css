@@ -263,6 +263,9 @@ button.danger-solid:hover { border-color: var(--ink); }
 .inject-fresh { margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: #EEF4FB; border: 1px solid #B9D0EA; font-size: 15px; line-height: 1.5; }
 .inject-fresh p { margin: 0 0 8px; }
 .inject-fresh img { width: 100%; border-radius: 8px; border: 1px solid #DADADA; display: block; margin-top: 4px; cursor: zoom-in; }
+.env-keys { margin: 0 0 8px; padding-left: 18px; }
+.env-keys li { margin-bottom: 4px; }
+kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px solid #BDBDBD; border-bottom-width: 2px; border-radius: 5px; background: #FAFAFA; white-space: nowrap; }
 .taxo-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid #EAEAEA; background: #F7F7F7; }
 .taxo-foot button:not(.primary) { background: #FFF; color: #000; border-color: #C7C7C7; }
 .proof .head { padding: 18px 22px 18px; color: #fff; background: var(--evergreen); display: flex; gap: 16px; align-items: flex-end; }

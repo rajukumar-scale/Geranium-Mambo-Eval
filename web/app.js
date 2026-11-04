@@ -208,6 +208,8 @@ function addMessage(m) {
   if (m.role === "report" && m.meta && m.meta.stage === "hardness" && (m.meta.injection_missing || m.meta.injection_stale)
       && !state.me.admin && (m.created_at || 0) > PAGE_OPENED)  // new, not old history
     setTimeout(() => showInjectGuideAfterHardness(m.meta.injection_missing ? "missing" : "stale"), 400);
+  if (m.role === "system" && m.meta && m.meta.env_guide && !state.me.admin && (m.created_at || 0) > PAGE_OPENED)
+    setTimeout(showEnvGuide, 400);  // their /admin request reads like a broken sandbox: the fix steps first
   state.messages.push(m);
   state.lastId = Math.max(state.lastId, m.id);
   const box = $("#messages");
