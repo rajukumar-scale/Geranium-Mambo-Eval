@@ -104,15 +104,18 @@ class EnsureTest(unittest.TestCase):
         self.assertEqual(self.run_ensure(), {})  # nothing left to do, no second note
         self.assertEqual(len(self.notes("assignment_autofill")), 1)
 
-    def test_never_overwrites_a_saved_assignment(self):
+    def test_platform_wins_over_a_disagreeing_paste(self):
         self._save("task-details", "00_Task_Assigned_Inputs.md", "Task Type: normal\nDifficulty Mode: hard\n")
         self.universe = "synthcut"
         done = self.run_ensure()
-        self.assertEqual(self.stored, [])
-        self.assertEqual(done, {"mismatch": ["difficulty mode", "task type"]})
-        self.assertEqual(len(self.notes("assignment_mismatch")), 1)
-        self.run_ensure()
-        self.assertEqual(len(self.notes("assignment_mismatch")), 1)  # once
+        self.assertEqual(done, {"replaced": ["difficulty mode", "task type"]})
+        self.assertEqual(self.stored, [("save", "task-details", "--source", f"Evals/task_inputs/_uploads/{assignment.SOURCE_NAME}")])
+        saved = (self.inputs / "00_Task_Assigned_Inputs.md").read_text()
+        self.assertIn("Difficulty Mode: medium", saved)
+        self.assertIn("Task Type: long-horizon", saved)
+        self.assertEqual(len(self.notes("assignment_replaced")), 1)
+        self.assertEqual(self.run_ensure(), {})  # now it matches: nothing more to do
+        self.assertEqual(len(self.stored), 1)
 
     def test_matching_saved_assignment_is_left_alone(self):
         self._save("task-details", "00_Task_Assigned_Inputs.md", "Horizon: Long-Horizon\nDifficulty: Medium\n")

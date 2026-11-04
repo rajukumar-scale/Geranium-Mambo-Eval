@@ -508,7 +508,9 @@ async def login(body: LoginBody, request: Request):
     workspace.ensure_attempt(attempt_id, unpack=False)
     if not existing:
         db.add_message(attempt_id, "system", "Welcome! " + HELP)
-        asyncio.create_task(assignment.ensure_safe(attempt_id))  # fill the assignment and date from the platform
+    # The platform's assignment and task date, before the page opens, so the date picker never has to ask (a no-op
+    # once they're saved; a few seconds the first time).
+    await assignment.ensure_safe(attempt_id)
     resp = JSONResponse({"ok": True, "attempt_id": attempt_id, **({"task_id": chat["task_id"]} if bypass else {})})
     payload = {"attempt_id": attempt_id, "user_id": row["USER_ID"], "iat": time.time()}
     if bypass:

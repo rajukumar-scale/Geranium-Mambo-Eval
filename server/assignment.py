@@ -11,8 +11,10 @@ What it does, at most once per need and never while a run is active (a review bo
   the eval would have saved from a paste).
 - No task date saved yet: save the platform's universe (hg4-synth-sep30cut = Oct 1, 2025; hg4-2026-08-31 = Feb 14,
   2026), so the date picker never has to ask.
-- An assignment is already saved but its difficulty mode or task type disagrees with the platform: post one note in the
-  chat. It is not overwritten, because changing a saved input marks the passes that read it as outdated.
+- An assignment is already saved but its difficulty mode or task type disagrees with the platform (a paste, now or
+  later): the platform wins. The portal saves the platform's assignment over it and says so in the chat; the passes
+  that read the old one show as outdated, because they were graded against the wrong mode or task type (Evan,
+  2026-11-03: "just use that as the default, no need to ask them any inputs").
 
 Called before the first review in send() and when a chat is created at login. Off for load tests and with
 ASSIGNMENT_AUTOFILL=0.
@@ -114,6 +116,7 @@ def disagreements(text, row):
 
 async def _store(attempt_id, *args):
     """Run the eval's own input tool in the attempt's workspace, like /api/universe does."""
+    await asyncio.to_thread(workspace.thaw, attempt_id)  # a cold chat: unpack before docker mounts it (login stays fast otherwise)
     cmd = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", "--network", "none", "--cap-drop", "ALL",
            "--security-opt", "no-new-privileges", "-w", "/work", *workspace.docker_mounts(attempt_id),
            "--entrypoint", "python3", config.RUNNER_IMAGE, "Evals/tools/hg_store_input.py", *args]
@@ -137,7 +140,6 @@ async def ensure(attempt_id):
         row = await platform_record(chat["task_id"])
         if not row:
             return {"skipped": True, "reason": "no platform record"}
-        await asyncio.to_thread(workspace.thaw, attempt_id)
         done = {}
         if not _saved(attempt_id, "task-details"):
             (workspace.uploads_dir(attempt_id) / SOURCE_NAME).write_text(render(row), encoding="utf-8")
@@ -145,15 +147,16 @@ async def ensure(attempt_id):
             done["task_details"] = True
         else:
             diff = disagreements(_saved_text(attempt_id, "task-details"), row)
-            if diff and not _posted(attempt_id, "assignment_mismatch"):
-                parts = "; ".join(f"your saved assignment says **{a}** for the {what}, the platform says **{b}**"
-                                  for what, a, b in diff)
-                text = (f"Heads up: {parts}. The evals use your saved assignment, so the {diff[0][0]} they apply may be "
-                        "wrong. Paste your assignment again with the platform's values (or ask me to fix it), then "
-                        "re-run the reviews the portal marks as outdated.")
-                m = db.add_message(attempt_id, "system", text, {"assignment_mismatch": True, "warn": True})
+            if diff:
+                (workspace.uploads_dir(attempt_id) / SOURCE_NAME).write_text(render(row), encoding="utf-8")
+                await _store(attempt_id, "save", "task-details", "--source", f"Evals/task_inputs/_uploads/{SOURCE_NAME}")
+                parts = "; ".join(f"the {what} was **{a}**, the platform says **{b}**" for what, a, b in diff)
+                text = (f"Your saved assignment didn't match the platform's record of this task ({parts}), so it's now "
+                        "the platform's. The evals apply the difficulty mode and task type from it. If the portal marks "
+                        "earlier passes as outdated, send those reviews again.")
+                m = db.add_message(attempt_id, "system", text, {"assignment_replaced": True, "warn": True})
                 hub.publish(attempt_id, "message", m)
-                done["mismatch"] = [d[0] for d in diff]
+                done["replaced"] = [d[0] for d in diff]
         key = universe_key(row)
         if key and workspace.dated_release() and workspace.universe_date(attempt_id) is None:
             await _store(attempt_id, "universe", key)
