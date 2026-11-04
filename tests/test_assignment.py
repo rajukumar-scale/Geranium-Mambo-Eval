@@ -38,8 +38,10 @@ class RenderTest(unittest.TestCase):
 
     def test_disagreements(self):
         pasted = "📋 Task Type\nnormal\n\n🎚️ Difficulty Mode\nhard\n"
-        self.assertEqual(assignment.disagreements(pasted, ROW),
-                         [("difficulty mode", "hard", "medium"), ("task type", "normal", "long-horizon")])
+        self.assertEqual(assignment.disagreements(pasted, ROW), [("task type", "normal", "long-horizon")])  # Hard on Medium is fine
+        self.assertEqual(assignment.disagreements("Difficulty: Easy\n", ROW), [("difficulty mode", "easy", "medium")])
+        self.assertEqual(assignment.disagreements("Difficulty: Medium\n", {**ROW, "difficulty_mode": "hard"}),
+                         [("difficulty mode", "medium", "hard")])  # easier than assigned: corrected
         self.assertEqual(assignment.disagreements("Horizon: Long-Horizon\nDifficulty: Medium\n", ROW), [])
         self.assertEqual(assignment.disagreements("Persona: Frederick\n", ROW), [])  # nothing pasted: nothing to flag
 
@@ -104,8 +106,17 @@ class EnsureTest(unittest.TestCase):
         self.assertEqual(self.run_ensure(), {})  # nothing left to do, no second note
         self.assertEqual(len(self.notes("assignment_autofill")), 1)
 
+    def test_a_harder_mode_than_assigned_is_kept_without_a_note(self):
+        """Evan, 2026-11-04: Hard on a Medium task grades stricter, so it isn't flagged and its passes stay current."""
+        self._save("task-details", "00_Task_Assigned_Inputs.md", "Task Type: long-horizon\nDifficulty Mode: hard\n")
+        self.universe = "synthcut"
+        self.assertEqual(self.run_ensure(), {})
+        self.assertEqual(self.stored, [])
+        self.assertIn("Difficulty Mode: hard", (self.inputs / "00_Task_Assigned_Inputs.md").read_text())
+        self.assertEqual(self.notes("assignment_replaced"), [])
+
     def test_platform_wins_over_a_disagreeing_paste(self):
-        self._save("task-details", "00_Task_Assigned_Inputs.md", "Task Type: normal\nDifficulty Mode: hard\n")
+        self._save("task-details", "00_Task_Assigned_Inputs.md", "Task Type: normal\nDifficulty Mode: easy\n")
         self.universe = "synthcut"
         done = self.run_ensure()
         self.assertEqual(done, {"replaced": ["difficulty mode", "task type"]})

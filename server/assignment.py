@@ -11,8 +11,9 @@ What it does, at most once per need and never while a run is active (a review bo
   the eval would have saved from a paste).
 - No task date saved yet: save the platform's universe (hg4-synth-sep30cut = Oct 1, 2025; hg4-2026-08-31 = Feb 14,
   2026), so the date picker never has to ask.
-- An assignment is already saved but its difficulty mode or task type disagrees with the platform (a paste, now or
-  later): the platform wins. The portal saves the platform's assignment over it and says so in the chat; the passes
+- An assignment is already saved but its task type disagrees with the platform, or its difficulty mode is easier than
+  the platform's (a paste, now or later): the platform wins. A harder saved mode (Hard on a Medium task) is kept, with no
+  note: it grades stricter, so nothing it passed needs redoing (Evan, 2026-11-04). The portal saves the platform's assignment over it and says so in the chat; the passes
   that read the old one show as outdated, because they were graded against the wrong mode or task type (Evan,
   2026-11-03: "just use that as the default, no need to ask them any inputs").
 
@@ -97,12 +98,17 @@ def _pasted(text, pattern):
     return m.group(1) if m else None
 
 
+MODE_RANK = {"easy": 0, "medium": 1, "hard": 2}
+
+
 def disagreements(text, row):
     """Difficulty mode or task type in a saved (pasted) assignment that differ from the platform's."""
     out = []
     mode = _pasted(text, r"difficulty(?:\s*mode)?\s*[:\-]?\s*[^\w\n]*\n?\s*(easy|medium|hard)\b")
     want_mode = (row.get("difficulty_mode") or "").strip().lower()
-    if want_mode and mode and mode != want_mode:
+    # Only an easier mode than the assigned one matters: Hard grades stricter than Medium (and Medium than Easy), so a
+    # task built Hard on a Medium assignment keeps its saved mode and passes, with no note (Evan, 2026-11-04).
+    if want_mode in MODE_RANK and mode in MODE_RANK and MODE_RANK[mode] < MODE_RANK[want_mode]:
         out.append(("difficulty mode", mode, want_mode))
     kind = _pasted(text, r"(?:task type|horizon(?: type)?)[^a-z]*(super[- ]long[- ]horizon|long[- ]horizon|long|normal)")
     want_kind = (row.get("task_type") or "").strip().lower()
