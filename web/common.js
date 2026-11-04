@@ -407,11 +407,13 @@ function injectGuideHtml({ lead = "", check, ok, cancel = "Close" }) {
         ${shot("inject_3_no_records.png", "<b>No records found</b> (5) is normal: an insert or update returns no rows. It is not an error.")}
         ${shot("inject_4_changelog.png", "To check it worked, open <b>Tables → _changelog</b> (6): one row for each change you made (7).")}
       </ol>
-      <div class="inject-fresh"><b>Changed your SQL? Start a fresh sandbox.</b> If you edited your injection SQL since you opened
-        a sandbox (or since your last Opus run), don't run the new version on top of the old one, and don't try to delete the old
-        rows by hand: inserts with the same ids fail and updates apply twice, so the run still won't match your task. Open a
-        <b>new</b> sandbox (it starts from the plain universe), run your <b>current</b> SQL once, check <b>_changelog</b>, then
-        make your Opus run there.</div>
+      <div class="inject-fresh"><p><b>Changed your SQL? Redeploy the sandbox first.</b> If you edited your injection SQL since you
+        ran it in this sandbox (or since your last Opus run), don't run the new version on top of the old one, and don't try to
+        delete the old rows by hand: inserts with the same ids fail and updates apply twice, so the run still won't match your task.</p>
+        <p>Open the <b>Settings</b> tab (1), keep <b>Universe this environment was deployed with</b> selected, and press
+        <b>Redeploy Environment</b> (2). It takes about 5 minutes and gives you a clean sandbox from the plain universe. Then run
+        your <b>current</b> SQL once (steps 1–4 above), check <b>_changelog</b>, and make your Opus run there.</p>
+        <img src="/static/img/inject_5_redeploy.png" alt="Settings tab (1), then Redeploy Environment (2)" loading="lazy"></div>
       ${check ? `<label class="taxo-check"><input type="checkbox"> ${esc(check)}</label>` : ""}
     </div>
     <div class="taxo-foot"><button data-close>${esc(cancel)}</button>${ok ? `<button class="primary" data-show${check ? " disabled" : ""}>${esc(ok)}</button>` : ""}</div></div>`;
@@ -437,8 +439,8 @@ const INJECT_AFTER_LEAD = {
   missing: `<p class="taxo-warn">This /hardness review found that your Opus run was made <b>without your injection</b>,
     so it can't score it. Make a new run in a sandbox where you ran your SQL first, upload it, and send /hardness again.</p>`,
   stale: `<p class="taxo-warn">This /hardness review found that your Opus run was made on an <b>older version of your SQL</b>
-    than the one saved now, so it doesn't match your task. Open a <b>new</b> sandbox, run your current SQL there, make a new
-    Opus run, upload it, and send /hardness again.</p>`,
+    than the one saved now, so it doesn't match your task. <b>Redeploy</b> the sandbox (Settings → Redeploy Environment, see the
+    blue box below), run your current SQL there, make a new Opus run, upload it, and send /hardness again.</p>`,
 };
 function showInjectGuideAfterHardness(kind = "missing") {
   return showInjectGuide({ lead: INJECT_AFTER_LEAD[kind] || INJECT_AFTER_LEAD.missing, ok: "Got it", cancel: "Close" });
@@ -768,7 +770,7 @@ applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light")
 // An image in a message (an admin's screenshot): click to open it full size in a new tab.
 if (typeof document !== "undefined" && document.addEventListener) {
   document.addEventListener("click", e => {
-    const img = e.target.closest?.(".bubble img");
+    const img = e.target.closest?.(".bubble img, .inject-step img");  // chat images and the inject guide's screenshots
     if (img && img.src && new URL(img.src, location.href).origin === location.origin) window.open(img.src, "_blank", "noopener");
   });
 }

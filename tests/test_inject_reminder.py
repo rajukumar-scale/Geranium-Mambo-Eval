@@ -21,7 +21,7 @@ class InjectReminderTest(unittest.TestCase):
         js = (WEB / "common.js").read_text()
         for name in re.findall(r'"(inject_\d_\w+\.png)"', js):
             self.assertTrue((WEB / "img" / name).is_file(), name)
-        self.assertEqual(len(re.findall(r'"(inject_\d_\w+\.png)"', js)), 4)
+        self.assertEqual(len(re.findall(r'"(inject_\d_\w+\.png)"', js)), 4)  # the 4 steps; the redeploy image is in the box
 
 
 if __name__ == "__main__":
@@ -75,6 +75,8 @@ class InjectionStaleReportTest(unittest.TestCase):
 
     def test_the_guide_explains_a_fresh_sandbox(self):
         common = (WEB / "common.js").read_text()
-        self.assertIn("Changed your SQL? Start a fresh sandbox.", common)
+        self.assertIn("Changed your SQL? Redeploy the sandbox first.", common)
+        self.assertIn("Redeploy Environment", common)
+        self.assertTrue((WEB / "img" / "inject_5_redeploy.png").is_file())
         self.assertIn('data-injectguide="stale"', common)
 
