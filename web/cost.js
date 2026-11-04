@@ -216,8 +216,9 @@ function renderTiles(c, b) {
 // ---- column charts ----
 // series: [{key, label, cls}] stacked bottom-up; value(d, key) gives each part. In line mode (the Bars / Lines toggle)
 // each series is its own 2px line with 8px markers instead, on the same single axis. period names the columns.
-function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleStart, tip, fmt = kUsd, period = "day" }) {
-  const W = 1100, H = 250, L = 56, R = 12, T = 26, B = 42, pw = W - L - R, ph = H - T - B, GAP = 2, line = C.chart === "line";
+function columns({ id, title, sub, days, series, value, pace, paceLabel, cycleStart, tip, fmt = kUsd, period = "day", bars = false }) {
+  // bars: always columns, whatever the Bars / Lines toggle says (the all-in chart stacks its parts, Evan 2026-11-04)
+  const W = 1100, H = 250, L = 56, R = 12, T = 26, B = 42, pw = W - L - R, ph = H - T - B, GAP = 2, line = !bars && C.chart === "line";
   const totals = days.map(d => series.reduce((t, s) => t + (value(d, s.key) || 0), 0));
   const highs = line ? days.map(d => Math.max(0, ...series.map(s => value(d, s.key) || 0))) : totals;
   const top = Math.max(pace || 0, ...highs, 1) * 1.12;
@@ -373,7 +374,7 @@ function allInCard(c) {
   const used = rows.filter(r => r.ok), subs = used.reduce((n, r) => n + r.tasks_submitted, 0);
   const sumOf = k => used.reduce((n, r) => n + r[k], 0), perTask = subs ? sumOf("all") / subs : 0;
   const chart = columns({
-    id: "allin", title: `All-in cost per submitted task, by ${period}`, period, days: rows,
+    id: "allin", title: `All-in cost per submitted task, by ${period}`, period, days: rows, bars: true,
     series: series.map(x => ({ ...x, key: `${x.key}_per` })), value: (d, k) => Math.max(0, d[k]),
     pace: perTask, paceLabel: perTask ? `${kUsd(perTask)} all-in per task over ${rangeName(c)}` : "",
     sub: `${chartSince() || "UTC days · "}${VIEWS[C.view].label.toLowerCase()}: everything spent that ${period} (except people still holding a task) ÷ tasks submitted that ${period} · ${period}s with fewer than ${MIN_TASKS} submitted tasks left out`,
