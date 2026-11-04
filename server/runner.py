@@ -655,8 +655,21 @@ class Runner:
                                                        admin_key=admin_key(extra_args[1] if len(extra_args) > 1 else ""))]
         return args + extra_args
 
-    def _env(self, token, home):
-        return {
+    @staticmethod
+    def _cache_ttl(run_id):
+        """The prompt-cache TTL for this run, or None to keep Claude Code's default (5 minutes with an API key).
+        Chat replies and answers to a paused review get config.CHAT_PROMPT_CACHE_TTL (1h): 40% of chat messages arrive
+        5-60 minutes after the last reply (2026-11-03), after a 5-minute cache has expired, so the whole conversation
+        was written to the cache again at the write price. Reviews run without idle gaps, so they keep 5 minutes
+        (a 1-hour write costs 2x the input price instead of 1.25x)."""
+        ttl = config.CHAT_PROMPT_CACHE_TTL
+        if ttl not in ("5m", "1h") or not run_id:
+            return None
+        run = db.get_run(run_id) or {}
+        return ttl if run.get("kind") == "followup" or run.get("continuation") else None
+
+    def _env(self, token, home, run_id=None):
+        env = {
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             "HOME": str(home),
             "LANG": "C.UTF-8",
@@ -671,6 +684,10 @@ class Runner:
             "DISABLE_ERROR_REPORTING": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
         }
+        ttl = self._cache_ttl(run_id)
+        if ttl:
+            env["CLAUDE_CODE_PROMPT_CACHE_TTL"] = ttl
+        return env
 
     async def _execute(self, run_id):
         run = db.get_run(run_id)
@@ -775,7 +792,7 @@ class Runner:
                 await asyncio.to_thread(workspace.prepare_local_workspace, lambda m: self._push_activity(run_id, attempt, m))
                 cwd = workspace.swap_in(attempt)
                 home = workspace.attempt_dir(attempt) / "home"
-                env = self._env(token, home)
+                env = self._env(token, home, run_id)
                 cmd = self._command(chat, session_args, followup=self._is_followup(run_id))
                 outcome["before"] = workspace.report_snapshot(attempt)
                 with open(err_path, "ab") as err, open(log_path, "a", encoding="utf-8") as raw_log:
@@ -798,7 +815,7 @@ class Runner:
                 # logs/<run>.io and the portal follows them, so a portal restart (a deploy) re-attaches to a running
                 # chat reply or server review (start()) instead of cutting it off. Deploys used to hold every new chat
                 # reply until the running ones had ended, up to 12 minutes, several times a day.
-                env = {**self._env(token, "/home/runner"), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+                env = {**self._env(token, "/home/runner", run_id), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
                 passthrough = [k for k in env if k != "PATH"]
                 io = docker_io(attempt, run_id)
                 shutil.rmtree(io, ignore_errors=True)
@@ -994,7 +1011,7 @@ class Runner:
         proxy.ACTIVE_TOKENS[token] = run_id
         # The token is kept so a restarted server can re-attach to this review; it dies with the run.
         db.update("runs", "id", run_id, proxy_token=token, boat_phase="setup")
-        env = {k: v for k, v in self._env(token, "/home/runner").items() if k not in ("PATH", "HOME")}
+        env = {k: v for k, v in self._env(token, "/home/runner", run_id).items() if k not in ("PATH", "HOME")}
         env["ANTHROPIC_BASE_URL"] = config.PROXY_PUBLIC_URL
         box = payload = None
         try:
