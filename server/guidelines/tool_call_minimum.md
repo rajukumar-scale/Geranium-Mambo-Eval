@@ -11,11 +11,12 @@ This guide is based on 10 real Enterprise Atlas tasks and the Opus 5.5 baseline 
 - **What gets counted:** your six Opus 5.5 baseline rollouts.
   - **If any rollout scored 100% on your rubric, that run is the golden run, and its count is the one that counts.** If more than one scored 100%, the lowest count among them is used.
   - **If none scored 100%, the average of all six is used.**
+  - **Sub-agent calls count.** When the agent hands work to helper agents (sub-agents), every call they make counts toward the total, the same as the main agent's own calls. How much a run hands off changes from run to run, so plan your budget on the work the task needs, not on sub-agents.
 - **The result:**
   - Under your tier is a **FAIL**.
   - Inside your tier is a **PASS**.
   - A Normal task over 100 is a **NON-FAIL**, because it belongs in a higher tier.
-- **No review checks this early.** /prompt and /hardness don't count calls. You first see real numbers on the Opus pre-check and the six baseline rollouts. The pre-check is a single run of the same model, so treat its count as an early warning.
+- **/hardness gives the first warning.** It counts your Opus run's calls, sub-agent calls included. Under 90% of your tier's minimum (under 45 on Normal, under 90 on Long-Horizon) is a /hardness FAIL, so you can fix the count before the baseline. /prompt doesn't count calls. The real numbers come from the Opus pre-check and the six baseline rollouts. The /hardness run and the pre-check are single runs, so treat their counts as early warnings.
 - **Padding is a failing error on its own.** Blocked calls, repeated calls and steps added only to raise the number all count against you. The count has to come from real work.
 
 ## Part 2. Where tool calls actually come from

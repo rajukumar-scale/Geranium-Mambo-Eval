@@ -730,6 +730,24 @@ function hardnessTooEasy(meta) {
 function tooEasyHint() {
   return `<div class="guide-hint">Too easy? See the <a href="${TOO_EASY_LINK}">hardness guide, Part 8. If the run comes back too easy</a></div>`;
 }
+// The two /hardness checks with their own guide (2026-11-04), read from the report text so older reports get them too.
+// Tool calls: the FAIL's "Why Easy (tool calls)" paragraph. Failure pattern: the ⚠ warning or a "Failure-pattern risk: YES"
+// line, however the report bolds it ("Failure-pattern risk: **YES**", "**Failure-pattern risk: YES (advice only).**").
+const TOOLCALLS_LINK = "/?guide=toolcalls#part-4-what-adds-real-calls-do-these";
+const PATTERNS_LINK = "/?guide=patterns#4-build-at-least-three-traps-that-split-the-rollouts";
+function hardnessToolCallFail(m) {
+  return !!m && (m.meta || {}).stage === "hardness" && /Why Easy \(tool calls\)/.test(m.content || "");
+}
+function hardnessPatternRisk(m) {
+  return !!m && (m.meta || {}).stage === "hardness"
+    && /⚠\s*\**\s*Failure-pattern risk|Failure-pattern risk[\s*:]*YES\b/.test(m.content || "");
+}
+function toolCallHint() {
+  return `<div class="guide-hint">Too few tool calls? See the <a href="${TOOLCALLS_LINK}">tool calls guide, Part 4. What adds real calls</a></div>`;
+}
+function patternRiskHint() {
+  return `<div class="guide-hint">Failure-pattern risk? See the <a href="${PATTERNS_LINK}">failure patterns guide, 4. Build at least three traps that split the rollouts</a></div>`;
+}
 // ---- end guide links ----
 
 // One chat message -> HTML. Used by the user chat and the admin view.
@@ -756,7 +774,9 @@ function messageHtml(m, opts = {}) {
       ${meta.exec_status && meta.exec_status !== "COMPLETE" ? `<span class="muted">· ${esc(meta.exec_status)}</span>` : ""}</div>
       ${ts}<button data-report="${m.id}">View</button><button data-download="${m.id}">Download</button></div>
       ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}
-      ${!opts.admin && hardnessTooEasy(meta) && !meta.injection_missing && !meta.injection_stale ? tooEasyHint() : ""}
+      ${!opts.admin && !meta.injection_missing && !meta.injection_stale
+        ? (hardnessToolCallFail(m) ? toolCallHint() : "") + (hardnessTooEasy(meta) ? tooEasyHint() : "")
+          + (hardnessPatternRisk(m) ? patternRiskHint() : "") : ""}
       ${meta.stage === "hardness" && meta.injection_missing ? `<div class="stale-line">💉 Your Opus run was made without your injection.
         <button class="small" data-injectguide="missing">How to inject</button></div>`
       : meta.stage === "hardness" && meta.injection_stale ? `<div class="stale-line">💉 Your Opus run was made on an older version of your SQL.

@@ -1,6 +1,7 @@
 """The Guide panel's reading tabs (2026-10-31): GET /api/guides/<name> serves the four guideline files to any signed-in
 contributor (fixed allowlist, never a path), the kickoff card links to three of them, and a /hardness report that came
-back too easy gets a one-line link to the hardness guide's Part 8."""
+back too easy gets a one-line link to the hardness guide's Part 8. Since 2026-11-04 a tool-call FAIL also links the
+tool calls guide and a failure-pattern warning links the failure patterns guide."""
 
 import json
 import re
@@ -105,7 +106,7 @@ global.window = {}; global.location = { origin: "http://x", href: "http://x/" };
 global.localStorage = { getItem() { return null; }, setItem() {} };
 global.document = { querySelectorAll: () => [], documentElement: { dataset: {} } };
 const src = fs.readFileSync(process.argv[1], "utf8");
-const lib = new Function(src + "; return { hardnessTooEasy, messageHtml, guideSlug, TOO_EASY_LINK };")();
+const lib = new Function(src + "; return { hardnessTooEasy, messageHtml, guideSlug, TOO_EASY_LINK, TOOLCALLS_LINK, PATTERNS_LINK };")();
 const input = JSON.parse(fs.readFileSync(0, "utf8"));
 process.stdout.write(JSON.stringify({
   tooEasy: input.metas.map(lib.hardnessTooEasy),
@@ -113,6 +114,10 @@ process.stdout.write(JSON.stringify({
   adminHtml: lib.messageHtml({ id: 1, role: "report", content: "r", created_at: 1, meta: input.metas[0] }, { admin: true }),
   slugs: input.headings.map(lib.guideSlug),
   link: lib.TOO_EASY_LINK,
+  reportHtml: input.reports.map(r => lib.messageHtml({ id: 1, role: "report", content: r.content, created_at: 1, meta: r.meta })),
+  adminReportHtml: lib.messageHtml({ id: 1, role: "report", content: input.reports[0].content, created_at: 1,
+                                     meta: input.reports[0].meta }, { admin: true }),
+  toolcallsLink: lib.TOOLCALLS_LINK, patternsLink: lib.PATTERNS_LINK,
 }));
 """
     METAS = [
@@ -127,12 +132,35 @@ process.stdout.write(JSON.stringify({
         ({"stage": "rubric", "verdict": "FAIL", "score": 1}, False),
     ]
 
+    # (meta, report text, tool-call hint?, failure-pattern hint?): the text lines are copied from live /hardness reports.
+    FAIL2 = {"stage": "hardness", "verdict": "FAIL", "score": 2}
+    PASS5 = {"stage": "hardness", "verdict": "PASS", "score": 5}
+    REPORTS = [
+        (FAIL2, "**Why Easy (tool calls):** this run made 61 tool calls; a Long-Horizon task needs 100", True, False),
+        (FAIL2, "**Why Easy (tool calls):** this run made 61 tool calls\n"
+                "⚠ **Failure-pattern risk:** Calvin's comment decides about 40% of the task's answer", True, True),
+        (PASS5, "Failure-pattern risk: **YES** (advice only; doesn't change the score).", False, True),
+        (PASS5, "- **Failure-pattern risk: YES (advice only).** Traps and this run's result", False, True),
+        (PASS5, "**Failure-pattern risk: YES** (advice only; it doesn't change the score).", False, True),
+        (PASS5, "- **Failure-pattern risk: NO.** Traps, each with its estimated share", False, False),
+        (PASS5, "Failure-pattern risk: NO. Largest trap share is about 25% (below 30%).\n"
+                "Tool calls: 142 (Long-Horizon, minimum 100; not under 90% of the minimum).", False, False),
+        ({"stage": "hardness", "verdict": "NON-FAIL", "score": None},
+         "Failure-pattern risk: N/A (unscored; traps not assessed).", False, False),
+        ({**FAIL2, "injection_missing": True}, "**Why Easy (tool calls):** 61\n⚠ **Failure-pattern risk:** x", False, False),
+        ({"stage": "prompt", "verdict": "FAIL", "score": 2}, "**Why Easy (tool calls):** ⚠ Failure-pattern risk", False, False),
+    ]
+
     @classmethod
     def setUpClass(cls):
         cls.hardness = (config.GUIDELINES_DIR / "hardness_v2.md").read_text(encoding="utf-8")
         cls.headings = re.findall(r"^#{1,3} (.+)$", cls.hardness, re.M)
+        cls.guide_headings = {name: re.findall(r"^#{1,3} (.+)$", (config.GUIDELINES_DIR / file).read_text(encoding="utf-8"), re.M)
+                              for name, file in NAMES.items()}
+        heads = cls.headings + [h for name in ("toolcalls", "patterns") for h in cls.guide_headings[name]]
+        reports = [{"meta": m, "content": c} for m, c, _, _ in cls.REPORTS]
         out = subprocess.run(["node", "-e", cls.SCRIPT, str(ROOT / "web" / "common.js")],
-                             input=json.dumps({"metas": [m for m, _ in cls.METAS], "headings": cls.headings}),
+                             input=json.dumps({"metas": [m for m, _ in cls.METAS], "headings": heads, "reports": reports}),
                              capture_output=True, text=True, check=True).stdout
         cls.out = json.loads(out)
 
@@ -148,6 +176,28 @@ process.stdout.write(JSON.stringify({
         self.assertIn(f'href="{self.out["link"]}"', self.out["html"][0])
         self.assertIn("hardness guide, Part 8. If the run comes back too easy</a>", self.out["html"][0])
         self.assertNotIn("Too easy?", self.out["adminHtml"])  # the /admin page has no Guide panel to open
+
+    def test_tool_call_and_failure_pattern_hints(self):
+        for (meta, text, tool, pattern), html in zip(self.REPORTS, self.out["reportHtml"]):
+            with self.subTest(text=text[:60], meta=meta):
+                self.assertEqual("Too few tool calls? See the" in html, tool)
+                self.assertEqual(f'href="{self.out["toolcallsLink"]}"' in html, tool)
+                self.assertEqual("Failure-pattern risk? See the" in html, pattern)
+                self.assertEqual(f'href="{self.out["patternsLink"]}"' in html, pattern)
+        first = self.out["reportHtml"][1]  # a tool-call FAIL with the warning: tool calls, then too easy, then the pattern
+        self.assertLess(first.index("Too few tool calls?"), first.index("Too easy?"))
+        self.assertLess(first.index("Too easy?"), first.index("Failure-pattern risk?"))
+        self.assertNotIn("guide-hint", self.out["adminReportHtml"])
+
+    def test_the_tool_call_and_pattern_links_hit_real_headings(self):
+        slugs = dict(zip(self.out["slugs"], self.headings + [h for n in ("toolcalls", "patterns") for h in self.guide_headings[n]]))
+        for link, tab, heading in ((self.out["toolcallsLink"], "toolcalls", "Part 4. What adds real calls (do these)"),
+                                   (self.out["patternsLink"], "patterns", "4. Build at least three traps that split the rollouts")):
+            with self.subTest(link=link):
+                self.assertTrue(link.startswith(f"/?guide={tab}#"))
+                self.assertIn(tab, portal.GUIDES)
+                self.assertEqual(slugs.get(link.split("#", 1)[1]), heading)
+                self.assertIn(heading, self.guide_headings[tab])
 
     def test_the_hint_links_to_part_8_by_its_slug(self):
         slugs = dict(zip(self.out["slugs"], self.headings))
