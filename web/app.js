@@ -715,7 +715,7 @@ $("#spendbar").onclick = () => {
 const GUIDE_COMMANDS = [
   ["/injection", "Checks your injection SQL: IDs, structure and chronology against the universe.", "Your injection SQL"],
   ["/prompt", "Checks your task prompt: unique answer, feasibility, persona access, clarity.",
-    "The exact task prompt, plus persona, business function, competency, task skill and horizon"],
+    "The exact task prompt (your assignment and task date are filled in from the platform)"],
   ["/hardness", "Checks how hard the task is for Opus, from one unhinted run.",
     "One unhinted run's trajectory JSON (Opus preferred, Haiku as a fallback) and the exact prompt"],
   ["/oe", "Checks your Oracle Events path.", "Your Oracle Events"],

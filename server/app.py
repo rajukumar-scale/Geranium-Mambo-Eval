@@ -89,7 +89,7 @@ app.mount("/static", Static(directory=WEB), name="static")
 
 HELP = """**Commands**
 - `/injection` review your injection SQL
-- `/prompt` review your task prompt (needs persona, business function, competency, task skill and horizon)
+- `/prompt` review your task prompt (your assignment and task date are filled in from the platform; you don't need to paste them)
 - `/hardness` check how hard the task is for Opus (needs one unhinted run: attach its trajectory JSON)
 - `/oe` review your Oracle Events
 - `/rubric` review your rubric
