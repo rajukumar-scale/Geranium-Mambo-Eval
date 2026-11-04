@@ -366,22 +366,7 @@ function showProof(p) {
   // After a /prompt or /hardness pass the next step happens in sandboxes (Universe Explorer, Agent Runner), and CBs kept
   // forgetting to run their injection SQL there first (Evan, 2026-11-03). One more step, every such pass.
   const injectStep = () => {
-    const shot = (n, file, text) => `<li><p>${text}</p><img src="/static/img/${file}" alt="${esc(text.replace(/<[^>]+>/g, ""))}" loading="lazy"></li>`;
-    wrap.innerHTML = `<div class="taxo-step inject-step" role="alertdialog" aria-labelledby="inject-title">
-      <div class="taxo-head"><span class="taxo-icon" aria-hidden="true">💉</span><span id="inject-title">Inject your SQL in every sandbox</span></div>
-      <div class="taxo-body">
-        <p><b>Every time you open a sandbox</b> (the <b>Universe Explorer</b> or the <b>Agent Runner</b>), run your injection SQL in it
-          <b>before you do anything else</b>. Each sandbox starts from the plain universe, so without it your injected records aren't there.
-          Not needed in the Rubric Verifier.</p>
-        <ol class="inject-steps">
-          ${shot(1, "inject_1_query_tab.png", "Open the <b>Database</b> tab (1), then the <b>Query</b> tab (2).")}
-          ${shot(2, "inject_2_run_query.png", "Paste your whole injection SQL, the version that passed <b class=\"mono\">/injection</b> (3), and press <b>Run Query</b> (4).")}
-          ${shot(3, "inject_3_no_records.png", "<b>No records found</b> (5) is normal: an insert or update returns no rows. It is not an error.")}
-          ${shot(4, "inject_4_changelog.png", "To check it worked, open <b>Tables → _changelog</b> (6): one row for each change you made (7).")}
-        </ol>
-        <label class="taxo-check"><input type="checkbox"> I'll run my injection SQL in every sandbox I open</label>
-      </div>
-      <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
+    wrap.innerHTML = injectGuideHtml({ check: "I'll run my injection SQL in every sandbox I open", ok: "Show my pass →" });
     const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
     tick.onchange = () => { show.disabled = !tick.checked; };
     show.onclick = card;
@@ -403,7 +388,56 @@ function showProof(p) {
 // plain characters with its first and last characters spelled out (spelledCode), then the details. Before the download it's read with the taxonomy's own reader and prompt
 // (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
 const COPYABLE = new Set(["injection", "prompt", "oe"]);
-const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness"]);  // their pass screen reminds them to inject in every sandbox
+const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness"]);
+
+// "Inject your SQL in every sandbox" (2026-11-03): on /prompt and /hardness pass screens, before every /hardness run,
+// and after a /hardness report that found the run had no injection. lead = an extra first paragraph.
+function injectGuideHtml({ lead = "", check, ok, cancel = "Close" }) {
+  const shot = (file, text) => `<li><p>${text}</p><img src="/static/img/${file}" alt="${esc(text.replace(/<[^>]+>/g, ""))}" loading="lazy"></li>`;
+  return `<div class="taxo-step inject-step" role="alertdialog" aria-labelledby="inject-title">
+    <div class="taxo-head"><span class="taxo-icon" aria-hidden="true">💉</span><span id="inject-title">Inject your SQL in every sandbox</span></div>
+    <div class="taxo-body">
+      ${lead}
+      <p><b>Every time you open a sandbox</b> (the <b>Universe Explorer</b> or the <b>Agent Runner</b>), run your injection SQL in it
+        <b>before you do anything else</b>. Each sandbox starts from the plain universe and the portal does not load your SQL for you,
+        so without it your injected records aren't there. Not needed in the Rubric Verifier.</p>
+      <ol class="inject-steps">
+        ${shot("inject_1_query_tab.png", "Open the <b>Database</b> tab (1), then the <b>Query</b> tab (2).")}
+        ${shot("inject_2_run_query.png", "Paste your whole injection SQL, the version that passed <b class=\"mono\">/injection</b> (3), and press <b>Run Query</b> (4).")}
+        ${shot("inject_3_no_records.png", "<b>No records found</b> (5) is normal: an insert or update returns no rows. It is not an error.")}
+        ${shot("inject_4_changelog.png", "To check it worked, open <b>Tables → _changelog</b> (6): one row for each change you made (7).")}
+      </ol>
+      ${check ? `<label class="taxo-check"><input type="checkbox"> ${esc(check)}</label>` : ""}
+    </div>
+    <div class="taxo-foot"><button data-close>${esc(cancel)}</button>${ok ? `<button class="primary" data-show${check ? " disabled" : ""}>${esc(ok)}</button>` : ""}</div></div>`;
+}
+
+// The guide on its own: resolves true when they press the main button (after ticking the box, if there is one).
+function showInjectGuide(opts) {
+  return new Promise(resolve => {
+    const wrap = document.createElement("div");
+    wrap.className = "overlay";
+    wrap.innerHTML = injectGuideHtml(opts);
+    const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
+    if (tick && show) tick.onchange = () => { show.disabled = !tick.checked; };
+    const done = v => { wrap.remove(); resolve(v); };
+    wrap.addEventListener("click", e => {
+      if (e.target === wrap || e.target.closest("[data-close]")) done(false);
+      else if (e.target.closest("[data-show]") && !e.target.closest("[data-show]").disabled) done(true);
+    });
+    document.body.appendChild(wrap);
+  });
+}
+const INJECT_AFTER_LEAD = `<p class="taxo-warn">This /hardness review found that your Opus run was made <b>without your injection</b>,
+  so it can't score it. Make a new run in a sandbox where you ran your SQL first, upload it, and send /hardness again.</p>`;
+function showInjectGuideAfterHardness() {
+  return showInjectGuide({ lead: INJECT_AFTER_LEAD, ok: "Got it", cancel: "Close" });
+}
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("click", e => {
+    if (e.target.closest?.("[data-injectguide]")) { e.preventDefault(); showInjectGuideAfterHardness(); }
+  });
+}  // their pass screen reminds them to inject in every sandbox
 const CHECKABLE = new Set(["injection", "prompt", "oe", "rubric"]);
 const PASS_IMAGE_SIZES = [44, 56, 68];  // code font sizes, px, tried in order
 const STAGE_NAMES = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" };
@@ -663,7 +697,9 @@ function messageHtml(m, opts = {}) {
       ${meta.exec_status && meta.exec_status !== "COMPLETE" ? `<span class="muted">· ${esc(meta.exec_status)}</span>` : ""}</div>
       ${ts}<button data-report="${m.id}">View</button><button data-download="${m.id}">Download</button></div>
       ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}
-      ${!opts.admin && hardnessTooEasy(meta) ? tooEasyHint() : ""}</div></div>`;
+      ${!opts.admin && hardnessTooEasy(meta) && !meta.injection_missing ? tooEasyHint() : ""}
+      ${meta.stage === "hardness" && meta.injection_missing ? `<div class="stale-line">💉 Your Opus run was made without your injection.
+        <button class="small" data-injectguide>How to inject</button></div>` : ""}</div></div>`;
   }
   if (m.role === "proof") {
     const stale = meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "";

@@ -202,8 +202,11 @@ async function catchUp() {
   fresh.forEach(addMessage);
 }
 
+const PAGE_OPENED = Date.now() / 1000;
 function addMessage(m) {
   if (!m || state.messages.some(x => x.id === m.id)) return;
+  if (m.role === "report" && m.meta && m.meta.stage === "hardness" && m.meta.injection_missing && !state.me.admin
+      && (m.created_at || 0) > PAGE_OPENED) setTimeout(showInjectGuideAfterHardness, 400);  // new, not old history
   state.messages.push(m);
   state.lastId = Math.max(state.lastId, m.id);
   const box = $("#messages");
@@ -995,6 +998,11 @@ async function send() {
   const review = text.match(/^\/(injection|prompt|hardness|oe|rubric)\b/i);
   const u = state.me.universe || {};
   if (review && u.asks && !u.date && !(await pickDate("Before the first review, pick your task's date."))) return;
+  if (review && review[1].toLowerCase() === "hardness" && !state.me.admin
+      && (state.me.inputs || []).some(i => i.key === "injection" && i.state === "saved")
+      && !(await showInjectGuide({ lead: `<p><b>Before /hardness:</b> it scores the Opus run you upload, so that run must have been made
+          with your injection loaded.</p>`, check: "My Opus run was made in a sandbox where I ran my injection SQL first",
+        ok: "Continue to /hardness", cancel: "Cancel" }))) return;
   if (review && !(await confirmReview(review[1].toLowerCase(), text))) return;
   if (review && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
   $("#send").disabled = true;

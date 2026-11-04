@@ -101,6 +101,14 @@ def _admin_line(row, key):
     return f"[portal-admin {key}] {when}, {who}: {_clip(text, 1500)}"
 
 
+# A /hardness report saying the Opus run was made without the injection (the CB never ran their SQL in the Agent
+# Runner sandbox; 2026-11-03 a CB filed it as a portal sync bug after two such runs).
+INJECTION_MISSING = re.compile(
+    r"injection (?:was|is) not in the run|none of the injected records|injected records? (?:were|was|are|is) "
+    r"(?:missing|absent|not (?:present|there))|(?:without|missing) (?:the|your) injection|on base data only|"
+    r"injection (?:was )?(?:missing|not loaded)", re.I)
+
+
 def date_note(attempt_id):
     """The task date as saved right now, for every chat reply. Set with the portal's date picker, it never reached a
     resumed chat session: the assistant went on asking for it from memory, ~18 replies with no lookups (2026-11-03,
@@ -1335,6 +1343,8 @@ class Runner:
             info["file"] = name
             # The input this report graded, in the taxonomy's fingerprint format (what reviewers match at L10).
             info["fingerprint"] = fingerprint.for_attempt(attempt, stage)
+            if stage == "hardness" and INJECTION_MISSING.search(text):
+                info["injection_missing"] = True  # the page opens the "inject in every sandbox" guide (2026-11-03)
             msg = db.add_message(attempt, "report", text, {"run_id": run_id, **info})
             hub.publish(attempt, "message", msg)
             if stage == run["command"]:
