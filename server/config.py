@@ -18,8 +18,8 @@ def _load_dotenv(path):
         value = value.strip()
         if value[:1] in ("'", '"'):
             value = value[1:].split(value[0], 1)[0]
-        else:  # drop an inline comment: VALUE   # note
-            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+        else:  # drop an inline comment: VALUE   # note, or KEY=   # note (empty)
+            value = re.split(r"(?:^|\s+)#", value, maxsplit=1)[0].strip()
         # The portal's own .env wins over inherited shell variables of the same name.
         os.environ[key.strip()] = value
 
