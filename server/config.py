@@ -192,6 +192,9 @@ MODAL_MEMORY_MB = _int("MODAL_MEMORY_MB", 8192)
 DAILY_REVIEW_LIMIT = _int("DAILY_REVIEW_LIMIT", 0)
 DAILY_FOLLOWUP_LIMIT = _int("DAILY_FOLLOWUP_LIMIT", 0)
 RUN_TIMEOUT_MIN = _int("RUN_TIMEOUT_MIN", 150)  # /rubric with its fix rechecks ran past 90 min (2026-10-30)
+# Prompt-cache TTL for chat replies and answers to a paused review (runner._cache_ttl, 2026-11-03): "1h" (default),
+# "5m", or empty for Claude Code's default. Reviews keep the 5-minute default.
+CHAT_PROMPT_CACHE_TTL = _get("CHAT_PROMPT_CACHE_TTL", "1h").strip()
 MAX_CALLS_PER_RUN = _int("MAX_CALLS_PER_RUN", 0)
 # Spend limit per contributor (USD, all their attempts, all time). Shown in their top bar; reaching it flags them,
 # warns them in the chat and alerts the admins. Runs are not blocked. 0 = no limit shown.
