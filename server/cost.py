@@ -61,6 +61,7 @@ COVERAGE_DAYS = 5  # how far back from the range's end the "task runs not logged
 LOST_REASONS = {"cancelled": "Task cancelled", "released": "Claim released or expired"}
 INTERNAL_SOURCES = ("queue_manager", "Scale API")
 PARTS = ("submitted", "lost", "in_progress", "internal", "untied")  # the total, split (see the module docstring)
+PART_KEYS = tuple(f"p_{k}_{side}" for k in PARTS for side in ("runs", "evals"))  # each day's parts (the all-in chart)
 CACHE_FILE = config.DATA_DIR / "cost_facts.json"
 _facts = {"at": 0.0, "rows": None, "billed": [], "states": [], "task": None, "error": None, "failed_at": 0.0}
 
@@ -144,7 +145,7 @@ def _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop
     users, nodes, incomplete, cb_submits = _claims(claim_facts)
     submitted = {(r["task"], r["cb"]) for r in all_subs} | cb_submits
     pairs, emails = {}, {}
-    other = {"untied_runs": 0.0, "untied_sandbox": 0.0, "untied_portal": 0.0, "admin_portal": 0.0}
+    other = {"untied_runs": 0.0, "untied_sandbox": 0.0, "untied_portal": 0.0, "admin_portal": 0.0, "admin_days": {}}
 
     def pair(task, uid, email):
         p = pairs.setdefault((task, uid), {"task_id": task, "user_id": uid, "agent_runs": 0.0, "sandbox": 0.0, "portal": 0.0,
@@ -178,6 +179,9 @@ def _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop
         if run["admin"] or not run["task"]:
             if at >= start:
                 other["admin_portal" if run["admin"] else "untied_portal"] += usd
+                if run["admin"]:
+                    day = int(at // DAY * DAY)
+                    other["admin_days"][day] = other["admin_days"].get(day, 0.0) + usd
             continue
         p = pair(run["task"], run["user"] or "", run["email"])
         p["upto"][2] += usd
@@ -295,6 +299,17 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                 day[1] += evals_usd
     if states is None:
         lost_day = {}
+    # Each day's spend in the five parts of the total (the all-in chart): what each person spent that day, by where
+    # their claim stands now; admins' portal runs are internal; what's left of the day is "can't be tied to a task".
+    part_day = {}
+    if states is not None:
+        for p in pairs.values():
+            for d, (runs_usd, evals_usd) in p["days"].items():
+                x = part_day.setdefault(d, {k: [0.0, 0.0] for k in PARTS[:-1]})[p["status"]]
+                x[0] += runs_usd
+                x[1] += evals_usd
+        for d, usd in other["admin_days"].items():
+            part_day.setdefault(d, {k: [0.0, 0.0] for k in PARTS[:-1]})["internal"][1] += usd
 
     daily = []
     for d in range(start, stop, DAY):
@@ -309,6 +324,12 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                       "tasks_touched": int(r.get("tasks_touched") or 0), "tasks_submitted": len(day_tasks),
                       "submitters": len(day_submitters), "sub_runs": int(r.get("sub_runs") or 0), "sub_runs_logged": int(r.get("sub_runs_logged") or 0),
                       "lost_runs": round(lost_runs, 2), "lost_evals": round(lost_evals, 2)})
+        if states is not None:
+            parts = part_day.get(d) or {k: [0.0, 0.0] for k in PARTS[:-1]}
+            for k in PARTS[:-1]:
+                daily[-1][f"p_{k}_runs"], daily[-1][f"p_{k}_evals"] = round(parts[k][0], 2), round(parts[k][1], 2)
+            daily[-1]["p_untied_runs"] = round(runs + hint - sum(parts[k][0] for k in PARTS[:-1]), 2)
+            daily[-1]["p_untied_evals"] = round(sandbox + portal - sum(parts[k][1] for k in PARTS[:-1]), 2)
 
     # tasks submitted in the range; their cost is what the people who submitted them spent on them up to the range's end,
     # and what earlier holders spent that's now lost is shown next to it (Evan, 2026-10-31)
@@ -390,15 +411,16 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                                     "lost_runs": 0.0, "lost_evals": 0.0, "people": set(),
                                     "tasks": set(), "cb_days": 0, "partial_start": b0 < start,
                                     "partial_end": _period_end(b0, period) > stop, "today": False})
-            for k in ("runs", "runs_linked", "sandbox", "hint", "portal", "lost_runs", "lost_evals"):
-                b[k] += d[k]
+            for k in ("runs", "runs_linked", "sandbox", "hint", "portal", "lost_runs", "lost_evals") + PART_KEYS:
+                if k in d:
+                    b[k] = b.get(k, 0.0) + d[k]
             b["people"] |= d["people"]
             b["cb_days"] += len(d["people"])
             b["today"] = b["today"] or d["today"]
         for r in subs:
             out[_period_start(int(r["t"]) // DAY * DAY, period)]["tasks"].add(r["task"])
         periods[period] = [{**{k: v for k, v in b.items() if k not in ("people", "tasks")},
-                            **{k: round(b[k], 2) for k in ("runs", "runs_linked", "sandbox", "hint", "portal", "lost_runs", "lost_evals")},
+                            **{k: round(b[k], 2) for k in ("runs", "runs_linked", "sandbox", "hint", "portal", "lost_runs", "lost_evals") + PART_KEYS if k in b},
                             "total": round(b["runs"] + b["sandbox"] + b["hint"] + b["portal"], 2),
                             "active_cbs": len(b["people"]), "tasks_submitted": len(b["tasks"])} for _, b in sorted(out.items())]
     for d in daily:

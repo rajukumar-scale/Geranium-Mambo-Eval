@@ -141,6 +141,8 @@ function render() {
   renderTiles(c, b);
   $("#split-card").innerHTML = c.breakdown ? splitCard(c) : "";
   $("#split-card").classList.toggle("hidden", !c.breakdown);
+  $("#allin-card").innerHTML = c.breakdown ? allInCard(c) : "";
+  $("#allin-card").classList.toggle("hidden", !c.breakdown);
   $("#daily-card").innerHTML = dailyCard(c, b);
   $("#pertask-card").innerHTML = perTaskCard(c);
   $("#percb-card").innerHTML = perCbCard(c);
@@ -345,6 +347,51 @@ function splitCard(c) {
     ${B.partial ? " Claims data is still loading, so who holds a task comes from the task state for now." : ""}</div></div></div>
     <div class="table-wrap"><table class="runs cost-table split-table"><tbody>${rows}
     <tr class="split-total"><td class="split-label">Total</td><td></td><td class="num">${esc(usd(Math.round(total)))}</td><td class="num">${total > 0 ? "100%" : "–"}</td></tr></tbody></table></div>`;
+}
+
+// All-in cost per submitted task, per day / week / month (Evan, 2026-11-04): everything spent that period ÷ tasks
+// submitted that period, in four parts: what went into submitted tasks (task runs, evals) and the overhead on each
+// side (lost, internal tests, and what can't be tied to a task: test runs, the hint pipeline, untagged calls).
+// Spend by people still holding a task (in progress) is left out: it may still become a task. Periods with fewer than
+// MIN_TASKS submissions are left out, like the other per-task charts.
+const ALLIN_SERIES = [
+  { key: "direct_runs", label: "Task runs, submitted tasks", cls: "s-runs", side: "runs", parts: ["submitted"] },
+  { key: "direct_evals", label: "Evals, submitted tasks", cls: "s-untagged", side: "evals", parts: ["submitted"] },
+  { key: "over_runs", label: "Task-run overhead", cls: "s-hint", side: "runs", parts: ["lost", "internal", "untied"] },
+  { key: "over_evals", label: "Eval overhead", cls: "s-lost", side: "evals", parts: ["lost", "internal", "untied"] }];
+const allInSeries = () => ALLIN_SERIES.filter(x => x.side === "runs" ? C.view !== "evals" : C.view !== "runs");
+const allInOf = (d, x) => x.parts.reduce((t, k) => t + (d[`p_${k}_${x.side}`] || 0), 0);
+const allInWip = d => (C.view !== "evals" ? d.p_in_progress_runs || 0 : 0) + (C.view !== "runs" ? d.p_in_progress_evals || 0 : 0);
+function allInCard(c) {
+  const period = C.period, series = allInSeries();
+  const rows = chartRows(c).map(d => {
+    const ok = d.tasks_submitted >= MIN_TASKS, r = { ...d, ok, wip: allInWip(d) };
+    series.forEach(x => { r[x.key] = allInOf(d, x); r[`${x.key}_per`] = ok ? r[x.key] / d.tasks_submitted : 0; });
+    r.all = series.reduce((t, x) => t + r[x.key], 0);
+    return r;
+  });
+  const used = rows.filter(r => r.ok), subs = used.reduce((n, r) => n + r.tasks_submitted, 0);
+  const sumOf = k => used.reduce((n, r) => n + r[k], 0), perTask = subs ? sumOf("all") / subs : 0;
+  const chart = columns({
+    id: "allin", title: `All-in cost per submitted task, by ${period}`, period, days: rows,
+    series: series.map(x => ({ ...x, key: `${x.key}_per` })), value: (d, k) => Math.max(0, d[k]),
+    pace: perTask, paceLabel: perTask ? `${kUsd(perTask)} all-in per task over ${rangeName(c)}` : "",
+    sub: `${chartSince() || "UTC days · "}${VIEWS[C.view].label.toLowerCase()}: everything spent that ${period} (except people still holding a task) ÷ tasks submitted that ${period} · ${period}s with fewer than ${MIN_TASKS} submitted tasks left out`,
+    tip: d => d.ok
+      ? [[usd(d.all / d.tasks_submitted), " all-in per submitted task"],
+         ...series.map(x => [usd(d[`${x.key}_per`]), ` ${x.label.toLowerCase()}`, x.cls]),
+         [usd(d.all), ` spent · ${fmtInt(d.tasks_submitted)} tasks submitted`],
+         ...(d.wip >= 1 ? [[usd(d.wip), " in progress, not counted"]] : [])]
+      : [[usd(d.all), " spent"], [d.tasks_submitted ? `Only ${fmtInt(d.tasks_submitted)}` : "No tasks", ` submitted this ${period}, so it's left out`]],
+  });
+  const direct = series.filter(x => x.parts[0] === "submitted").reduce((n, x) => n + sumOf(x.key), 0);
+  const head = subs ? `<div class="cc-sub">Over the ${used.length} ${period}${used.length === 1 ? "" : "s"} shown: <b>${esc(usd(perTask))}</b> all-in per submitted task
+    (${fmtInt(subs)} tasks) = ${series.map(x => `${esc(x.label.toLowerCase())} <b>${esc(usd(sumOf(x.key) / subs))}</b>`).join(" + ")}.
+    Overhead is <b>${sumOf("all") > 0 ? Math.round(100 * (sumOf("all") - direct) / sumOf("all")) : 0}%</b> of it.</div>` : "";
+  const table = rows.slice().reverse().map(d => `<tr><td>${periodRow(d, period)}</td>${series.map(x => `<td>${esc(usd(d[x.key]))}</td>`).join("")}
+    <td>${esc(usd(d.all))}</td><td>${fmtInt(d.tasks_submitted)}</td><td>${d.ok ? esc(usd(d.all / d.tasks_submitted)) : "–"}</td><td>${esc(usd(d.wip))}</td></tr>`).join("");
+  return chart + head + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "day" ? "Day" : period === "week" ? "Week" : "Month"} (UTC)</th>
+    ${series.map(x => `<th>${esc(x.label)}</th>`).join("")}<th>All-in</th><th>Tasks submitted</th><th>All-in per submitted task</th><th>In progress (not counted)</th></tr>${table}</table></details>`;
 }
 
 // Lost spend over time, by the day it was spent, split into task runs and evals, plus why the tasks were lost.

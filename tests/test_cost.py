@@ -230,6 +230,24 @@ class LostByClaimTest(unittest.TestCase):
         self.assertEqual(round(runs + evals, 2), s["total"])  # both
         self.assertEqual((s["total"], b["total"]), (54, {"agent_runs": 41, "evals": 13, "all": 54}))
 
+    def test_each_day_splits_into_the_same_parts(self):
+        """The all-in chart (Evan, 2026-11-04): each day's five parts add up to that day, and over the range to the
+        breakdown, in each view; weeks and months carry them too."""
+        r = self.build()
+        b = r["breakdown"]
+        for side in ("runs", "evals"):
+            for k in cost.PARTS:
+                want = b[k]["agent_runs" if side == "runs" else "evals"]
+                self.assertAlmostEqual(sum(d[f"p_{k}_{side}"] for d in r["daily"]), want, places=2, msg=(k, side))
+        for d in r["daily"]:
+            self.assertAlmostEqual(sum(d[f"p_{k}_runs"] for k in cost.PARTS), d["runs"] + d["hint"], places=2)
+            self.assertAlmostEqual(sum(d[f"p_{k}_evals"] for k in cost.PARTS), d["sandbox"] + d["portal"], places=2)
+        day = {d["day"]: d for d in r["daily"]}
+        self.assertEqual((day[utc(2026, 10, 18)]["p_internal_evals"], day[utc(2026, 10, 18)]["p_untied_evals"]), (3, 1.5))  # admin run; no task
+        self.assertEqual(day[utc(2026, 10, 15)]["p_lost_runs"], 5)
+        for period in ("weeks", "months"):
+            self.assertAlmostEqual(sum(w["p_lost_runs"] + w["p_lost_evals"] for w in r[period]), 7, places=2)
+
     def test_claims_not_loaded_uses_the_task_state(self):
         r = self.build(claims=False)
         self.assertTrue(r["breakdown"]["partial"] and r["lost"]["partial"])

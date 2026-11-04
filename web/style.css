@@ -465,8 +465,8 @@ kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px s
 .legend .lg { display: inline-flex; align-items: center; gap: 6px; }
 .legend .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .legend .ln { width: 18px; border-top: 1px solid var(--muted); opacity: .7; display: inline-block; }
-.cost-app { --runs: #2e7d55; --untagged: #2a78d6; --sandbox: #8fbf9f; --hint: #c98a2b; }
-:root[data-theme="dark"] .cost-app { --runs: #45a674; --untagged: #3987e5; --sandbox: #6e9c7e; --hint: #d99a3b; }
+.cost-app { --runs: #2e7d55; --untagged: #2a78d6; --sandbox: #8fbf9f; --hint: #c98a2b; --lost: #c2454b; --internal: #9a9a9a; }
+:root[data-theme="dark"] .cost-app { --runs: #45a674; --untagged: #3987e5; --sandbox: #6e9c7e; --hint: #d99a3b; --lost: #e0666b; --internal: #8a8a8a; }
 .cost-app .bar.s-runs, .cost-app .sw.s-runs { fill: var(--runs); background: var(--runs); }
 .cost-app .bar.s-untagged, .cost-app .sw.s-untagged { fill: var(--untagged); background: var(--untagged); }
 .sc-tip .tk { display: inline-block; width: 12px; height: 0; border-top: 2px solid; margin-right: 6px; vertical-align: middle; }
@@ -485,6 +485,11 @@ kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px s
 .cost-app .line.s-untagged { stroke: var(--untagged); } .cost-app .dot.s-untagged { fill: var(--untagged); }
 .cost-app .line.s-sandbox { stroke: var(--sandbox); } .cost-app .dot.s-sandbox { fill: var(--sandbox); }
 .cost-app .line.s-hint { stroke: var(--hint); } .cost-app .dot.s-hint { fill: var(--hint); }
+.cost-app .bar.s-lost, .cost-app .sw.s-lost { fill: var(--lost); background: var(--lost); }
+.cost-app .bar.s-internal, .cost-app .sw.s-internal { fill: var(--internal); background: var(--internal); }
+.sc-tip .tk.s-lost { border-color: var(--lost); } .sc-tip .tk.s-internal { border-color: var(--internal); }
+.cost-app .line.s-lost { stroke: var(--lost); } .cost-app .dot.s-lost { fill: var(--lost); }
+.cost-app .line.s-internal { stroke: var(--internal); } .cost-app .dot.s-internal { fill: var(--internal); }
 .legend .sw.swl { height: 2px; width: 16px; border-radius: 1px; }
 .table-wrap { overflow-x: auto; }
 .cost-table { font-size: 13px; }
