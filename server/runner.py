@@ -101,6 +101,23 @@ def _admin_line(row, key):
     return f"[portal-admin {key}] {when}, {who}: {_clip(text, 1500)}"
 
 
+def date_note(attempt_id):
+    """The task date as saved right now, for every chat reply. Set with the portal's date picker, it never reached a
+    resumed chat session: the assistant went on asking for it from memory, ~18 replies with no lookups (2026-11-03,
+    attempt 6adfee3a0c4d…)."""
+    try:
+        if not workspace.dated_release():
+            return ""
+        saved = workspace.universe_date(attempt_id)
+    except Exception:  # noqa: BLE001 - a note must never stop a reply
+        return ""
+    if not saved:
+        return ""
+    label = workspace.UNIVERSE_DATES[saved][1]
+    return (f"(Portal: this task's date is saved: {label}. It is set; don't ask for it again. Answer from that "
+            "universe.)\n\n")
+
+
 def admin_block(attempt_id, since, key):
     """Admin replies posted in this chat since `since`, as tagged lines for the start of the user turn."""
     rows = db.q("select content, meta, created_at from messages where attempt_id=? and role='admin' and created_at>? "
@@ -655,7 +672,7 @@ class Runner:
             spawn = self._spawn_boat if self.pool_of.get(run_id) == "boat" else self._spawn
             key = admin_key(session_id)  # the key belongs to the session, so rebuild after a retry's new one
             new_chat_session = run["kind"] == "followup" and not resume  # carry the recent conversation over
-            stale = staleness.prompt_note(attempt) if run["kind"] == "followup" else ""
+            stale = (staleness.prompt_note(attempt) + date_note(attempt)) if run["kind"] == "followup" else ""
             full = admin_block(attempt, since, key) + (recap(attempt, run["created_at"], key, since) if new_chat_session else "") + stale + prompt
             outcome = await spawn(run_id, chat, full, ["--resume" if resume else "--session-id", session_id])
             # resume_missing: the session to continue is gone. session_taken: a new session's ID already has a transcript
