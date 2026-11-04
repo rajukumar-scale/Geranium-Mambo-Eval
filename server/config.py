@@ -90,6 +90,10 @@ READER_CHECKS_PER_HOUR = _int("READER_CHECKS_PER_HOUR", 60)  # per attempt; one 
 REDASH_URL = _get("REDASH_URL", "https://redash.scale.com").rstrip("/")
 REDASH_API_KEY = _get("REDASH_API_KEY", "")
 REDASH_LOGIN_QUERY_ID = _int("REDASH_LOGIN_QUERY_ID", 387117)
+# The platform task record (persona, business function, competency, skill, task type, difficulty mode, universe) for
+# server/assignment.py, which fills a chat's assignment and task date from it (2026-11-03). 0 turns that off.
+REDASH_TASK_QUERY_ID = _int("REDASH_TASK_QUERY_ID", 399176)
+ASSIGNMENT_AUTOFILL = _int("ASSIGNMENT_AUTOFILL", 1)
 # Budget of the LiteLLM key, for the admin page: a saved query on the LiteLLM tables (0 = no budget panel).
 BUDGET_QUERY_ID = _int("BUDGET_QUERY_ID", 388350)
 BUDGET_DAILY_QUERY_ID = _int("BUDGET_DAILY_QUERY_ID", 389171)  # the key's spend per UTC day, for the bar chart (0 = none)

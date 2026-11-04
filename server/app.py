@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import assignment, auth, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -107,6 +107,7 @@ async def startup():
     if problems:
         raise RuntimeError("Portal configuration problems:\n- " + "\n- ".join(problems))
     db.conn()
+    assignment.LOOP = asyncio.get_running_loop()
     RUNNER.start()
     asyncio.create_task(submissions.loop())
     asyncio.create_task(status.loop())
@@ -507,6 +508,7 @@ async def login(body: LoginBody, request: Request):
     workspace.ensure_attempt(attempt_id, unpack=False)
     if not existing:
         db.add_message(attempt_id, "system", "Welcome! " + HELP)
+        asyncio.create_task(assignment.ensure_safe(attempt_id))  # fill the assignment and date from the platform
     resp = JSONResponse({"ok": True, "attempt_id": attempt_id, **({"task_id": chat["task_id"]} if bypass else {})})
     payload = {"attempt_id": attempt_id, "user_id": row["USER_ID"], "iat": time.time()}
     if bypass:
@@ -527,6 +529,7 @@ def logout():
 @app.get("/api/me")
 def me(request: Request):
     session = current_user(request)
+    assignment.schedule(session["attempt_id"])  # background: fill a missing assignment / date from the platform
     try:  # the chat page calls this whenever it opens a chat: the first time, before any /prompt, post the kickoff card
         plan.maybe_kickoff(session, db.get_chat(session["attempt_id"]))
     except Exception:  # noqa: BLE001 - the card must never stop the chat from opening
@@ -895,6 +898,8 @@ async def send(body: SendBody, request: Request):
     pending = db.get_run(chat["pending_review_run"]) if chat.get("pending_review_run") and not command else None
     if db.active_run(attempt_id):
         raise HTTPException(409, "A run is already in progress for this attempt. Wait for it to finish or cancel it.")
+    if command:  # before a review reads them: the platform's assignment and date where the chat has none yet
+        await assignment.ensure_safe(attempt_id)
     over = None if session.get("admin") else spend.over_budget(attempt_id)
     if over:  # Evan, 2026-11-03: past the budget, runs need an admin's approval (/admin and /help still work)
         raise HTTPException(402, f"This task reached its ${over[1]:,.0f} budget (${over[0]:,.2f} spent), so new reviews and "
