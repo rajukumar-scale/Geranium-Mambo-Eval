@@ -205,8 +205,9 @@ async function catchUp() {
 const PAGE_OPENED = Date.now() / 1000;
 function addMessage(m) {
   if (!m || state.messages.some(x => x.id === m.id)) return;
-  if (m.role === "report" && m.meta && m.meta.stage === "hardness" && m.meta.injection_missing && !state.me.admin
-      && (m.created_at || 0) > PAGE_OPENED) setTimeout(showInjectGuideAfterHardness, 400);  // new, not old history
+  if (m.role === "report" && m.meta && m.meta.stage === "hardness" && (m.meta.injection_missing || m.meta.injection_stale)
+      && !state.me.admin && (m.created_at || 0) > PAGE_OPENED)  // new, not old history
+    setTimeout(() => showInjectGuideAfterHardness(m.meta.injection_missing ? "missing" : "stale"), 400);
   state.messages.push(m);
   state.lastId = Math.max(state.lastId, m.id);
   const box = $("#messages");

@@ -260,6 +260,7 @@ button.danger-solid:hover { border-color: var(--ink); }
 .inject-steps li { margin-bottom: 14px; }
 .inject-steps li p { margin: 0 0 6px; }
 .inject-steps img { width: 100%; border-radius: 8px; border: 1px solid #DADADA; display: block; }
+.inject-fresh { margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: #EEF4FB; border: 1px solid #B9D0EA; font-size: 15px; line-height: 1.5; }
 .taxo-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid #EAEAEA; background: #F7F7F7; }
 .taxo-foot button:not(.primary) { background: #FFF; color: #000; border-color: #C7C7C7; }
 .proof .head { padding: 18px 22px 18px; color: #fff; background: var(--evergreen); display: flex; gap: 16px; align-items: flex-end; }

@@ -54,3 +54,27 @@ class InjectionMissingReportTest(unittest.TestCase):
         common = (WEB / "common.js").read_text()
         self.assertIn("data-injectguide", common)
         self.assertIn("function showInjectGuide(", common)
+
+
+class InjectionStaleReportTest(unittest.TestCase):
+    """A /hardness report saying the run was made on an older SQL version gets meta.injection_stale."""
+
+    def test_the_real_wording_is_caught(self):
+        from server import runner
+        for text in ("The SQL is also newer than the run's environment by input history: it is revision 12",
+                     "This is a **source-version conflict that changes the expected answer** (1A §4)."):
+            self.assertTrue(runner.INJECTION_STALE.search(text), text)
+            self.assertFalse(runner.INJECTION_MISSING.search(text), text)
+
+    def test_ordinary_mentions_are_not_flagged(self):
+        from server import runner
+        for text in ("Read tracker (idx 77-78), flagged it out of date, used the stale fallback trap",
+                     "If the prompt or SQL changes, this pass is outdated: rerun /injection, /prompt, a fresh Opus run",
+                     "So the run state contained this SQL version."):
+            self.assertFalse(runner.INJECTION_STALE.search(text), text)
+
+    def test_the_guide_explains_a_fresh_sandbox(self):
+        common = (WEB / "common.js").read_text()
+        self.assertIn("Changed your SQL? Start a fresh sandbox.", common)
+        self.assertIn('data-injectguide="stale"', common)
+

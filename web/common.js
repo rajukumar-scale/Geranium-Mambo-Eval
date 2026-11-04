@@ -407,6 +407,11 @@ function injectGuideHtml({ lead = "", check, ok, cancel = "Close" }) {
         ${shot("inject_3_no_records.png", "<b>No records found</b> (5) is normal: an insert or update returns no rows. It is not an error.")}
         ${shot("inject_4_changelog.png", "To check it worked, open <b>Tables → _changelog</b> (6): one row for each change you made (7).")}
       </ol>
+      <div class="inject-fresh"><b>Changed your SQL? Start a fresh sandbox.</b> If you edited your injection SQL since you opened
+        a sandbox (or since your last Opus run), don't run the new version on top of the old one, and don't try to delete the old
+        rows by hand: inserts with the same ids fail and updates apply twice, so the run still won't match your task. Open a
+        <b>new</b> sandbox (it starts from the plain universe), run your <b>current</b> SQL once, check <b>_changelog</b>, then
+        make your Opus run there.</div>
       ${check ? `<label class="taxo-check"><input type="checkbox"> ${esc(check)}</label>` : ""}
     </div>
     <div class="taxo-foot"><button data-close>${esc(cancel)}</button>${ok ? `<button class="primary" data-show${check ? " disabled" : ""}>${esc(ok)}</button>` : ""}</div></div>`;
@@ -428,14 +433,20 @@ function showInjectGuide(opts) {
     document.body.appendChild(wrap);
   });
 }
-const INJECT_AFTER_LEAD = `<p class="taxo-warn">This /hardness review found that your Opus run was made <b>without your injection</b>,
-  so it can't score it. Make a new run in a sandbox where you ran your SQL first, upload it, and send /hardness again.</p>`;
-function showInjectGuideAfterHardness() {
-  return showInjectGuide({ lead: INJECT_AFTER_LEAD, ok: "Got it", cancel: "Close" });
+const INJECT_AFTER_LEAD = {
+  missing: `<p class="taxo-warn">This /hardness review found that your Opus run was made <b>without your injection</b>,
+    so it can't score it. Make a new run in a sandbox where you ran your SQL first, upload it, and send /hardness again.</p>`,
+  stale: `<p class="taxo-warn">This /hardness review found that your Opus run was made on an <b>older version of your SQL</b>
+    than the one saved now, so it doesn't match your task. Open a <b>new</b> sandbox, run your current SQL there, make a new
+    Opus run, upload it, and send /hardness again.</p>`,
+};
+function showInjectGuideAfterHardness(kind = "missing") {
+  return showInjectGuide({ lead: INJECT_AFTER_LEAD[kind] || INJECT_AFTER_LEAD.missing, ok: "Got it", cancel: "Close" });
 }
 if (typeof document !== "undefined" && document.addEventListener) {
   document.addEventListener("click", e => {
-    if (e.target.closest?.("[data-injectguide]")) { e.preventDefault(); showInjectGuideAfterHardness(); }
+    const b = e.target.closest?.("[data-injectguide]");
+    if (b) { e.preventDefault(); showInjectGuideAfterHardness(b.dataset.injectguide || "missing"); }
   });
 }  // their pass screen reminds them to inject in every sandbox
 const CHECKABLE = new Set(["injection", "prompt", "oe", "rubric"]);
@@ -697,9 +708,11 @@ function messageHtml(m, opts = {}) {
       ${meta.exec_status && meta.exec_status !== "COMPLETE" ? `<span class="muted">· ${esc(meta.exec_status)}</span>` : ""}</div>
       ${ts}<button data-report="${m.id}">View</button><button data-download="${m.id}">Download</button></div>
       ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}
-      ${!opts.admin && hardnessTooEasy(meta) && !meta.injection_missing ? tooEasyHint() : ""}
+      ${!opts.admin && hardnessTooEasy(meta) && !meta.injection_missing && !meta.injection_stale ? tooEasyHint() : ""}
       ${meta.stage === "hardness" && meta.injection_missing ? `<div class="stale-line">💉 Your Opus run was made without your injection.
-        <button class="small" data-injectguide>How to inject</button></div>` : ""}</div></div>`;
+        <button class="small" data-injectguide="missing">How to inject</button></div>`
+      : meta.stage === "hardness" && meta.injection_stale ? `<div class="stale-line">💉 Your Opus run was made on an older version of your SQL.
+        <button class="small" data-injectguide="stale">How to re-inject</button></div>` : ""}</div></div>`;
   }
   if (m.role === "proof") {
     const stale = meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "";

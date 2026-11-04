@@ -109,6 +109,15 @@ INJECTION_MISSING = re.compile(
     r"injection (?:was )?(?:missing|not loaded)", re.I)
 
 
+# ...or made on an OLDER version of the SQL than the one saved now (wording seen in real /hardness reports: "The SQL is
+# also newer than the run's environment", "source-version conflict").
+INJECTION_STALE = re.compile(
+    r"(?:sql|injection) is (?:also )?newer than the run|source-version conflict|run(?:'s)? (?:environment|state|sandbox) "
+    r"(?:has|had|held|contained|holds) an? (?:older|earlier|previous) (?:version of the )?(?:sql|injection)|"
+    r"(?:older|earlier|previous) (?:version of (?:the|your) )?(?:sql|injection)(?: version| revision)? (?:was|is) "
+    r"(?:loaded|in the run|in the sandbox)", re.I)
+
+
 def date_note(attempt_id):
     """The task date as saved right now, for every chat reply. Set with the portal's date picker, it never reached a
     resumed chat session: the assistant went on asking for it from memory, ~18 replies with no lookups (2026-11-03,
@@ -1345,6 +1354,8 @@ class Runner:
             info["fingerprint"] = fingerprint.for_attempt(attempt, stage)
             if stage == "hardness" and INJECTION_MISSING.search(text):
                 info["injection_missing"] = True  # the page opens the "inject in every sandbox" guide (2026-11-03)
+            elif stage == "hardness" and INJECTION_STALE.search(text):
+                info["injection_stale"] = True  # ...with "start a fresh sandbox with your current SQL" first
             msg = db.add_message(attempt, "report", text, {"run_id": run_id, **info})
             hub.publish(attempt, "message", msg)
             if stage == run["command"]:
