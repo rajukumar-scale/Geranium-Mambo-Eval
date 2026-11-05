@@ -422,7 +422,6 @@ function proofHtml(p, opts = {}) {
       ${p.fingerprint ? "" : `<div class="codebox"><div class="k">Verification code</div><div class="c">${esc(p.code)}</div></div>`}
     </div>
     ${staleBand(p)}
-    ${laterBand(p)}
     ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as your Outlier task shows it</div>
       <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div>
       ${spelledCode(shortFp(p.fingerprint)).map(l => `<div class="spell">${esc(l)}</div>`).join("")}</div>` : ""}
@@ -432,6 +431,7 @@ function proofHtml(p, opts = {}) {
       <div><div class="k">User</div><div class="v">${esc(p.user_email)}</div></div>
       <div><div class="k">Completed</div><div class="v">${esc(fmtUTC(p.finished_at))}</div></div>
     </div>
+    ${laterBand(p)}
     <details class="more"${opts.open ? " open" : ""}><summary>More details</summary>
     ${rubricWeights(p.fingerprint) ? `<div class="wband"><div class="k">Rubric weights, one per row · not part of the verification code</div>
       <div class="w">${esc(rubricWeights(p.fingerprint))}</div></div>` : ""}
