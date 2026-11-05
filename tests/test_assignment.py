@@ -175,6 +175,15 @@ class EnsureTest(unittest.TestCase):
         self.assertIn("Competency: Corporate Ops", saved)
         self.assertIn("Difficulty Mode: hard", saved)
 
+    def test_chats_from_before_the_switch_keep_what_they_have(self):
+        db.update("chats", "attempt_id", "a1", created_at=assignment.STRICT_SINCE - 60)
+        self._save("task-details", "00_Task_Assigned_Inputs.md", "Persona: Frederick Stone\nCompetency: Finance\nTask Type: long-horizon\n")
+        self.universe = "normal"
+        self.assertEqual(self.run_ensure(), {})
+        self.assertEqual(self.stored, [])
+        self._save("task-details", "00_Task_Assigned_Inputs.md", "Difficulty Mode: easy\n")  # the easier-mode rule still applies
+        self.assertEqual(self.run_ensure(), {"replaced": ["difficulty mode"]})
+
     def test_a_task_date_that_isnt_the_tasks_is_replaced(self):
         self._save("task-details", "00_Task_Assigned_Inputs.md", assignment.render(ROW))
         self.universe = "normal"
@@ -251,7 +260,7 @@ class DatePickerTest(unittest.TestCase):
         self.addCleanup(lambda: db._local.__dict__.clear())
         db._local.__dict__.clear()
         db.ex("insert into chats(attempt_id, task_id, user_id, email, session_id, created_at, last_activity) "
-              "values ('a1',?,'u1','cb@x.com','s1',0,0)", (TASK,))
+              "values ('a1',?,'u1','cb@x.com','s1',?,?)", (TASK, time.time(), time.time()))
         c = TestClient(portal.app)
         c.cookies.set(auth.USER_COOKIE, auth.sign({"attempt_id": "a1", "user_id": "u1", "iat": time.time()}))
         r = c.post("/api/universe", json={"date": "normal"})

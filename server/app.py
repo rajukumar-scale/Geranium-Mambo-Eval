@@ -574,7 +574,7 @@ async def set_universe(body: UniverseBody, request: Request):
         raise HTTPException(400, "Pick Oct 1, 2025 or Feb 14, 2026.")
     chat = db.get_chat(attempt_id)
     row = await assignment.platform_record(chat["task_id"]) if assignment.enabled(chat) else None
-    fixed = assignment.universe_key(row) if row else None
+    fixed = assignment.universe_key(row) if row and assignment.strict(chat) else None
     if fixed and body.date != fixed and not session.get("admin"):  # the task's date is on its platform record
         raise HTTPException(409, f"This task's date comes from the platform's record: {workspace.UNIVERSE_DATES[fixed][1]}. "
                                  "It can't be changed here; type /admin if the platform's date is wrong.")

@@ -143,11 +143,21 @@ def same_value(saved, platform):
     return len(first) >= 4 and any(w.startswith(first) for w in a.split())
 
 
-def disagreements(text, row):
+# Chats created from 2026-11-05 01:10 UTC take the whole assignment and the task date from the platform;
+# older chats keep what they have, apart from the easier-mode / shorter-type rule (Evan: "for the current existing chats
+# idc, do this for future from now").
+STRICT_SINCE = 1793841000
+
+
+def strict(chat):
+    return bool(chat) and (chat.get("created_at") or 0) >= STRICT_SINCE
+
+
+def disagreements(text, row, fields=True):
     """What in a saved (pasted) assignment really differs from the platform's record: another persona, business
-    function, competency or task skill, or an easier difficulty mode / shorter task type than assigned."""
+    function, competency or task skill (when `fields`), or an easier difficulty mode / shorter task type than assigned."""
     out = []
-    saved = pasted_fields(text)
+    saved = pasted_fields(text) if fields else {}
     for label, key in _FIELDS:
         want = (row.get(key) or "").strip()
         if want and saved.get(label) and not any(same_value(v, want) for v in saved[label]):
@@ -214,7 +224,7 @@ async def ensure(attempt_id):
             done["task_details"] = True
         else:
             text = _saved_text(attempt_id, "task-details")
-            diff = disagreements(text, row)
+            diff = disagreements(text, row, fields=strict(chat))
             if diff:
                 before = staleness.snapshot(attempt_id).get("task-details")
                 (workspace.uploads_dir(attempt_id) / SOURCE_NAME).write_text(render(keep_harder(text, row)), encoding="utf-8")
@@ -236,7 +246,7 @@ async def ensure(attempt_id):
         if key and workspace.dated_release() and saved_date is None:
             await _store(attempt_id, "universe", key)
             done["universe"] = key
-        elif key and saved_date and saved_date != key:  # a date picked or pasted that isn't the task's (Evan, 2026-11-04)
+        elif key and saved_date and saved_date != key and strict(chat):  # a date picked or pasted that isn't the task's (Evan, 2026-11-04)
             await _store(attempt_id, "universe", key)
             done["universe_replaced"] = key
             m = db.add_message(attempt_id, "system", "Your task date didn't match the platform's record of this task, so "
