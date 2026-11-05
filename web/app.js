@@ -479,8 +479,8 @@ function syncProofCards(proofs) {
     if (m.role !== "proof" || !m.meta) continue;
     const now = byRef[m.meta.ref || m.meta.code];
     if (!now) continue;
-    const was = JSON.stringify([m.meta.outdated || null, m.meta.locked || null, m.meta.code || null]);
-    if (was === JSON.stringify([now.outdated || null, now.locked || null, now.code || null])) continue;
+    const was = JSON.stringify([m.meta.outdated || null, m.meta.locked || null, m.meta.code || null, m.meta.warn_later || []]);
+    if (was === JSON.stringify([now.outdated || null, now.locked || null, now.code || null, now.warn_later || []])) continue;
     m.meta = { ...now };
     const el = document.querySelector(`#messages [data-proof="${m.id}"]`)?.closest(".msg");
     if (el) el.outerHTML = messageHtml(m);
@@ -495,22 +495,23 @@ function renderPassGate(gate) {
   const any = gate && gate.stages.some(s => s.status !== "none");
   if (!any) { box.innerHTML = ""; box.className = ""; return; }
   const done = gate.stages.filter(s => s.status === "current").length;
-  box.className = "pass-gate" + (gate.locked ? " is-locked" : "");
-  box.innerHTML = `<div class="pg-head">${gate.locked
-      ? `🔒 <b>Passes locked</b><span class="muted"> · send ${gate.todo.map(s => `<b class="mono">/${esc(s)}</b>`).join(", ")} again</span>`
+  const stale = gate.todo.length > 0;
+  box.className = "pass-gate" + (stale ? " is-locked" : "");
+  box.innerHTML = `<div class="pg-head">${stale
+      ? `⚠ <b>Send ${gate.todo.map(s => `<span class="mono">/${esc(s)}</span>`).join(", ")} again</b><span class="muted"> · outdated: re-run before you submit</span>`
       : `✅ <b>${done} of 5 current</b><span class="muted"> · passes ready to use</span>`}</div>
-    <div class="pg-dots">${gate.stages.map(s => `<span class="pg-dot ${s.status}" title="/${esc(s.stage)}: ${esc(s.status === "none" ? "not passed yet" : s.status)}">${esc((STAGE_NAMES[s.stage] || s.stage).split(" ")[0])}</span>`).join("")}</div>
-    ${gate.locked ? `<button class="small primary" data-gateinfo>What do I do?</button>` : ""}`;
+    <div class="pg-dots">${gate.stages.map(s => `<span class="pg-dot ${s.status}${s.locked ? " locked" : ""}" title="/${esc(s.stage)}: ${esc(s.status === "none" ? "not passed yet" : s.locked && s.status === "current" ? "current, locked until the earlier stage passes" : s.status)}">${s.locked ? "🔒 " : ""}${esc((STAGE_NAMES[s.stage] || s.stage).split(" ")[0])}</span>`).join("")}</div>
+    ${stale ? `<button class="small primary" data-gateinfo>What do I do?</button>` : ""}`;
   const id = state.me.attempt_id;
-  if (lastLocked[id] === true && !gate.locked) showPassesUnlocked();
-  lastLocked[id] = gate.locked;
+  if (lastLocked[id] === true && !stale) showPassesUnlocked();
+  lastLocked[id] = stale;
 }
 document.addEventListener("click", e => {
   const g = e.target.closest("[data-gateinfo]");
   if (g && state.me && state.me.pass_gate) {
     const gate = state.me.pass_gate;
-    const cur = gate.stages.find(s => s.status === "current") || gate.stages.find(s => s.status === "outdated");
-    return showLockedPass({ stage: cur ? cur.stage : gate.todo[0], verdict: cur ? cur.verdict : "", locked: { self: false, todo: gate.todo } });
+    const first = gate.stages.find(s => s.status === "outdated");
+    return showLockedPass({ stage: first ? first.stage : gate.todo[0], verdict: first ? first.verdict : "", locked: { self: true, todo: gate.todo } });
   }
   const b = e.target.closest("[data-sendcmd]");
   if (!b || !state.me) return;
@@ -573,7 +574,7 @@ function renderSide() {
   $("#proofs").innerHTML = me.proofs.length ? me.proofs.map((p, i) =>
     p.locked
       ? `<div class="list-item locked" data-pr="${i}" title="Locked until ${esc((p.locked.todo || []).map(s => "/" + s).join(", "))} ${(p.locked.todo || []).length > 1 ? "are" : "is"} sent again"><span class="grow">🔒 /${esc(p.stage)} · <span class="muted">locked</span></span>${pill(p.outdated ? "OUTDATED" : "LOCKED")}</div>`
-      : `<div class="list-item" data-pr="${i}" title="${esc(p.fingerprint || p.code)}"><span class="grow">/${esc(p.stage)} · <span class="mono">${p.fingerprint ? "🔏 " + esc(shortFp(p.fingerprint)) : esc(p.code)}</span></span>${pill(p.verdict)}</div>`).join("") : "None yet";
+      : `<div class="list-item" data-pr="${i}" title="${esc((p.warn_later || []).length ? "Also send " + p.warn_later.map(s => "/" + s).join(", ") + " again before you submit" : p.fingerprint || p.code)}"><span class="grow">${(p.warn_later || []).length ? "⚠ " : ""}/${esc(p.stage)} · <span class="mono">${p.fingerprint ? "🔏 " + esc(shortFp(p.fingerprint)) : esc(p.code)}</span></span>${pill(p.verdict)}</div>`).join("") : "None yet";
   renderPassGate(me.pass_gate);
   syncProofCards(me.proofs);
   const size = n => (n == null ? "" : n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`);

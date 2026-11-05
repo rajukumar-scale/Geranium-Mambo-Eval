@@ -748,3 +748,13 @@ kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px s
 .bubble.proofcard.lockedcard { background: #FFF6EC !important; border-color: #F3B37A !important; border-left: 4px solid #E8710A !important; }
 :root[data-theme="dark"] .bubble.proofcard.lockedcard { background: #2a1d10 !important; border-color: #6b4317 !important; }
 .lock-dialog.unlocked .lock-list { padding-top: 16px; }
+/* Later stages outdated (staleness.later_outdated): usable card, but OE/rubric must be sent again before submitting. */
+.proof .laterband { padding: 12px 16px; background: #FFF1E4; border-top: 1px solid #F3B37A; border-bottom: 1px solid #F3B37A; color: #000; }
+.proof .laterband .k { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: #9a4a06; margin-bottom: 4px; }
+.proof .laterband .m { font-size: 14.5px; }
+.proofcard .later-line { margin-top: 6px; font-size: 13px; color: #9a4a06; font-weight: 500; }
+.lock-dialog.warnlater .lock-list { padding-top: 16px; }
+.lock-note.penalty { background: #FDEBEC; border: 1px solid #F0B8BB; color: #5c1418; }
+:root[data-theme="dark"] .lock-note.penalty { background: #3a1518; border-color: #6b2a2e; color: #ffd6d8; }
+.lock-dialog .later-check { margin: 12px 18px 0; }
+.pg-dot.current.locked { background: var(--grey-90); border-color: var(--grey-80); color: var(--muted); }
