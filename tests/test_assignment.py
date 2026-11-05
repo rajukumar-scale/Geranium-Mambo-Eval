@@ -1,7 +1,10 @@
-"""server/assignment.py (2026-11-03): a chat's assignment and task date come from the platform task record when the
-chat has none; a saved assignment that disagrees on difficulty mode or task type gets one note, never an overwrite."""
+"""server/assignment.py (2026-11-03, widened 2026-11-04): a chat's assignment and task date come from the platform task
+record. A saved one that really differs (another persona, competency, business function, task skill or task date, an
+easier mode or a shorter task type) is replaced by the platform's; typos, old names, a harder mode or a longer type are
+left alone. Correcting only the business function or task skill keeps the passes."""
 
 import asyncio
+import hashlib
 import json
 import tempfile
 import time
@@ -49,6 +52,33 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(assignment.disagreements("Persona: Frederick\n", ROW), [])  # nothing pasted: nothing to flag
 
 
+class FieldsTest(unittest.TestCase):
+    def test_every_pasted_layout_is_read(self):
+        for text in ("🏢 Business Function Executive  🧑 Persona Frederick Stone Role: Co-founder  🎯 Competency Corporate Ops"
+                     "  🛠️ Task Skill Actions  📋 Task Type long-horizon",
+                     "🏢 Business Function\nExecutive\n\n🧑 Persona\nFrederick Stone\nRole: Co-founder\n\n🎯 Competency\nCorporate Ops\n",
+                     "Persona : Frederick Stone, Co-founder Business function : Executive Competency : Corporate Ops Task skill : Actions"):
+            f = assignment.pasted_fields(text)
+            self.assertEqual((f["persona"][0], f["business function"][0], f["competency"][0]),
+                             ("Frederick Stone", "Executive", "Corporate Ops"), text)
+
+    def test_typos_and_old_names_are_the_same_value(self):
+        for saved, platform in (("Simon Walkera", "Simon Walker"), ("Retrival", "Retrieval"), ("Enginerring Ops", "Engineering Ops"),
+                                ("Founders-Exec-Strategy", "Executive"), ("Claire", "Claire Morgan"), ("Marketing & GTM", "Marketing and GTM")):
+            self.assertTrue(assignment.same_value(saved, platform), (saved, platform))
+        for saved, platform in (("Corporate Ops", "Executive"), ("Engineering Ops", "Design"), ("Leonard Hayes", "Martin Walsh")):
+            self.assertFalse(assignment.same_value(saved, platform), (saved, platform))
+
+    def test_real_differences_are_found_typos_are_not(self):
+        self.assertEqual(assignment.disagreements("Persona: Frederik Stone\nBusiness function: Executive\nCompetency: Corporate Ops\n", ROW), [])
+        self.assertEqual(assignment.disagreements("Persona: Frederick Stone\nBusiness function: Corporate Ops\nCompetency: Corporate Ops\n", ROW),
+                         [("business function", "Corporate Ops", "Executive")])
+        self.assertEqual(assignment.disagreements("Persona: Frederick Stone\nCompetency: Finance\n", ROW),
+                         [("competency", "Finance", "Corporate Ops")])
+        template = "Paste it here. Do not change the Persona or any assigned value.\n```\nPersona\nFrederick Stone\n```"
+        self.assertEqual(assignment.disagreements(template, ROW), [])  # the label in the instructions isn't the value
+
+
 class EnsureTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -90,7 +120,8 @@ class EnsureTest(unittest.TestCase):
         index = self.inputs / "inputs.json"
         data = json.loads(index.read_text()) if index.is_file() else {"inputs": {}}
         data["inputs"][key] = {"state": "saved", "revision": 1,
-                               "files": [{"path": f"Evals/task_inputs/{name}", "sha256": "x", "bytes": len(text)}]}
+                               "files": [{"path": f"Evals/task_inputs/{name}", "sha256": hashlib.sha256(text.encode()).hexdigest(),
+                                          "bytes": len(text)}]}
         index.write_text(json.dumps(data))
 
     def run_ensure(self):
@@ -108,6 +139,48 @@ class EnsureTest(unittest.TestCase):
         self.assertEqual(len(self.notes("assignment_autofill")), 1)
         self.assertEqual(self.run_ensure(), {})  # nothing left to do, no second note
         self.assertEqual(len(self.notes("assignment_autofill")), 1)
+
+    def proof(self, stage="prompt"):
+        from server import staleness
+        db.ex("insert into proofs(code, run_id, attempt_id, payload, created_at) values (?,?,?,?,?)",
+              (f"EVP-{stage}", "r1", "a1", json.dumps({"stage": stage, "verdict": "PASS", "inputs": staleness.snapshot("a1")}), time.time()))
+
+    def outdated(self):
+        from server import staleness
+        return staleness.latest_outdated("a1")
+
+    def test_a_mistyped_business_function_is_corrected_and_the_passes_still_count(self):
+        self._save("task-details", "00_Task_Assigned_Inputs.md",
+                   "Persona: Frederick Stone\nBusiness function: Corporate Ops\nCompetency: Corporate Ops\nTask Type: long-horizon\n")
+        self.universe = "synthcut"
+        self.proof()
+        done = self.run_ensure()
+        self.assertEqual(done, {"replaced": ["business function"]})
+        self.assertIn("Business Function: Executive", (self.inputs / "00_Task_Assigned_Inputs.md").read_text())
+        self.assertEqual(self.outdated(), {})
+        self.assertIn("still count", self.notes("assignment_replaced")[0]["content"])
+
+    def test_another_competency_is_replaced_and_its_passes_go_outdated(self):
+        self._save("task-details", "00_Task_Assigned_Inputs.md", "Persona: Frederick Stone\nCompetency: Finance\n")
+        self.universe = "synthcut"
+        self.proof()
+        self.assertEqual(self.run_ensure(), {"replaced": ["competency"]})
+        self.assertIn("prompt", self.outdated())
+
+    def test_a_harder_mode_is_kept_when_another_field_is_corrected(self):
+        self._save("task-details", "00_Task_Assigned_Inputs.md", "Competency: Finance\nTask Type: long-horizon\nDifficulty Mode: hard\n")
+        self.universe = "synthcut"
+        self.run_ensure()
+        saved = (self.inputs / "00_Task_Assigned_Inputs.md").read_text()
+        self.assertIn("Competency: Corporate Ops", saved)
+        self.assertIn("Difficulty Mode: hard", saved)
+
+    def test_a_task_date_that_isnt_the_tasks_is_replaced(self):
+        self._save("task-details", "00_Task_Assigned_Inputs.md", assignment.render(ROW))
+        self.universe = "normal"
+        done = self.run_ensure()
+        self.assertEqual((done.get("universe_replaced"), self.universe), ("synthcut", "synthcut"))
+        self.assertEqual(len(self.notes("universe_replaced")), 1)
 
     def test_a_harder_mode_than_assigned_is_kept_without_a_note(self):
         """Evan, 2026-11-04: Hard on a Medium task grades stricter, so it isn't flagged and its passes stay current."""
@@ -133,7 +206,7 @@ class EnsureTest(unittest.TestCase):
 
     def test_matching_saved_assignment_is_left_alone(self):
         self._save("task-details", "00_Task_Assigned_Inputs.md", "Horizon: Long-Horizon\nDifficulty: Medium\n")
-        self.universe = "normal"  # a date they picked is never changed either
+        self.universe = "synthcut"  # the task's own date (a different one is replaced: see below)
         self.assertEqual(self.run_ensure(), {})
         self.assertEqual(self.stored, [])
 
@@ -159,3 +232,28 @@ class EnsureTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DatePickerTest(unittest.TestCase):
+    """The task date comes from the platform's record: the picker can't move it to the other date (2026-11-04)."""
+
+    def test_the_other_date_is_refused(self):
+        from fastapi.testclient import TestClient
+        from server import app as portal, auth
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        for p in (mock.patch.object(config, "DATA_DIR", Path(tmp.name)), mock.patch.object(db, "_conn", None),
+                  mock.patch.object(config, "ASSIGNMENT_AUTOFILL", 1),
+                  mock.patch.object(assignment, "platform_record", mock.AsyncMock(return_value=ROW)),
+                  mock.patch.object(workspace, "thaw", lambda a: False)):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(lambda: db._local.__dict__.clear())
+        db._local.__dict__.clear()
+        db.ex("insert into chats(attempt_id, task_id, user_id, email, session_id, created_at, last_activity) "
+              "values ('a1',?,'u1','cb@x.com','s1',0,0)", (TASK,))
+        c = TestClient(portal.app)
+        c.cookies.set(auth.USER_COOKIE, auth.sign({"attempt_id": "a1", "user_id": "u1", "iat": time.time()}))
+        r = c.post("/api/universe", json={"date": "normal"})
+        self.assertEqual(r.status_code, 409, r.text)
+        self.assertIn("comes from the platform", r.json()["detail"])

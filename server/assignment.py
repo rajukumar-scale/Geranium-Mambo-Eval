@@ -22,12 +22,13 @@ ASSIGNMENT_AUTOFILL=0.
 """
 
 import asyncio
+import difflib
 import logging
 import os
 import re
 import time
 
-from . import auth, config, db, hub, workspace
+from . import auth, config, db, hub, staleness, workspace
 
 log = logging.getLogger("portal.assignment")
 
@@ -101,9 +102,56 @@ def _pasted(text, pattern):
 MODE_RANK = {"easy": 0, "medium": 1, "hard": 2}
 
 
+# The labels a pasted assignment uses, in any of the formats seen (one per line, "Label: value", or the taxonomy's
+# emoji row "🏢 Business Function Executive  🧑 Persona …" on one line).
+_LABELS = r"business function|persona|role|competency|task skill|task type(?: / horizon)?|horizon(?: type)?(?: \(normal or long\))?|difficulty mode|difficulty|universe date|task date"
+# A different business function or task skill changes how a task is labelled, not what it must be: correcting one keeps
+# the passes (Evan, 2026-11-04: 8 contributors had typed their competency as their business function).
+LABEL_ONLY = {"business function", "task skill"}
+_FIELDS = (("persona", "persona_name"), ("business function", "business_function"), ("competency", "competency"),
+           ("task skill", "task_skill"))
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower().replace("&", " and ")).strip()
+
+
+def pasted_fields(text):
+    """{label: [values]} from a saved assignment, whatever its layout (a label can appear more than once, for example in
+    a template's instructions and again in its filled-in block)."""
+    t = re.sub(r"[^\w\s:/().,&+-]", " ", text or "")  # drop the emoji
+    marks = [(m.start(), m.end(), m.group(1).lower()) for m in re.finditer(rf"(?i)\b({_LABELS})\b\s*[:\-]?", t)]
+    out = {}
+    for i, (start, end, label) in enumerate(marks):
+        value = t[end: marks[i + 1][0] if i + 1 < len(marks) else len(t)]
+        value = re.split(r"[\n,(]", value.strip(" :-\t"), maxsplit=1)[0].strip(" :-.")
+        key = next((k for k, _ in _FIELDS if label.startswith(k)), None)
+        if key and value:
+            out.setdefault(key, []).append(value)
+    return out
+
+
+def same_value(saved, platform):
+    """A typo, an old taxonomy name or a first name only is the same value (2026-11-04: of 449 chats compared, all but
+    two differences were "Simon Walkera", "Retrival", "Enginerring Ops", "Founders-Exec-Strategy", "Claire")."""
+    a, b = _norm(saved), _norm(platform)
+    if not a or not b or a == b or a in b or b in a:
+        return True
+    if difflib.SequenceMatcher(None, a, b).ratio() >= 0.8:
+        return True
+    first = b.split()[0][:4]  # "exec" in "founders exec strategy"; "claire" in "claire morgan"
+    return len(first) >= 4 and any(w.startswith(first) for w in a.split())
+
+
 def disagreements(text, row):
-    """Difficulty mode or task type in a saved (pasted) assignment that differ from the platform's."""
+    """What in a saved (pasted) assignment really differs from the platform's record: another persona, business
+    function, competency or task skill, or an easier difficulty mode / shorter task type than assigned."""
     out = []
+    saved = pasted_fields(text)
+    for label, key in _FIELDS:
+        want = (row.get(key) or "").strip()
+        if want and saved.get(label) and not any(same_value(v, want) for v in saved[label]):
+            out.append((label, saved[label][-1], want))
     mode = _pasted(text, r"difficulty(?:\s*mode)?\s*[:\-]?\s*[^\w\n]*\n?\s*(easy|medium|hard)\b")
     want_mode = (row.get("difficulty_mode") or "").strip().lower()
     # Only an easier mode than the assigned one matters: Hard grades stricter than Medium (and Medium than Easy), so a
@@ -117,6 +165,19 @@ def disagreements(text, row):
         want = "long-horizon" if "long" in want_kind else "normal"
         if kind == "normal" and want == "long-horizon":  # likewise: long-horizon on a normal task is fine, only shorter isn't
             out.append(("task type", kind, want))
+    return out
+
+
+def keep_harder(text, row):
+    """The platform's record to save, keeping a saved difficulty mode or task type that asks for more than assigned."""
+    out = dict(row)
+    mode = _pasted(text, r"difficulty(?:\s*mode)?\s*[:\-]?\s*[^\w\n]*\n?\s*(easy|medium|hard)\b")
+    want_mode = (row.get("difficulty_mode") or "").strip().lower()
+    if mode in MODE_RANK and want_mode in MODE_RANK and MODE_RANK[mode] > MODE_RANK[want_mode]:
+        out["difficulty_mode"] = mode
+    kind = _pasted(text, r"(?:task type|horizon(?: type)?)[^a-z]*(super[- ]long[- ]horizon|long[- ]horizon|long|normal)")
+    if kind and "long" in kind and "long" not in (row.get("task_type") or "").lower():
+        out["task_type"] = "super-long-horizon" if "super" in kind else "long-horizon"
     return out
 
 
@@ -152,21 +213,36 @@ async def ensure(attempt_id):
             await _store(attempt_id, "save", "task-details", "--source", f"Evals/task_inputs/_uploads/{SOURCE_NAME}")
             done["task_details"] = True
         else:
-            diff = disagreements(_saved_text(attempt_id, "task-details"), row)
+            text = _saved_text(attempt_id, "task-details")
+            diff = disagreements(text, row)
             if diff:
-                (workspace.uploads_dir(attempt_id) / SOURCE_NAME).write_text(render(row), encoding="utf-8")
+                before = staleness.snapshot(attempt_id).get("task-details")
+                (workspace.uploads_dir(attempt_id) / SOURCE_NAME).write_text(render(keep_harder(text, row)), encoding="utf-8")
                 await _store(attempt_id, "save", "task-details", "--source", f"Evals/task_inputs/_uploads/{SOURCE_NAME}")
                 parts = "; ".join(f"the {what} was **{a}**, the platform says **{b}**" for what, a, b in diff)
-                text = (f"Your saved assignment didn't match the platform's record of this task ({parts}), so it's now "
-                        "the platform's. The evals apply the difficulty mode and task type from it. If the portal marks "
-                        "earlier passes as outdated, send those reviews again.")
+                if {d[0] for d in diff} <= LABEL_ONLY:  # nothing the reviews graded changed: the passes still count
+                    staleness.restamp(attempt_id, "task-details", before, staleness.snapshot(attempt_id).get("task-details"))
+                    text = (f"Your saved assignment now matches the platform's record of this task ({parts}). Your passes "
+                            "still count; there's nothing to send again.")
+                else:
+                    text = (f"Your saved assignment didn't match the platform's record of this task ({parts}), so it's "
+                            "now the platform's: the evals read the assignment from it. If the portal marks earlier "
+                            "passes as outdated, send those reviews again.")
                 m = db.add_message(attempt_id, "system", text, {"assignment_replaced": True, "warn": True})
                 hub.publish(attempt_id, "message", m)
                 done["replaced"] = [d[0] for d in diff]
         key = universe_key(row)
-        if key and workspace.dated_release() and workspace.universe_date(attempt_id) is None:
+        saved_date = workspace.universe_date(attempt_id) if key and workspace.dated_release() else None
+        if key and workspace.dated_release() and saved_date is None:
             await _store(attempt_id, "universe", key)
             done["universe"] = key
+        elif key and saved_date and saved_date != key:  # a date picked or pasted that isn't the task's (Evan, 2026-11-04)
+            await _store(attempt_id, "universe", key)
+            done["universe_replaced"] = key
+            m = db.add_message(attempt_id, "system", "Your task date didn't match the platform's record of this task, so "
+                               f"it's now the platform's: **{workspace.UNIVERSE_DATES[key][1]}**. If the portal marks "
+                               "earlier passes as outdated, send those reviews again.", {"universe_replaced": True, "warn": True})
+            hub.publish(attempt_id, "message", m)
         if (done.get("task_details") or done.get("universe")) and not _posted(attempt_id, "assignment_autofill"):
             bits = []
             if done.get("task_details"):

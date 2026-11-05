@@ -572,6 +572,12 @@ async def set_universe(body: UniverseBody, request: Request):
     chat_writable(session, db.get_chat(attempt_id))
     if body.date not in workspace.UNIVERSE_DATES:
         raise HTTPException(400, "Pick Oct 1, 2025 or Feb 14, 2026.")
+    chat = db.get_chat(attempt_id)
+    row = await assignment.platform_record(chat["task_id"]) if assignment.enabled(chat) else None
+    fixed = assignment.universe_key(row) if row else None
+    if fixed and body.date != fixed and not session.get("admin"):  # the task's date is on its platform record
+        raise HTTPException(409, f"This task's date comes from the platform's record: {workspace.UNIVERSE_DATES[fixed][1]}. "
+                                 "It can't be changed here; type /admin if the platform's date is wrong.")
     await asyncio.to_thread(workspace.thaw, attempt_id)  # a cold chat: unpack off the event loop before docker mounts it
     if not workspace.dated_release():
         raise HTTPException(409, "This eval version has one date only; nothing to pick.")

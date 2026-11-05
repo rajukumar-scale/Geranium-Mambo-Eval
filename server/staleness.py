@@ -64,6 +64,21 @@ def snapshot(attempt_id):
     return out
 
 
+def restamp(attempt_id, key, old, new):
+    """Passes that were current on input `key` (digest `old`) stay current on `new`: for a change the portal makes that
+    doesn't change what the review graded (the platform's business function or task skill over a mistyped one)."""
+    if not old or not new or old == new:
+        return 0
+    n = 0
+    for p in db.q("select code, payload from proofs where attempt_id=?", (attempt_id,)):
+        payload = json.loads(p["payload"] or "{}")
+        if (payload.get("inputs") or {}).get(key) == old:
+            payload["inputs"][key] = new
+            db.ex("update proofs set payload=? where code=?", (json.dumps(payload), p["code"]))
+            n += 1
+    return n
+
+
 def label(key):
     if key.startswith("reference:"):
         return "reference file " + key.split(":", 1)[1]
