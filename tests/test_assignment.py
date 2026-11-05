@@ -39,6 +39,9 @@ class RenderTest(unittest.TestCase):
     def test_disagreements(self):
         pasted = "📋 Task Type\nnormal\n\n🎚️ Difficulty Mode\nhard\n"
         self.assertEqual(assignment.disagreements(pasted, ROW), [("task type", "normal", "long-horizon")])  # Hard on Medium is fine
+        normal = {**ROW, "task_type": "normal"}
+        self.assertEqual(assignment.disagreements("Task Type: long-horizon\n", normal), [])  # longer than assigned is fine
+        self.assertEqual(assignment.disagreements("Task Type: super-long-horizon\nDifficulty: Hard\n", normal), [])
         self.assertEqual(assignment.disagreements("Difficulty: Easy\n", ROW), [("difficulty mode", "easy", "medium")])
         self.assertEqual(assignment.disagreements("Difficulty: Medium\n", {**ROW, "difficulty_mode": "hard"}),
                          [("difficulty mode", "medium", "hard")])  # easier than assigned: corrected

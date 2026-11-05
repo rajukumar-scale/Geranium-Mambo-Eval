@@ -11,9 +11,9 @@ What it does, at most once per need and never while a run is active (a review bo
   the eval would have saved from a paste).
 - No task date saved yet: save the platform's universe (hg4-synth-sep30cut = Oct 1, 2025; hg4-2026-08-31 = Feb 14,
   2026), so the date picker never has to ask.
-- An assignment is already saved but its task type disagrees with the platform, or its difficulty mode is easier than
-  the platform's (a paste, now or later): the platform wins. A harder saved mode (Hard on a Medium task) is kept, with no
-  note: it grades stricter, so nothing it passed needs redoing (Evan, 2026-11-04). The portal saves the platform's assignment over it and says so in the chat; the passes
+- An assignment is already saved but it asks for less than the platform's (an easier difficulty mode, or normal on a
+  long-horizon task; a paste, now or later): the platform wins. More than assigned (Hard on a Medium task, long-horizon
+  on a normal one) is kept, with no note: it grades stricter, so nothing it passed needs redoing (Evan, 2026-11-04). The portal saves the platform's assignment over it and says so in the chat; the passes
   that read the old one show as outdated, because they were graded against the wrong mode or task type (Evan,
   2026-11-03: "just use that as the default, no need to ask them any inputs").
 
@@ -115,7 +115,7 @@ def disagreements(text, row):
     if want_kind and kind:
         kind = "long-horizon" if "long" in kind else "normal"
         want = "long-horizon" if "long" in want_kind else "normal"
-        if kind != want:
+        if kind == "normal" and want == "long-horizon":  # likewise: long-horizon on a normal task is fine, only shorter isn't
             out.append(("task type", kind, want))
     return out
 
