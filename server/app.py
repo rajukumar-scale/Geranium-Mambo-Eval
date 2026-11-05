@@ -503,6 +503,18 @@ async def login(body: LoginBody, request: Request):
             raise HTTPException(409, "This task's previous holder still has a review running in it. Please try again in a few minutes.")
         log.info("attempt %s re-served: archived the previous holder's chat, fresh chat for the new one", attempt_id)
         existing = db.get_chat(attempt_id)
+    if not bypass and row.get("USER_ID") and handover.own_archive(attempt_id, row["USER_ID"]):
+        # The task came back to someone who held it before: their own chat, not a blank one (2026-11-04).
+        try:
+            back = await asyncio.to_thread(handover.restore, attempt_id, row["USER_ID"])
+        except handover.Busy:
+            back = None
+        except Exception:  # noqa: BLE001 - a failed restore must never stop the sign-in; they get the blank chat
+            log.exception("restoring %s's own chat on %s failed", row["USER_ID"], attempt_id)
+            back = None
+        if back:
+            log.info("attempt %s came back to its earlier holder: restored their chat %s", attempt_id, back)
+            existing = db.get_chat(attempt_id)
     chat = db.upsert_chat(attempt_id, row["TASK_ID"], row["PROJECT_ID"], row["USER_ID"], row["EMAIL_RAW"],
                           existing["session_id"] if existing else str(uuid.uuid4()))
     workspace.ensure_attempt(attempt_id, unpack=False)

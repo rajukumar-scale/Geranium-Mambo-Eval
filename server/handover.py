@@ -10,6 +10,7 @@ real attempt ID is left clean for the new holder.
 """
 
 import hashlib
+import json
 import shutil
 import time
 import uuid
@@ -94,4 +95,78 @@ def archive(attempt_id, before=None, owner=None):
                   session_guard=None, pending_review_run=pending, admin_open=int(still_open), created_at=cut)
     if not db.one("select 1 from messages where attempt_id=?", (attempt_id,)):
         db.add_message(attempt_id, "system", CLEARED)
+    return aid
+
+
+def own_archive(attempt_id, user_id):
+    """The newest archived chat of this attempt that belongs to `user_id`: their own earlier work on it."""
+    if not user_id:
+        return None
+    return db.one("select * from chats where archived_from=? and user_id=? order by archived_at desc limit 1",
+                  (attempt_id, user_id))
+
+
+WELCOME_BACK = ("👋 **Welcome back.** This task came back to you, so your earlier chat is restored: your messages, saved "
+                "inputs, reports and passes are all here again. Carry on where you left off.")
+
+
+def _in_pending_bundle(archive_id):
+    """Is this chat in an archive bundle whose part isn't uploaded and removed yet (archive.remove still needs its
+    folder under this id)?"""
+    from . import archive
+    for path in archive.root().glob("*/manifest.json") if archive.root().exists() else []:
+        try:
+            man = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        chat = (man.get("chats") or {}).get(archive_id)
+        if chat and not any(p.get("removed_at") for p in man.get("parts", []) if p.get("n") == chat.get("part")):
+            return True
+    return False
+
+
+def restore(attempt_id, user_id):
+    """The platform handed this attempt back to someone who held it before (2026-11-04: fikanoor's $608 chat, 10 people
+    in 3 weeks): give them their own chat back instead of a blank one. Only when the live chat has nothing in it since
+    (only the portal's own notes, no runs), so nobody's newer work is mixed in. Returns the archive ID it restored, or
+    None."""
+    arch = own_archive(attempt_id, user_id)
+    if not arch:
+        return None
+    aid = arch["attempt_id"]
+    if db.one("select 1 from messages where attempt_id=? and role!='system' union select 1 from runs where attempt_id=?",
+              (attempt_id, attempt_id)):
+        return None  # they (or someone) worked in the live chat since: leave both as they are
+    if db.active_run(aid) or db.active_run(attempt_id):
+        raise Busy(aid)
+
+    src, dst = workspace.attempt_dir(aid), workspace.attempt_dir(attempt_id)
+    if src.exists():
+        if dst.exists():
+            shutil.rmtree(dst, ignore_errors=True)  # the blank chat's workspace: nothing of anyone's in it
+        if _in_pending_bundle(aid):
+            shutil.copytree(src, dst, symlinks=True)  # archive.remove still needs the folder under the archive's ID
+        else:
+            shutil.move(str(src), str(dst))  # its cold.tgz or S3 marker travels with it, so thaw still works
+    workspace.ensure_attempt(attempt_id)
+
+    live = db.get_chat(attempt_id)
+    db.ex("delete from messages where attempt_id=? and role='system'", (attempt_id,))  # the blank chat's welcome notes
+    for table in ("messages", "runs", "proofs", "admin_requests"):
+        db.ex(f"update {table} set attempt_id=? where attempt_id=?", (attempt_id, aid))
+    if not db.one("select 1 from attempt_spend_flags where attempt_id=?", (attempt_id,)):
+        db.ex("update attempt_spend_flags set attempt_id=? where attempt_id=?", (attempt_id, aid))
+    if not db.one("select 1 from blocks where kind='attempt' and key=?", (attempt_id,)):
+        db.ex("update blocks set key=? where kind='attempt' and key=?", (attempt_id, aid))
+    still_open = int(bool(db.one("select 1 from admin_requests where attempt_id=? and status='open'", (attempt_id,))))
+    if live:
+        db.update("chats", "attempt_id", attempt_id, user_id=arch["user_id"], email=arch["email"],
+                  session_id=arch["session_id"] or live["session_id"], session_started=0, session_guard=None,
+                  pending_review_run=None, admin_open=still_open, created_at=arch["created_at"],
+                  last_activity=max(arch["last_activity"] or 0, live["last_activity"] or 0))
+        db.ex("delete from chats where attempt_id=?", (aid,))
+    else:
+        db.ex("update chats set attempt_id=?, archived_from=null, archived_at=null, admin_open=?, pending_review_run=null "
+              "where attempt_id=?", (attempt_id, still_open, aid))
+    db.add_message(attempt_id, "system", WELCOME_BACK, {"welcome_back": True})
     return aid
