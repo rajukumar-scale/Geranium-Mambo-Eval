@@ -87,6 +87,12 @@ def page(name):
 
 app.mount("/static", Static(directory=WEB), name="static")
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Browsers ask for /favicon.ico before reading the page's icon links: the portal's own icon (2026-11-04)."""
+    return FileResponse(WEB / "img" / "icon-32.png", media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
 HELP = """**Commands**
 - `/injection` review your injection SQL
 - `/prompt` review your task prompt (your assignment and task date are filled in from the platform; you don't need to paste them)
