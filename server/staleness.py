@@ -105,12 +105,101 @@ def check(payload, now=None):
                        f"Send /{stage} again."}
 
 
+# ---- Locked passes (2026-11-05) -----------------------------------------------------------------------------
+# Task 6adfbc55...6c6f (attempt 6aeb9f8e): the CB passed /oe and /rubric on Nov 3, rewrote the injection SQL ~28
+# times on Nov 4, re-ran only /injection, /prompt and /hardness, and submitted the Nov 3 rubric and OE screenshots.
+# The chat had said "Outdated passes" five times. QC failed the rubric on exactly what the new SQL changed.
+# Rule (Evan): cards unlock in order (injection -> prompt -> hardness -> oe -> rubric). A stage's pass shows its
+# code and image only when it and every earlier stage are current; an outdated LATER stage never locks an earlier
+# card (each card is needed to move on in the task: the prompt card before the Opus run for /hardness, ...).
+# A card issued while a later stage is outdated carries a warning to send those again (warn_later), and
+# submit_watch.py DMs Evan when a task is submitted while any pass is still outdated.
+
+def gate(attempt_id, now=None):
+    """{"todo": [outdated stages, in order], "stages": [{stage, status, verdict, why, changed, locked}]}.
+    status: "current", "outdated" (its newest pass no longer covers the saved inputs) or "none" (no pass yet;
+    a stage not passed yet never locks anything). locked: that stage's card is held (it, or an earlier stage, is
+    outdated)."""
+    rows = db.q("select payload from proofs where attempt_id=? order by created_at", (attempt_id,))
+    newest = {}
+    for row in rows:
+        p = json.loads(row["payload"])
+        newest[p.get("stage")] = p
+    now = snapshot(attempt_id) if now is None else now
+    stages, todo, earlier = [], [], []
+    for stage in list(ORDER) + sorted(s for s in newest if s not in ORDER):
+        p = newest.get(stage)
+        result = check(p, now) if p else None
+        status = "none" if not p else "outdated" if result else "current"
+        stages.append({"stage": stage, "status": status, "verdict": (p or {}).get("verdict"),
+                       "why": result["message"] if result else None, "changed": result["labels"] if result else [],
+                       "locked": bool(p) and (bool(result) or bool(earlier))})
+        if result:
+            todo.append(stage)
+            earlier.append(stage)
+    return {"todo": todo, "stages": stages, "locked": any(s["locked"] for s in stages)}
+
+
+def _rank(stage):
+    return ORDER.index(stage) if stage in ORDER else len(ORDER)
+
+
+def lock_reason(payload, the_gate):
+    """Why this pass's card is held (None when it can be used): it is outdated itself, or an earlier stage is."""
+    stage = payload.get("stage")
+    before = [s for s in the_gate["todo"] if _rank(s) < _rank(stage)]
+    if payload.get("outdated"):
+        return {"self": True, "todo": before + [stage]}
+    if before:
+        return {"self": False, "todo": before}
+    return None
+
+
+def later_outdated(payload, the_gate):
+    """Later stages that are outdated while this card is usable: the contributor must send them again."""
+    stage = payload.get("stage")
+    return [s for s in the_gate["todo"] if _rank(s) > _rank(stage)]
+
+
+SECRET_FIELDS = ("code", "fingerprint", "report_sha256", "signature")
+
+
+def redact(value):
+    """Contributor's view: a locked pass keeps its verdict and stage but loses everything that could be uploaded
+    or typed into the task (verification code, EVP code, report hashes). "ref" stays so the page can match cards."""
+    if isinstance(value, dict):
+        if value.get("locked") and "stage" in value and "code" in value:
+            out = {k: v for k, v in value.items() if k not in SECRET_FIELDS}
+            out.update(ref=f"{value.get('run_id')}:{value.get('stage')}", code=None, fingerprint=None,
+                       report_hashes={}, report_fields={})
+            return out
+        return {k: redact(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact(v) for v in value]
+    return value
+
+
 def annotate(attempt_id, payloads):
-    """Add "outdated" (check()'s result or None) to each pass payload, with one snapshot for the lot."""
+    """Add "outdated" (check()'s result or None), "locked" (lock_reason), "warn_later" (later stages to send
+    again) and "ref" to each pass payload, with one snapshot for the lot."""
     now = snapshot(attempt_id)
+    the_gate = gate(attempt_id, now) if payloads else None
     for p in payloads:
         p["outdated"] = check(p, now)
+        p["locked"] = lock_reason(p, the_gate)
+        p["warn_later"] = [] if p["locked"] else later_outdated(p, the_gate)
+        p["ref"] = f"{p.get('run_id')}:{p.get('stage')}"
     return payloads
+
+
+def view_event(attempt_id, payload):
+    """A live event for a contributor: a new pass (or its chat message) gets the same lock as the chat history."""
+    event, data = payload.get("event"), payload.get("data")
+    if event == "proof" and isinstance(data, dict):
+        return {**payload, "data": redact(annotate(attempt_id, [dict(data)])[0])}
+    if event == "message" and isinstance(data, dict) and data.get("role") == "proof" and isinstance(data.get("meta"), dict):
+        return {**payload, "data": {**data, "meta": redact(annotate(attempt_id, [dict(data["meta"])])[0])}}
+    return payload
 
 
 def annotate_messages(attempt_id, messages):
@@ -156,10 +245,12 @@ def notice(attempt_id):
         return None
     order = rerun_order(current)  # every outdated stage, so the list of commands is complete
     lines = [f"- /{s}: your {', '.join(current[s]['labels'])} changed after it passed" for s in order]
-    return ("⚠ **Outdated passes.** These passes were graded on an older version of your inputs, so they no longer "
-            "count for what you have saved now:\n" + "\n".join(lines) +
-            "\n\nSend these again, in this order: " + ", ".join(f"`/{s}`" for s in order) +
-            ". Use the new pass screens for your task, not the old ones.")
+    return ("⚠ **Outdated passes.** You changed your inputs after these passes, so they were graded on an older "
+            "version and no longer count:\n" + "\n".join(lines) +
+            "\n\nSend these again, in this order: " + ", ".join(f"`/{s}`" for s in order) + ". Each pass card "
+            "unlocks as you go: a card after an outdated stage stays 🔒 locked until that stage passes again. "
+            "**Re-run every one of them before you submit.** Submitting a task with an outdated pass (an older "
+            "OE or rubric screenshot, for example) gets it sent back and penalized, and the team is notified.")
 
 
 def prompt_note(attempt_id):
@@ -168,5 +259,6 @@ def prompt_note(attempt_id):
     if not current:
         return ""
     parts = [f"/{s} (their {', '.join(current[s]['labels'])} changed since that review)" for s in rerun_order(current)]
-    return ("(Portal: these passes are outdated right now and must be run again before they submit: "
+    return ("(Portal: these passes are outdated right now; their cards, and every later stage's card, stay locked "
+            "until they are run again in order, and submitting with an outdated pass gets the task sent back: "
             + "; ".join(parts) + ".)\n\n")

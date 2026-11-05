@@ -138,6 +138,8 @@ LINTER_ALERT_QUERY_ID = _int("LINTER_ALERT_QUERY_ID", 395304)  # 0 = off
 LINTER_ALERT_SLACK_USER = _get("LINTER_ALERT_SLACK_USER", "U0BD6FV1PJ4")
 LINTER_ALERT_EVERY_MIN = _int("LINTER_ALERT_EVERY_MIN", 15)
 LINTER_ALERT_REPEAT_HOURS = _int("LINTER_ALERT_REPEAT_HOURS", 3)  # same CB/task/stage again only after this
+# DM Evan when a task is submitted while one of its portal passes is outdated (server/submit_watch.py). 0 = off.
+SUBMIT_WATCH = _int("SUBMIT_WATCH", 1)
 LINTER_ALERT_DASHBOARD_URL = _get("LINTER_ALERT_DASHBOARD_URL",
                                   "https://redash.scale.com/dashboards/12117-mcp-ac-fingerprint-linter-monitor")
 PUBLIC_BASE_URL = _get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")

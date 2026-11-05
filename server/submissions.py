@@ -84,4 +84,7 @@ async def loop():
         except Exception as error:  # noqa: BLE001 - keep the last good answer
             state["error"] = str(error)[:200]
             log.warning("submission lookup failed: %s", error)
+        else:
+            from . import submit_watch  # here, not at the top: submit_watch imports this module
+            await submit_watch.after_refresh()
         await asyncio.sleep(REFRESH_SEC)
