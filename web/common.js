@@ -275,8 +275,13 @@ function staleBand(p) {
 // outdated stages are sent again; then they all unlock together. A first pass through the stages is never locked.
 const passGate = () => (typeof state !== "undefined" && state.me && state.me.pass_gate) || null;
 
+// "/a", "/a and /b", "/a, /b and /c"; html=true wraps each in a mono <b>.
+function stageList(stages, html = false) {
+  const names = stages.map(s => html ? `<b class="mono">/${esc(s)}</b>` : "/" + s);
+  return names.length < 2 ? names.join("") : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
+}
 function laterNote(stages) {
-  const list = stages.map(s => "/" + s).join(" and ");
+  const list = stageList(stages);
   return `Your ${list} ${stages.length > 1 ? "passes are" : "pass is"} outdated: you changed your inputs after ${stages.length > 1 ? "they" : "it"} passed. ` +
     `Send ${list} again before you submit. Submitting older ${list} screenshots gets your task sent back and penalized.`;
 }
@@ -346,6 +351,33 @@ function showLockedPass(p) {
     <div class="lock-note">💡 <b>Tip:</b> send the stages again in order: each card unlocks as soon as it and the stages before it are current.
       Older pass images don't count: submitting one gets your task sent back and penalized, and the team is notified.</div>
     <div class="lock-foot"><button data-close>Got it</button></div></div>`;
+  wrap.addEventListener("click", e => { if (e.target === wrap || e.target.closest("[data-close]") || e.target.closest("[data-sendcmd]")) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
+
+// Shown the moment a change makes earlier passes outdated (the chat's stale notice, staleness.notice): what changed,
+// what to send again in order, and what happens if they don't.
+function showOutdatedPopup() {
+  const gate = passGate();
+  if (!gate || !gate.todo.length) return;
+  // A pass popup already open (with its own later-stage warning) says the same thing: don't stack another on it.
+  if (document.querySelector(".overlay .lock-dialog, .overlay .taxo-step, .overlay .proof-stack")) return;
+  const changed = [...new Set(gate.stages.flatMap(s => s.status === "outdated" ? s.changed || [] : []))];
+  const what = changed.length ? changed.join(" and ") : "inputs";
+  const first = gate.todo[0], list = stageList(gate.todo, true);
+  const wrap = document.createElement("div");
+  wrap.className = "overlay";
+  wrap.innerHTML = `<div class="lock-dialog" role="alertdialog" aria-labelledby="outdated-title">
+    <div class="lock-head"><span class="lock-big" aria-hidden="true">✏️</span><div>
+      <div id="outdated-title" class="lock-title">You changed your ${esc(what)}</div>
+      <div class="lock-sub">${gate.todo.length} of your passes ${gate.todo.length > 1 ? "were" : "was"} graded on the old version, so ${gate.todo.length > 1 ? "they" : "it"} no longer count${gate.todo.length > 1 ? "" : "s"}.
+        Their cards (and the cards after them) are 🔒 locked until you send them again.</div></div></div>
+    ${lockStepsHtml()}
+    <div class="lock-sec">Send these again, in this order</div>
+    ${lockChecklistHtml(gate.todo, { buttons: typeof send === "function" })}
+    <div class="lock-note penalty">🚫 <b>Re-run ${list} before you submit.</b> Submitting a task with an older pass screenshot gets it sent back
+      and penalized. Submits are checked automatically and the team is notified.</div>
+    <div class="lock-foot"><button data-close>Later</button>${typeof send === "function" ? `<button class="primary" data-sendcmd="/${esc(first)}">Send /${esc(first)} now</button>` : ""}</div></div>`;
   wrap.addEventListener("click", e => { if (e.target === wrap || e.target.closest("[data-close]") || e.target.closest("[data-sendcmd]")) wrap.remove(); });
   document.body.appendChild(wrap);
 }
@@ -442,16 +474,16 @@ function showProof(p) {
   wrap.className = "overlay";
   // Later stages outdated (Evan, 2026-11-05): before the pass, a warning they must tick, every time.
   const laterStep = () => {
-    const later = p.warn_later, list = later.map(s => `<b class="mono">/${esc(s)}</b>`).join(" and ");
+    const later = p.warn_later, list = stageList(later, true);
     wrap.innerHTML = `<div class="lock-dialog warnlater" role="alertdialog" aria-labelledby="later-title">
       <div class="lock-head"><span class="lock-big" aria-hidden="true">⚠️</span><div>
-        <div id="later-title" class="lock-title">Don't forget ${later.map(s => "/" + esc(s)).join(" and ")}</div>
+        <div id="later-title" class="lock-title">Don't forget ${esc(stageList(later))}</div>
         <div class="lock-sub">Your <b class="mono">${cmd}</b> ${esc(p.verdict)} is ready. But your ${list} ${later.length > 1 ? "passes are" : "pass is"} outdated:
           you changed your inputs after ${later.length > 1 ? "they" : "it"} passed.</div></div></div>
       ${lockChecklistHtml(later, { buttons: typeof send === "function" })}
       <div class="lock-note penalty">🚫 <b>Send ${list} again before you submit.</b> If you submit with your older ${list} screenshots,
         your task gets sent back and you'll be penalized. Submits are checked automatically and the team is notified.</div>
-      <label class="taxo-check later-check"><input type="checkbox"> I'll send ${list} again before I submit</label>
+      <label class="taxo-check later-check"><input type="checkbox"> I'll send ${later.length > 1 ? "them" : "it"} again before I submit</label>
       <div class="lock-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my ${cmd} pass →</button></div></div>`;
     const tick = wrap.querySelector(".later-check input"), show = wrap.querySelector("[data-show]");
     tick.onchange = () => { show.disabled = !tick.checked; };

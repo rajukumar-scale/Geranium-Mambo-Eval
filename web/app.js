@@ -216,7 +216,9 @@ function addMessage(m) {
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 200;
   box.insertAdjacentHTML("beforeend", messageHtml(m));
   if (nearBottom || m.role === "user") box.scrollTop = box.scrollHeight;
-  if (["report", "proof", "assistant"].includes(m.role) || (m.meta && m.meta.stale_notice)) refreshSide();
+  const freshStale = m.meta && m.meta.stale_notice && !state.me.admin && (m.created_at || 0) > PAGE_OPENED;
+  if (["report", "proof", "assistant"].includes(m.role) || (m.meta && m.meta.stale_notice))
+    refreshSide().then(() => { if (freshStale) showOutdatedPopup(); });  // new, not old history: the checklist is current
 }
 
 function renderMessages() {
