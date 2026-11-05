@@ -270,7 +270,91 @@ function staleBand(p) {
   return `<div class="staleband"><div class="k">⚠ Outdated pass</div><div class="m">${esc(p.outdated.message)}</div></div>`;
 }
 
+// ---- Locked passes (server: staleness.gate, 2026-11-05) -------------------------------------------------------
+// After a contributor changes an input that an earlier pass read, every pass is locked (no code, no image) until the
+// outdated stages are sent again; then they all unlock together. A first pass through the stages is never locked.
+const passGate = () => (typeof state !== "undefined" && state.me && state.me.pass_gate) || null;
+
+function lockStepsHtml() {
+  return `<div class="lock-steps" aria-hidden="true">
+    <div class="ls"><div class="ls-n">1</div><div class="ls-i">✏️</div><div class="ls-t">You changed an input<br><span>SQL, prompt, OE or rubric</span></div></div>
+    <div class="ls-arrow">→</div>
+    <div class="ls"><div class="ls-n">2</div><div class="ls-i">🔁</div><div class="ls-t">Send the outdated stages<br><span>in the order shown</span></div></div>
+    <div class="ls-arrow">→</div>
+    <div class="ls"><div class="ls-n">3</div><div class="ls-i">🔓</div><div class="ls-t">Every pass unlocks<br><span>all at once</span></div></div>
+  </div>`;
+}
+
+function lockChecklistHtml(todo, opts = {}) {
+  const gate = passGate();
+  const rows = gate ? gate.stages : (todo || []).map(s => ({ stage: s, status: "outdated" }));
+  const next = (gate ? gate.todo : todo || [])[0];
+  return `<div class="lock-list">${rows.map(r => {
+    const name = STAGE_NAMES[r.stage] || r.stage;
+    if (r.status === "outdated") return `<div class="lk-row todo"><span class="lk-ic">🔁</span><span class="lk-name">/${esc(r.stage)} <span class="muted">${esc(name)}</span></span>
+      <span class="lk-why">${esc((r.changed || []).length ? "your " + r.changed.join(", ") + " changed" : "send it again")}</span>
+      ${opts.buttons ? `<button class="small${r.stage === next ? " primary" : ""}" data-sendcmd="/${esc(r.stage)}">Send /${esc(r.stage)}</button>` : ""}</div>`;
+    if (r.status === "current") return `<div class="lk-row ok"><span class="lk-ic">✅</span><span class="lk-name">/${esc(r.stage)} <span class="muted">${esc(name)}</span></span>
+      <span class="lk-why">${esc(r.verdict || "")} · current</span></div>`;
+    return `<div class="lk-row none"><span class="lk-ic">○</span><span class="lk-name">/${esc(r.stage)} <span class="muted">${esc(name)}</span></span>
+      <span class="lk-why">not passed yet</span></div>`;
+  }).join("")}</div>`;
+}
+
+function lockedProofHtml(p, opts = {}) {
+  const stage = STAGE_NAMES[p.stage] || p.stage;
+  const todo = (p.locked && p.locked.todo) || [];
+  return `<div class="proof locked">
+    <div class="head"><div class="left">
+      <div class="brandline">Original Conference Eval Portal</div>
+      <div class="verdict"><span class="vbadge ${esc(p.verdict)}">${esc(p.verdict)}</span>${p.score != null ? `<span>Score ${esc(p.score)}</span>` : ""}</div>
+      <div class="sub">/${esc(p.stage)} · ${esc(stage)} review</div></div></div>
+    <div class="lockband"><div class="lb-ic">🔒</div><div><div class="k">Locked · not for upload</div>
+      <div class="m">${p.locked && p.locked.self
+        ? `This pass was graded on an older version of your inputs.`
+        : `This pass is current, but other passes are outdated.`} Send ${todo.map(s => `<b class="mono">/${esc(s)}</b>`).join(", ")} again
+        and every pass unlocks together.</div></div></div>
+    ${opts.foot === false ? "" : `<div class="foot"><div class="grow muted">No verification code or image while locked.</div>
+      <button data-close>Close</button></div>`}
+  </div>`;
+}
+
+// The popup for a locked pass: what happened, the three steps, the live checklist with one-click commands.
+function showLockedPass(p) {
+  const todo = (p.locked && p.locked.todo) || [];
+  const wrap = document.createElement("div");
+  wrap.className = "overlay";
+  wrap.innerHTML = `<div class="lock-dialog" role="alertdialog" aria-labelledby="lock-title">
+    <div class="lock-head"><span class="lock-big" aria-hidden="true">🔒</span><div>
+      <div id="lock-title" class="lock-title">Your passes are locked for now</div>
+      <div class="lock-sub">Your <b class="mono">/${esc(p.stage)}</b> ${esc(p.verdict)} is saved. You changed your inputs after some earlier passes,
+        so those no longer match what you'll submit.</div></div></div>
+    ${lockStepsHtml()}
+    <div class="lock-sec">Your checklist</div>
+    ${lockChecklistHtml(todo, { buttons: typeof send === "function" })}
+    <div class="lock-note">💡 <b>Tip:</b> finish every review here first, then fill in your Outlier task in one go, so every pass you upload matches what you submit.
+      Older pass images don't count: submits are checked, and a pass that doesn't match sends the task back.</div>
+    <div class="lock-foot"><button data-close>Got it</button></div></div>`;
+  wrap.addEventListener("click", e => { if (e.target === wrap || e.target.closest("[data-close]") || e.target.closest("[data-sendcmd]")) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
+
+// Shown once when the last outdated stage passes: every pass is usable again.
+function showPassesUnlocked() {
+  const wrap = document.createElement("div");
+  wrap.className = "overlay";
+  wrap.innerHTML = `<div class="lock-dialog unlocked" role="alertdialog" aria-labelledby="unlock-title">
+    <div class="lock-head"><span class="lock-big" aria-hidden="true">🎉</span><div>
+      <div id="unlock-title" class="lock-title">All your passes are unlocked</div>
+      <div class="lock-sub">Every stage now matches your saved inputs. Open each pass from <b>Passes</b> on the left and upload it in your Outlier task.</div></div></div>
+    ${lockChecklistHtml([], {})}
+    <div class="lock-foot"><button class="primary" data-close>Show my passes</button></div></div>`;
+  wrap.addEventListener("click", e => { if (e.target === wrap || e.target.closest("[data-close]")) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
+
 function proofHtml(p, opts = {}) {
+  if (p.locked) return lockedProofHtml(p, opts);
   const t = p.totals || {};
   const total = (t.input || 0) + (t.output || 0) + (t.cache_read || 0) + (t.cache_creation || 0);
   const models = Object.entries(p.models || {}).map(([m, u]) => `${m} (${fmtInt(u.calls)} calls)`).join(", ") || "–";
@@ -340,6 +424,7 @@ function proofHtml(p, opts = {}) {
 // then the card. The reminder sits outside the pass card (a cropped screenshot shows only the pass) and uses its
 // own orange style, never a verdict colour.
 function showProof(p) {
+  if (p.locked) return showLockedPass(p);
   const cmd = esc("/" + (p.stage || ""));
   const wrap = document.createElement("div");
   wrap.className = "overlay";
@@ -781,6 +866,11 @@ function messageHtml(m, opts = {}) {
         <button class="small" data-injectguide="missing">How to inject</button></div>`
       : meta.stage === "hardness" && meta.injection_stale ? `<div class="stale-line">💉 Your Opus run was made on an older version of your SQL.
         <button class="small" data-injectguide="stale">How to re-inject</button></div>` : ""}</div></div>`;
+  }
+  if (m.role === "proof" && meta.locked) {
+    return `<div class="msg system"><div class="bubble proofcard lockedcard"><div class="rcard"><div class="grow">🔒 <b>/${esc(meta.stage)} ${esc(meta.verdict)}</b>
+      <span class="pill LOCKED">LOCKED</span><span class="muted"> no code or image until ${(meta.locked.todo || []).map(s => `<b class="mono">/${esc(s)}</b>`).join(", ")} ${(meta.locked.todo || []).length > 1 ? "are" : "is"} sent again</span></div>${ts}
+      <button class="primary" data-proof="${m.id}">What do I do?</button></div></div></div>`;
   }
   if (m.role === "proof") {
     const stale = meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "";

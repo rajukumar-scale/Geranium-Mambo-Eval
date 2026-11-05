@@ -241,7 +241,8 @@ def for_viewer(session, value):
     if session.get("admin"):
         return value
     chat = db.get_chat(session["attempt_id"])
-    return taskids.hide(value, extra=[chat["task_id"]] if chat else [])
+    # A locked pass (staleness.gate) loses its codes for contributors; admins keep the full record.
+    return taskids.hide(staleness.redact(value), extra=[chat["task_id"]] if chat else [])
 
 
 def viewer_is_admin(request):
@@ -306,6 +307,8 @@ def chat_state(attempt_id):
         # each with "outdated": set when an input its review read has changed since (staleness.check)
         "proofs": staleness.annotate(attempt_id, [json.loads(r["payload"]) for r in
                    db.q("select payload from proofs where attempt_id=? order by created_at", (attempt_id,))]),
+        # Which stages are current, outdated (to send again) or not passed yet; locked = images held (staleness.gate).
+        "pass_gate": staleness.gate(attempt_id),
         "blocked": blocks.view(blocks.chat_blocked(attempt_id)),
         "disabled": blocks.view(blocks.disabled(chat["user_id"], chat["email"])),  # seen by admins only
     }
@@ -820,7 +823,8 @@ async def events(request: Request):
     else:
         chat = db.get_chat(attempt_id)
         extra = [chat["task_id"]] if chat else []
-        view = lambda payload: taskids.hide(payload, extra=extra)  # noqa: E731
+        # Only pass events read the database (to lock them like the chat history); every other event is as before.
+        view = lambda payload: taskids.hide(staleness.view_event(attempt_id, payload), extra=extra)  # noqa: E731
     return StreamingResponse(event_stream(request, attempt_id, hello, view),
                              media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -1058,7 +1062,12 @@ def verify(code: str, request: Request):
     if not payload:
         raise HTTPException(404, "Unknown verification code.")
     payload["outdated"] = staleness.check(payload)  # after the signature check: computed now, not part of the record
-    return payload if viewer_is_admin(request) else taskids.hide(payload)
+    if viewer_is_admin(request):
+        payload["locked"] = staleness.lock_reason(payload, staleness.gate(payload["attempt_id"]))
+        return payload
+    # The public page shows a locked pass as LOCKED without its codes, so it can't be screenshotted in place of one.
+    payload = staleness.annotate(payload["attempt_id"], [payload])[0]
+    return taskids.hide(staleness.redact(payload))
 
 
 # ---- pass image: read back like the taxonomy, copy what passed ------------------------
@@ -1068,12 +1077,18 @@ def proof_for_viewer(code, request):
     payload = proofs.lookup(code)
     if not payload or not payload.get("valid"):
         raise HTTPException(404, "Unknown pass.")
+    session = None
     try:
         session = current_user(request)
-        if session.get("admin") or session["attempt_id"] == payload["attempt_id"]:
-            return payload
     except (HTTPException, Disabled):
         pass
+    if session and session.get("admin"):
+        return payload
+    if session and session["attempt_id"] == payload["attempt_id"]:
+        if staleness.annotate(payload["attempt_id"], [dict(payload)])[0].get("locked"):
+            raise HTTPException(423, "This pass is locked: some of your passes are outdated. Send those stages "
+                                     "again, and every pass unlocks once they're all current.")
+        return payload
     try:
         current_admin(request)
         return payload

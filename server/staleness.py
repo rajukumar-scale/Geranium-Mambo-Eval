@@ -105,12 +105,85 @@ def check(payload, now=None):
                        f"Send /{stage} again."}
 
 
+# ---- Locked passes (2026-11-05) -----------------------------------------------------------------------------
+# Task 6adfbc55...6c6f (attempt 6aeb9f8e): the CB passed /oe and /rubric on Nov 3, rewrote the injection SQL ~28
+# times on Nov 4, re-ran only /injection, /prompt and /hardness, and submitted the Nov 3 rubric and OE screenshots.
+# The chat had said "Outdated passes" five times. QC failed the rubric on exactly what the new SQL changed.
+# Rule (Evan): a contributor on a first pass through the stages gets every pass image right away. Once any stage's
+# newest pass is outdated, every pass is locked: the card shows the verdict but no verification code, EVP code or
+# image, until each outdated stage is sent again. Then they all unlock together.
+
+def gate(attempt_id, now=None):
+    """{"locked": bool, "todo": [stages to send again, in order], "stages": [{stage, status, verdict, why}]}.
+    status: "current", "outdated" (its newest pass no longer covers the saved inputs) or "none" (no pass yet;
+    a stage not passed yet never locks anything)."""
+    rows = db.q("select payload from proofs where attempt_id=? order by created_at", (attempt_id,))
+    newest = {}
+    for row in rows:
+        p = json.loads(row["payload"])
+        newest[p.get("stage")] = p
+    now = snapshot(attempt_id) if now is None else now
+    stages, todo = [], []
+    for stage in list(ORDER) + sorted(s for s in newest if s not in ORDER):
+        p = newest.get(stage)
+        if not p:
+            stages.append({"stage": stage, "status": "none"})
+            continue
+        result = check(p, now)
+        stages.append({"stage": stage, "status": "outdated" if result else "current", "verdict": p.get("verdict"),
+                       "why": result["message"] if result else None, "changed": result["labels"] if result else []})
+        if result:
+            todo.append(stage)
+    return {"locked": bool(todo), "todo": rerun_order(todo), "stages": stages}
+
+
+def lock_reason(payload, the_gate):
+    """Why this pass can't be used now (None when it can)."""
+    if payload.get("outdated"):
+        return {"self": True, "todo": the_gate["todo"] or [payload.get("stage")]}
+    if the_gate["locked"]:
+        return {"self": False, "todo": the_gate["todo"]}
+    return None
+
+
+SECRET_FIELDS = ("code", "fingerprint", "report_sha256", "signature")
+
+
+def redact(value):
+    """Contributor's view: a locked pass keeps its verdict and stage but loses everything that could be uploaded
+    or typed into the task (verification code, EVP code, report hashes). "ref" stays so the page can match cards."""
+    if isinstance(value, dict):
+        if value.get("locked") and "stage" in value and "code" in value:
+            out = {k: v for k, v in value.items() if k not in SECRET_FIELDS}
+            out.update(ref=f"{value.get('run_id')}:{value.get('stage')}", code=None, fingerprint=None,
+                       report_hashes={}, report_fields={})
+            return out
+        return {k: redact(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact(v) for v in value]
+    return value
+
+
 def annotate(attempt_id, payloads):
-    """Add "outdated" (check()'s result or None) to each pass payload, with one snapshot for the lot."""
+    """Add "outdated" (check()'s result or None), "locked" (lock_reason) and "ref" to each pass payload, with one
+    snapshot for the lot."""
     now = snapshot(attempt_id)
+    the_gate = gate(attempt_id, now) if payloads else None
     for p in payloads:
         p["outdated"] = check(p, now)
+        p["locked"] = lock_reason(p, the_gate)
+        p["ref"] = f"{p.get('run_id')}:{p.get('stage')}"
     return payloads
+
+
+def view_event(attempt_id, payload):
+    """A live event for a contributor: a new pass (or its chat message) gets the same lock as the chat history."""
+    event, data = payload.get("event"), payload.get("data")
+    if event == "proof" and isinstance(data, dict):
+        return {**payload, "data": redact(annotate(attempt_id, [dict(data)])[0])}
+    if event == "message" and isinstance(data, dict) and data.get("role") == "proof" and isinstance(data.get("meta"), dict):
+        return {**payload, "data": {**data, "meta": redact(annotate(attempt_id, [dict(data["meta"])])[0])}}
+    return payload
 
 
 def annotate_messages(attempt_id, messages):
@@ -156,10 +229,12 @@ def notice(attempt_id):
         return None
     order = rerun_order(current)  # every outdated stage, so the list of commands is complete
     lines = [f"- /{s}: your {', '.join(current[s]['labels'])} changed after it passed" for s in order]
-    return ("⚠ **Outdated passes.** These passes were graded on an older version of your inputs, so they no longer "
-            "count for what you have saved now:\n" + "\n".join(lines) +
+    return ("🔒 **Your passes are locked.** You changed your inputs after these passes, so they were graded on an older "
+            "version and no longer count:\n" + "\n".join(lines) +
             "\n\nSend these again, in this order: " + ", ".join(f"`/{s}`" for s in order) +
-            ". Use the new pass screens for your task, not the old ones.")
+            ". Until then no pass shows a verification code or an image. When every stage is current again, all "
+            "your passes unlock together. Don't upload older pass images: submits are checked, and a pass that "
+            "doesn't match what you submitted sends the task back.")
 
 
 def prompt_note(attempt_id):
@@ -168,5 +243,6 @@ def prompt_note(attempt_id):
     if not current:
         return ""
     parts = [f"/{s} (their {', '.join(current[s]['labels'])} changed since that review)" for s in rerun_order(current)]
-    return ("(Portal: these passes are outdated right now and must be run again before they submit: "
+    return ("(Portal: these passes are outdated right now, so every pass is locked (no codes or images) until they "
+            "are run again: "
             + "; ".join(parts) + ".)\n\n")
