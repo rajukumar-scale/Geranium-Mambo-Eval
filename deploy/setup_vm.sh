@@ -26,7 +26,7 @@ log() { printf '\n== %s\n' "$*"; }
 
 log "packages"
 apt-get update -q
-apt-get install -y -q python3 python3-venv unzip curl rsync ca-certificates
+apt-get install -y -q python3 python3-venv unzip curl rsync ca-certificates sqlite3
 # Keep a preinstalled Docker (e.g. docker-ce on boat.dev); installing docker.io over it conflicts.
 command -v docker >/dev/null || apt-get install -y -q docker.io
 systemctl enable --now docker
