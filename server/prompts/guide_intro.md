@@ -6,6 +6,6 @@ Most tasks that fail review fail for reasons these guides cover: the task is too
 
 Reading them first saves you rounds of /prompt and /hardness later.
 
-**One rule for your env:** everything you add goes in your SQL. Don't add or edit data by hand in the env explorer. Before your final runs, redeploy the env and apply only your final SQL: an old draft you ran earlier leaves its rows behind, and QC fails the task for data your SQL doesn't create.
+**One rule for your env:** everything you add goes in your SQL. Don't add or edit data by hand in the env explorer. Before your final runs, redeploy the env from the base universe (never a snapshot) and apply only your final SQL: an old draft you ran earlier leaves its rows behind, and QC fails the task for data your SQL doesn't create.
 
 Open each one below. You can come back to them any time with the **Guide** button at the top right.

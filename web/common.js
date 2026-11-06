@@ -539,6 +539,13 @@ const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness"]);
 
 // "Inject your SQL in every sandbox" (2026-11-03): on /prompt and /hardness pass screens, before every /hardness run,
 // and after a /hardness report that found the run had no injection. lead = an extra first paragraph.
+// Redeploy from the base universe, never a snapshot (Evan, 2026-11-06): a snapshot can be gone ("Artifact
+// snapshot-hg4-with-gsuite-bundle-1174-e51786a0 version=16 not found") and it brings back old rows (QC 6aecc5e4).
+const REDEPLOY_BASE = `<p class="taxo-warn"><b>Always redeploy from the base universe, never from a snapshot.</b> Under <b>Redeploy from</b>,
+  look at the name under <b>Universe this environment was deployed with</b>. If it's <b class="mono">hg4-synth-sep30cut</b> (task date
+  Oct 1, 2025) or <b class="mono">hg4-2026-08-31</b> (Feb 14, 2026), keep it. If it starts with <b class="mono">snapshot-</b>, pick
+  <b>A specific universe or snapshot id</b> instead and paste the base universe for your task date. A snapshot can be deleted
+  (the "Artifact snapshot-… not found" error) and it still has the old rows in it.</p>`;
 function injectGuideHtml({ lead = "", check, ok, cancel = "Close" }) {
   const shot = (file, text) => `<li><p>${text}</p><img src="/static/img/${file}" alt="${esc(text.replace(/<[^>]+>/g, ""))}" loading="lazy"></li>`;
   return `<div class="taxo-step inject-step" role="alertdialog" aria-labelledby="inject-title">
@@ -557,9 +564,10 @@ function injectGuideHtml({ lead = "", check, ok, cancel = "Close" }) {
       <div class="inject-fresh"><p><b>Changed your SQL? Redeploy the sandbox first.</b> If you edited your injection SQL since you
         ran it in this sandbox (or since your last Opus run), don't run the new version on top of the old one, and don't try to
         delete the old rows by hand: inserts with the same ids fail and updates apply twice, so the run still won't match your task.</p>
-        <p>Open the <b>Settings</b> tab (1), keep <b>Universe this environment was deployed with</b> selected, and press
+        <p>Open the <b>Settings</b> tab (1), choose the base universe under <b>Redeploy from</b> (below), and press
         <b>Redeploy Environment</b> (2). It can take about 30 minutes and gives you a clean sandbox from the plain universe. Then run
         your <b>current</b> SQL once (steps 1–4 above), check <b>_changelog</b>, and make your Opus run there.</p>
+        ${REDEPLOY_BASE}
         <img src="/static/img/inject_5_redeploy.png" alt="Settings tab (1), then Redeploy Environment (2)" loading="lazy"></div>
       ${check ? `<label class="taxo-check"><input type="checkbox"> ${esc(check)}</label>` : ""}
     </div>
@@ -616,8 +624,9 @@ function envGuideHtml() {
             <li><b>Windows / Linux:</b> ${keys("Ctrl", "Shift", "R")} &nbsp;or&nbsp; ${keys("Ctrl", "F5")}</li>
           </ul>
           <p class="taxo-note">If it says <i>your browser can't reach the environment's host</i>, turn off your VPN or ad-blocker for the site, then refresh.</p></li>
-        <li><p><b>Redeploy the sandbox.</b> Open the <b>Settings</b> tab (1), keep <b>Universe this environment was deployed with</b> selected,
+        <li><p><b>Redeploy the sandbox.</b> Open the <b>Settings</b> tab (1), choose the base universe under <b>Redeploy from</b>,
           and press <b>Redeploy Environment</b> (2). It can take about <b>30 minutes</b>: wait until it finishes and don't press it again meanwhile.</p>
+          ${REDEPLOY_BASE}
           <img src="/static/img/inject_5_redeploy.png" alt="Settings tab (1), then Redeploy Environment (2)" loading="lazy"></li>
         <li><p><b>Run your injection SQL again</b> in the new sandbox: it starts from the plain universe, so your records are gone.
           Paste your <b>current</b> SQL in <b>Database → Query</b>, press <b>Run Query</b> once, and check <b>Tables → _changelog</b>.

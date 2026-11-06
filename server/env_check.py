@@ -182,7 +182,8 @@ def card_text(unknown):
               "doesn't create, and the baseline runs read it too.",
               "",
               "**Fix:** put everything you want in the task into your SQL. Then redeploy the env, apply only your final "
-              "SQL, and redo the Opus run. If you didn't add these records, type /admin."]
+              "SQL, and redo the Opus run. Redeploy from the base universe, never from a snapshot: a snapshot keeps "
+              "the old rows. If you didn't add these records, type /admin."]
     return "\n".join(lines)
 
 

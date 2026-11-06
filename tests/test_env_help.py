@@ -105,3 +105,19 @@ class GuideTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RedeployFromSnapshotTest(unittest.TestCase):
+    """2026-11-06: a redeploy from a deleted snapshot. The guide now says to redeploy from the base universe."""
+
+    def test_the_not_found_error_and_failed_redeploys_open_the_guide(self):
+        for text in ("Artifact snapshot-hg4-with-gsuite-bundle-1174-e51786a0 version=16 not found",
+                     "my environment failed to redeploy"):
+            self.assertTrue(env_help.is_sandbox_trouble(text), text)
+
+    def test_the_guides_say_base_universe_not_snapshot(self):
+        js = (Path(__file__).resolve().parent.parent / "web" / "common.js").read_text()
+        self.assertEqual(js.count("${REDEPLOY_BASE}"), 2)
+        self.assertNotIn("keep <b>Universe this environment was deployed with</b> selected", js)
+        for base in ("hg4-synth-sep30cut", "hg4-2026-08-31"):
+            self.assertIn(base, js)

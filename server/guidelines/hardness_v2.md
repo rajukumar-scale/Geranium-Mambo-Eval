@@ -111,7 +111,7 @@ Add these to your decision map (see "Building a Task That Passes", Part 3):
 - rows that fail an answer for missing a literal phrase when the fact is there
 - dozens of rows grading the same downstream effect of one miss
 - injected data that never reached the environment. Check it through the agent's tools, not just in your SQL.
-- data in the environment that your SQL doesn't create: rows added by hand in the env explorer, or rows left over from an older SQL draft you ran on the same env (re-running a draft adds rows but never removes the old ones). Every addition goes in the SQL; before your final runs, redeploy the env and apply only your final SQL.
+- data in the environment that your SQL doesn't create: rows added by hand in the env explorer, or rows left over from an older SQL draft you ran on the same env (re-running a draft adds rows but never removes the old ones). Every addition goes in the SQL; before your final runs, redeploy the env from the base universe (not a snapshot) and apply only your final SQL.
 
 ## Part 7. Self-check before you run /hardness
 

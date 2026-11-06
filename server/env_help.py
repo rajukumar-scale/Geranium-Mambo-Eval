@@ -15,6 +15,8 @@ TROUBLE = re.compile(
     r"(?:environment|sandbox|universe|explorer|agent runner)\s+(?:\w+\s+){0,6}"
     r"(?:expired|not loading|not running|won'?t load|isn'?t loading|not working|broken|down|error|crash\w*|stuck)|"
     r"reset (?:my |the )?(?:task )?(?:environment|sandbox)|no artifact recorded|"
+    r"artifact\s+\S+\s+(?:version\s*=\s*\d+\s+)?not found|"
+    r"fail\w*\s+to\s+(?:re)?deploy|"  # redeployed from a deleted snapshot (2026-11-06)
     r"(?:agents?|opus|haiku)\s+(?:runs?\s+|trajector\w*\s+)?(?:\w+\s+){0,2}(?:fail\w*|stuck|crash\w*|erroring|errors?\b)|"
     # their injection isn't in the runs: the same fix (a fresh sandbox, then the current SQL once)
     r"(?:runs?|opus|agent|verifier|rollouts?|environment|sandbox|runner)\b[^.\n]{0,60}"
@@ -32,5 +34,5 @@ def is_sandbox_trouble(text):
 
 REPLY_NOTE = ("\n\n🛠️ **While you wait:** most sandbox problems (Snapshot failed 502, a run stuck at Loading data, "
               "500 errors, an expired environment, runs without your injection) go away with a hard refresh, then "
-              "**Settings → Redeploy Environment**, then your current injection SQL once. The steps just opened; you can open them again with the "
+              "**Settings → Redeploy Environment** from the base universe (never a snapshot), then your current injection SQL once. The steps just opened; you can open them again with the "
               "button below.")
