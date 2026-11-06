@@ -10,8 +10,11 @@ records (Wise and Griffin payment emails, duplicate creator agreements) a day be
   Gmail message and thread ids, Slack timestamps, Linear issue keys; fields that come straight from the exported data),
   skip ones the agent created itself (first seen in a write tool's result), drop those in the saved SQL, and look the
   rest up in the task date's base universe with one ripgrep pass (idle CPU and disk priority, one scan at a time).
-- Anything left is in neither the base data nor the SQL. The chat gets a warning card listing them, with the fix.
-  When a later run is clean after a warning, the chat gets a short "clean now" note.
+- Anything left is in neither the base data nor the SQL. The chat gets a warning card listing them, with the fix, and
+  the chat page shows it as a pop-up that only Acknowledge closes (after ticking that they redeployed from the base
+  universe and ran only their final SQL); until then it opens every time the chat does (pending(), POST
+  /api/env-check/ack). No "clean now" note: a run that didn't read the old rows doesn't prove they're gone
+  (6aecc5e4's final upload was clean while 5 of 6 baseline runs still read them).
 - Calibration (2026-11-06, 25 uploads): the 6aecc5e4 draft-leftover upload flagged 178; 21 of the other 22 flagged
   nothing; 2 flagged 1-2 Slack messages that are in neither their SQL nor the base copy (likely real; on Feb 14 the
   env can load a newer universe version than the portal's copy, so a single message there can be version drift).
@@ -187,10 +190,6 @@ def card_text(unknown):
     return "\n".join(lines)
 
 
-CLEAN_TEXT = ("✅ **Env data check: clean now.** Your latest Opus run read nothing that's missing from the base data "
-              "and your SQL.")
-
-
 def in_pilot(chat):
     pilot = {x.lower() for x in config.ENV_CHECK_PILOT}
     if not pilot or not chat:
@@ -201,10 +200,25 @@ def in_pilot(chat):
     return bool(pilot & {x for x in (chat.get("user_id"), email, email.split("+")[0]) if x})
 
 
-def _last_card(attempt_id):
-    row = db.one("select meta from messages where attempt_id=? and role='system' and meta like '%\"env_check\":%' "
-                 "order by id desc limit 1", (attempt_id,))
-    return json.loads(row["meta"]) if row else None
+def pending(attempt_id):
+    """The newest env warning card in the chat if it isn't acknowledged yet: {"id", "content"}, else None."""
+    row = db.one("select id, content, meta from messages where attempt_id=? and role='system' "
+                 "and meta like '%\"env_check\":%' order by id desc limit 1", (attempt_id,))
+    if not row or not (json.loads(row["meta"] or "{}").get("env_check") or 0) > 0:
+        return None
+    if db.one("select 1 from env_check_acks where attempt_id=? and message_id=?", (attempt_id, row["id"])):
+        return None
+    return {"id": row["id"], "content": row["content"]}
+
+
+def acknowledge(attempt_id, message_id):
+    """The contributor's Acknowledge on a warning card of their own chat. False if it isn't one."""
+    row = db.one("select meta from messages where id=? and attempt_id=? and role='system'", (message_id, attempt_id))
+    if not row or not (json.loads(row["meta"] or "{}").get("env_check") or 0) > 0:
+        return False
+    db.ex("insert or ignore into env_check_acks(attempt_id, message_id, acked_at) values (?,?,?)",
+          (attempt_id, message_id, time.time()))
+    return True
 
 
 def wanted(chat, run, status):
@@ -214,8 +228,8 @@ def wanted(chat, run, status):
 
 
 def check(chat, run_id=None):
-    """Scan the attempt's saved Opus run and post the card (or the clean note after an earlier card). Returns the
-    posted message, or None. Blocking: run it in a thread."""
+    """Scan the attempt's saved Opus run and post the warning card when it read unknown records. Returns the posted
+    message, or None. Blocking: run it in a thread."""
     attempt = chat["attempt_id"]
     universe = UNIVERSE_DIRS.get(workspace.universe_date(attempt) or "")
     inputs = workspace.task_inputs(attempt)
@@ -237,14 +251,9 @@ def check(chat, run_id=None):
     if unknown is None:
         return None
     log.info("env check %s: %d unknown records (%.0fs)", attempt, len(unknown), time.time() - started)
-    last = _last_card(attempt)
-    if unknown:
-        meta = {"run_id": run_id, "env_check": len(unknown), "warn": True}
-        msg = db.add_message(attempt, "system", card_text(unknown), meta)
-    elif last and last.get("env_check"):
-        msg = db.add_message(attempt, "system", CLEAN_TEXT, {"run_id": run_id, "env_check": 0})
-    else:
+    if not unknown:
         return None
+    msg = db.add_message(attempt, "system", card_text(unknown), {"run_id": run_id, "env_check": len(unknown), "warn": True})
     hub.publish(attempt, "message", msg)
     return msg
 

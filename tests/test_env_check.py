@@ -129,14 +129,51 @@ class CheckTest(unittest.TestCase):
         run = {"id": "r1", "kind": "review", "command": command, "actor_admin": admin}
         return asyncio.run(env_check.after_review(self.chat, run, status))
 
-    def test_posts_the_card_then_the_clean_note_once(self):
+    def test_posts_the_card_and_holds_it_until_acknowledged(self):
         msg = self.run_check()
         self.assertEqual(msg["meta"]["env_check"], 2)  # SpeedrunSofia + the Wise email; ZOM-601 is in the SQL
         self.assertIn("SpeedrunSofia", msg["content"])
+        self.assertEqual(env_check.pending("a1"), {"id": msg["id"], "content": msg["content"]})
+        self.assertFalse(env_check.acknowledge("a1", msg["id"] + 99))
+        self.assertTrue(env_check.acknowledge("a1", msg["id"]))
+        self.assertIsNone(env_check.pending("a1"))
+        again = self.run_check()  # a new run that still reads them: a new card, pending again
+        self.assertEqual(env_check.pending("a1")["id"], again["id"])
+
+    def test_no_clean_note(self):
+        """A run that didn't read the old rows doesn't prove they're gone (6aecc5e4's final upload was clean)."""
+        self.run_check()
         clean = [e for e in RUN if "speedrunsofia" not in json.dumps(e).lower() and "wise-1018" not in json.dumps(e)]
         (self.inputs / "opus" / "trajectory.json").write_text(json.dumps(clean))
-        self.assertEqual(self.run_check()["content"], env_check.CLEAN_TEXT)
-        self.assertIsNone(self.run_check())  # clean again: nothing more
+        self.assertIsNone(self.run_check())
+        self.assertIsNotNone(env_check.pending("a1"))  # the earlier card still needs its Acknowledge
+
+    def test_endpoint_and_me(self):
+        from fastapi.testclient import TestClient
+        from server import app as portal, auth
+        msg = self.run_check()
+
+        def client(admin=False):
+            c = TestClient(portal.app)
+            c.cookies.set(auth.USER_COOKIE, auth.sign({"attempt_id": "a1", "user_id": "u1", "iat": time.time(),
+                                                       **({"admin": "evan@scale.com"} if admin else {})}))
+            return c
+        with mock.patch.object(portal.blocks, "disabled", lambda *a: None), \
+                mock.patch.object(portal, "admin_role", lambda email: "admin"):
+            self.assertEqual(client(admin=True).post("/api/env-check/ack", json={"message_id": msg["id"]}).status_code, 403)
+            self.assertIsNone(portal._env_alert({"attempt_id": "a1", "admin": "evan@scale.com"}))
+            self.assertEqual(portal._env_alert({"attempt_id": "a1"})["id"], msg["id"])
+            self.assertEqual(client().post("/api/env-check/ack", json={"message_id": msg["id"]}).status_code, 200)
+            self.assertIsNone(portal._env_alert({"attempt_id": "a1"}))
+
+    def test_the_page_blocks_until_acknowledged(self):
+        web = Path(__file__).resolve().parent.parent / "web"
+        app_js, common = (web / "app.js").read_text(), (web / "common.js").read_text()
+        self.assertIn("showEnvAlert();", app_js)
+        self.assertIn('"/api/env-check/ack"', app_js)
+        self.assertIn('p.stage === "hardness" && typeof showEnvAlert === "function"', common)
+        self.assertIn('const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness", "oe", "rubric"])', common)
+        self.assertIn("answer <b>Yes</b> to “did you inject”", common)
 
     def test_only_contributors_finished_hardness(self):
         self.assertIsNone(self.run_check(admin=1))

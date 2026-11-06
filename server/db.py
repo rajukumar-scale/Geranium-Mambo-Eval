@@ -90,6 +90,9 @@ create table if not exists status_updates (
   id integer primary key autoincrement, incident_id integer, status text, body text, created_at real, created_by text
 );
 create table if not exists status_notified (key text primary key, created_at real);
+create table if not exists env_check_acks (
+  attempt_id text not null, message_id integer not null, acked_at real, primary key (attempt_id, message_id)
+);
 create table if not exists guide_reads (
   attempt_id text not null, guide text not null, created_at real, primary key (attempt_id, guide)
 );

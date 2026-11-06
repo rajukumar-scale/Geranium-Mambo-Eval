@@ -12,8 +12,10 @@ class InjectReminderTest(unittest.TestCase):
     def test_prompt_and_hardness_passes_get_the_sandbox_injection_step(self):
         js = (WEB / "common.js").read_text()
         stages = re.search(r'const INJECT_REMINDER_STAGES = new Set\(\[([^\]]*)\]\)', js).group(1)
-        self.assertEqual(sorted(re.findall(r'"(\w+)"', stages)), ["hardness", "prompt"])
-        self.assertIn("show.onclick = INJECT_REMINDER_STAGES.has(p.stage) ? injectStep : card", js)
+        # /oe and /rubric too since 2026-11-06 (redoing a task after the rubric pass), when the task has SQL saved
+        self.assertEqual(sorted(re.findall(r'"(\w+)"', stages)), ["hardness", "oe", "prompt", "rubric"])
+        self.assertIn('show.onclick = INJECT_REMINDER_STAGES.has(p.stage) && (p.stage === "prompt" || p.stage === "hardness" '
+                      '|| hasSavedSql()) ? injectStep : card', js)
         for words in ("Universe Explorer", "Agent Runner", "Not needed in the Rubric Verifier", "_changelog", "No records found"):
             self.assertIn(words, js)
 

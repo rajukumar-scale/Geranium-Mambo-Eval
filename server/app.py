@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import assignment, auth, env_help, selfguard, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import assignment, auth, env_check, env_help, selfguard, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -567,7 +567,33 @@ def me(request: Request):
                                 "cost_access": bool(session.get("admin")) and admin_role(session["admin"]) == "owner",
                                 "spend": spend.status(db.get_chat(session["attempt_id"])),
                                 "guide_intro": _guide_intro(session),
+                                "env_alert": _env_alert(session),
                                 "review_minutes": {c: progress.calibration(c)["minutes"] for c in progress.DEFAULTS}})
+
+
+def _env_alert(session):
+    """The env data warning the contributor hasn't acknowledged yet (env_check.pending); never for admins."""
+    if session.get("admin"):
+        return None
+    try:
+        return env_check.pending(session["attempt_id"])
+    except Exception:  # noqa: BLE001
+        log.exception("env alert state failed for %s", session["attempt_id"])
+        return None
+
+
+class EnvAckBody(BaseModel):
+    message_id: int
+
+
+@app.post("/api/env-check/ack")
+def env_check_ack(body: EnvAckBody, request: Request):
+    session = current_user(request)
+    if session.get("admin"):
+        raise HTTPException(403, "Only the contributor can acknowledge this.")
+    if not env_check.acknowledge(session["attempt_id"], body.message_id):
+        raise HTTPException(404, "No such warning in this chat.")
+    return {"ok": True}
 
 
 def _guide_intro(session):

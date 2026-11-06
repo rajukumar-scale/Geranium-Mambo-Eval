@@ -102,6 +102,7 @@ async function showApp(prefetched = null) {
   connect();
   checkBroadcasts();
   showGuideIntro();
+  showEnvAlert();  // after the guide pop-up, so it sits on top
   openGuideFromUrl();
 }
 
@@ -152,6 +153,38 @@ function showBroadcast(b) {
   // No close button, no click-outside, no Esc: only Acknowledge removes it.
   document.body.appendChild(wrap);
   btn.focus();
+}
+
+// ---- the env data warning (server/env_check.py): records the Opus run read that neither base data nor the SQL has ----
+// Like a broadcast: no close button, no click-outside, no Esc. Acknowledge (after the tick) is the only way out, and
+// until then it opens every time the chat does; the /hardness pass card waits for it too (showProof).
+function showEnvAlert() {
+  const a = state.me && !state.me.admin && state.me.env_alert;
+  if (!a || document.querySelector(`.overlay[data-env-alert="${a.id}"]`)) return;
+  document.querySelectorAll(".overlay[data-env-alert]").forEach(o => o.remove());  // an older one
+  const wrap = document.createElement("div");
+  wrap.className = "overlay broadcast env-alert";
+  wrap.dataset.envAlert = a.id;
+  wrap.innerHTML = `<div class="modal dialog" role="alertdialog" aria-modal="true" aria-labelledby="ea-title">
+      <header><div class="grow" id="ea-title">⚠ Your env has data your SQL doesn't create</div></header>
+      <div class="content bubble broadcast-body">${md(a.content)}</div>
+      <div class="dialog-actions" style="flex-wrap:wrap"><label class="taxo-check grow" style="margin:0"><input type="checkbox">
+        I redeployed my env from the base universe, ran only my final SQL there, and will redo my Opus run in it</label>
+        <button class="primary" data-ack disabled>Acknowledge</button></div></div>`;
+  const tick = wrap.querySelector("input"), btn = wrap.querySelector("[data-ack]");
+  tick.onchange = () => { btn.disabled = !tick.checked; };
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      await api("/api/env-check/ack", { json: { message_id: a.id } });
+      if (state.me.env_alert && state.me.env_alert.id === a.id) state.me.env_alert = null;
+      wrap.remove();
+    } catch (err) {
+      btn.disabled = !tick.checked;
+      uiAlert("Couldn't save that", err.message);
+    }
+  };
+  document.body.appendChild(wrap);
 }
 
 // ---- the guide pop-up (plan.guide_intro): read Hardness, Tool calls and Failure patterns before the first /prompt ----
@@ -260,6 +293,10 @@ function addMessage(m) {
   if (m.role === "report" && m.meta && m.meta.stage === "hardness" && (m.meta.injection_missing || m.meta.injection_stale)
       && !state.me.admin && (m.created_at || 0) > PAGE_OPENED)  // new, not old history
     setTimeout(() => showInjectGuideAfterHardness(m.meta.injection_missing ? "missing" : "stale"), 400);
+  if (m.role === "system" && m.meta && m.meta.env_check > 0 && !state.me.admin) {  // env data check found records
+    state.me.env_alert = { id: m.id, content: m.content };
+    setTimeout(showEnvAlert, 400);
+  }
   if (m.role === "system" && m.meta && m.meta.env_guide && !state.me.admin && (m.created_at || 0) > PAGE_OPENED)
     setTimeout(showEnvGuide, 400);  // their /admin request reads like a broken sandbox: the fix steps first
   state.messages.push(m);

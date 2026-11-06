@@ -469,6 +469,9 @@ function proofHtml(p, opts = {}) {
 // own orange style, never a verdict colour.
 function showProof(p) {
   if (p.locked) return showLockedPass(p);
+  // An unacknowledged env data warning holds the /hardness pass (server/env_check.py, chat page only).
+  if (p.stage === "hardness" && typeof showEnvAlert === "function" && state.me && !state.me.admin && state.me.env_alert)
+    return showEnvAlert();
   const cmd = esc("/" + (p.stage || ""));
   const wrap = document.createElement("div");
   wrap.className = "overlay";
@@ -508,12 +511,15 @@ function showProof(p) {
       <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
     const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
     tick.onchange = () => { show.disabled = !tick.checked; };
-    show.onclick = INJECT_REMINDER_STAGES.has(p.stage) ? injectStep : card;
+    show.onclick = INJECT_REMINDER_STAGES.has(p.stage) && (p.stage === "prompt" || p.stage === "hardness" || hasSavedSql()) ? injectStep : card;
   };
   // After a /prompt or /hardness pass the next step happens in sandboxes (Universe Explorer, Agent Runner), and CBs kept
   // forgetting to run their injection SQL there first (Evan, 2026-11-03). One more step, every such pass.
   const injectStep = () => {
-    wrap.innerHTML = injectGuideHtml({ check: "I'll run my injection SQL in every sandbox I open", ok: "Show my pass →" });
+    const sql = hasSavedSql();
+    wrap.innerHTML = injectGuideHtml({ lead: sql ? OUTLIER_SQL_LEAD : "", ok: "Show my pass →",
+      check: sql ? "I'll redeploy from the base universe, run only my final SQL, and answer Yes on Outlier with this same SQL"
+                 : "I'll run my injection SQL in every sandbox I open" });
     const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
     tick.onchange = () => { show.disabled = !tick.checked; };
     show.onclick = card;
@@ -535,7 +541,17 @@ function showProof(p) {
 // plain characters with its first and last characters spelled out (spelledCode), then the details. Before the download it's read with the taxonomy's own reader and prompt
 // (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
 const COPYABLE = new Set(["injection", "prompt", "oe"]);
-const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness"]);
+// /oe and /rubric too (Evan, 2026-11-06): contributors who redo a task after passing /rubric go back into sandboxes.
+// Those two show it only when the task has injection SQL saved.
+const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness", "oe", "rubric"]);
+function hasSavedSql() {
+  return typeof state !== "undefined" && !!state.me && (state.me.inputs || []).some(i => i.key === "injection" && i.state === "saved");
+}
+// The platform side (QC 6aec82c2, 2026-11-06: the SQL was in the portal, but Outlier said "did you inject: no").
+const OUTLIER_SQL_LEAD = `<p class="taxo-warn"><b>On Outlier, use this exact SQL.</b> Paste your <b>final</b> injection SQL (the version that passed
+  <b class="mono">/injection</b>) and answer <b>Yes</b> to “did you inject”. Before any run on the platform, redeploy the sandbox from the
+  <b>base universe</b> (never a snapshot) and run only that SQL, once. Data you add any other way (by hand in the explorer, or left
+  from an older draft) gets the task failed in QC.</p>`;
 
 // "Inject your SQL in every sandbox" (2026-11-03): on /prompt and /hardness pass screens, before every /hardness run,
 // and after a /hardness report that found the run had no injection. lead = an extra first paragraph.
