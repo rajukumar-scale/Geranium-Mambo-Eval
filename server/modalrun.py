@@ -21,6 +21,7 @@ import base64
 import logging
 import shlex
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -89,7 +90,10 @@ def _create_body(image_id, timeout, tags, universe_id=None):
         "idle_timeout": 30 * 60,
         "project_id": config.MODAL_PROJECT_ID,
         "product": "atlas-eval",
-        "tags": {"app": "atlas-eval", **tags},
+        # modal-proxy hands back a live sandbox that has the same tags instead of creating one (create_or_get_sandbox),
+        # so every sandbox needs a tag of its own: with only "app", concurrent reviews shared one machine and read each
+        # other's attempts (2026-11-06).
+        "tags": {"app": "atlas-eval", **tags, "sandbox": uuid.uuid4().hex},
     }
     if universe_id:
         body["directory_snapshots"] = [{"snapshot_image_id": universe_id, "mount_path": UNIVERSE_MOUNT}]

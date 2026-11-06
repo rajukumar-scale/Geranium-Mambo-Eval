@@ -92,9 +92,19 @@ class MachineContractTest(ModalTest):
         self.assertEqual(body["image"], config.MODAL_BASE_IMAGE)
         self.assertEqual(body["directory_snapshots"], [{"snapshot_image_id": "im-universe", "mount_path": "/universe"}])
         self.assertRegex(body["project_id"], r"^[0-9a-f]{24}$")
-        self.assertEqual(body["tags"], {"app": "atlas-eval", "run": "r1"})
+        self.assertEqual({k: v for k, v in body["tags"].items() if k != "sandbox"}, {"app": "atlas-eval", "run": "r1"})
         self.assertLessEqual(body["idle_timeout"], 1800)
         self.assertGreaterEqual(body["timeout"], config.RUN_TIMEOUT_MIN * 60)
+
+    def test_every_sandbox_gets_tags_of_its_own(self):
+        # modal-proxy returns an existing live sandbox with the same tags (create_or_get_sandbox), so two reviews with
+        # the same tags would share a machine. boxpool calls create_box() with no tags at all.
+        asyncio.run(modalrun.create_box())
+        asyncio.run(modalrun.create_box())
+        first, second = (body["tags"] for _, body in self.fake.requests)
+        self.assertNotEqual(first, second)
+        self.assertRegex(first["sandbox"], r"^[0-9a-f]{32}$")
+        self.assertEqual(first["app"], "atlas-eval")
 
     def test_no_template_fails_clearly(self):
         with mock.patch.object(config, "MODAL_TEMPLATE_IMAGE", ""):
