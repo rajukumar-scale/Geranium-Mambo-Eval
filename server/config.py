@@ -163,6 +163,8 @@ MAX_CONCURRENT_RUNS = _int("MAX_CONCURRENT_RUNS", 4 if RUNNER_MODE == "docker" e
 # cloned from BOAT_SNAPSHOT; follow-ups stay on RUNNER_MODE. Empty = reviews also use RUNNER_MODE.
 REVIEW_RUNNER = _get("REVIEW_RUNNER", "")
 BOAT_BIN = _get("BOAT_BIN", "boat")
+# The portal's own boat box (server/selfguard.py keeps its auto-stop off). BOAT_ID is set in boat shells only.
+SERVER_BOX_ID = _get("SERVER_BOX_ID", "") or os.environ.get("BOAT_ID", "") or "bx_qnsgbtzk"
 BOAT_SNAPSHOT = _get("BOAT_SNAPSHOT", "hg-runner")
 BOAT_BOX_TYPE = _get("BOAT_BOX_TYPE", "default")
 MAX_BOAT_RUNS = _int("MAX_BOAT_RUNS", 20)

@@ -1,0 +1,29 @@
+name: Server watchdog
+# Resumes the portal's server box if boat stopped it, and tells Slack (deploy/watchdog.sh). Every 30 minutes: each run
+# bills at least one Actions minute, so ~1,440 a month; when the portal is up it is one curl.
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy/watchdog.sh
+          sparse-checkout-cone-mode: false
+      - name: Check the portal, resume the box if it was stopped
+        env:
+          BOAT_API_KEY: ${{ secrets.BOAT_WATCHDOG_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: bash deploy/watchdog.sh

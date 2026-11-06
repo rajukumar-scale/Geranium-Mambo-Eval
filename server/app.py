@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import assignment, auth, env_help, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
+from . import assignment, auth, env_help, selfguard, blocks, broadcasts, status, boatrun, boat_wallet, boxpool, budget, cbs, config, cost, housekeeping, rerun_guard, runner_image, db, donedebug, fingerprint, fix_helper, handover, hub, known_issues, notify, pause, plan, progress, proofs, spend, staleness, submissions, taskids, taxo_reader, taxo_check, linter_alerts, workspace
 from .runner import RUNNER
 
 log = logging.getLogger("portal")
@@ -124,6 +124,7 @@ async def startup():
     asyncio.create_task(runner_image.loop())
     asyncio.create_task(boat_wallet.loop())
     asyncio.create_task(boxpool.loop())
+    asyncio.create_task(selfguard.loop())
     log.info("portal started: mode=%s base=%s", config.RUNNER_MODE, config.EVAL_BASE_DIR)
     if config.FIX_HELPER_PILOT and not (config.PROMPTS_DIR / fix_helper.RULES_FILE).is_file():
         log.error("FIX_HELPER_PILOT is on but server/prompts/%s is missing: answers get no fix-helper note",
