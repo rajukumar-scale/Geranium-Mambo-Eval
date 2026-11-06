@@ -111,6 +111,7 @@ Add these to your decision map (see "Building a Task That Passes", Part 3):
 - rows that fail an answer for missing a literal phrase when the fact is there
 - dozens of rows grading the same downstream effect of one miss
 - injected data that never reached the environment. Check it through the agent's tools, not just in your SQL.
+- data in the environment that your SQL doesn't create: rows added by hand in the env explorer, or rows left over from an older SQL draft you ran on the same env (re-running a draft adds rows but never removes the old ones). Every addition goes in the SQL; before your final runs, redeploy the env and apply only your final SQL.
 
 ## Part 7. Self-check before you run /hardness
 
@@ -222,6 +223,7 @@ Ask the portal assistant each of these:
 - Done check, same-place check, filter check, input check and decision flip all pass (Part 7).
 - Trap rows are weight 5, one condition each.
 - Injected records are visible through the agent's tools.
+- The env is base data plus your final SQL only: nothing added in the explorer by hand, and the env redeployed before you applied the final SQL (no rows left from older drafts).
 
 **If it comes back too easy**
 - Find the heavy rows that passed 6/6 and stop adding more like them.
