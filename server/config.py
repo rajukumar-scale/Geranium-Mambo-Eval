@@ -245,6 +245,8 @@ FIX_HELPER_PILOT = _list("FIX_HELPER_PILOT", "")
 # Tool-call note after /hardness (server/toolcall_note.py, 2026-11-02): emails or Outlier IDs, "*" = everyone (the
 # default), empty = off.
 TOOLCALL_NOTE_PILOT = _list("TOOLCALL_NOTE_PILOT", "*")
+# Env data check after /hardness (server/env_check.py, 2026-11-06): same format, "*" = everyone, empty = off.
+ENV_CHECK_PILOT = _list("ENV_CHECK_PILOT", "*")
 
 DEFAULT_MODEL = _get("DEFAULT_MODEL", "claude-opus-5-5")
 # Thinking effort for every run. The bundled skills pin xhigh; the portal rewrites that in its own copy.

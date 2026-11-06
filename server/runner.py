@@ -14,7 +14,7 @@ import subprocess
 import time
 import uuid
 
-from . import boatrun, boxpool, config, db, modalrun, fingerprint, fix_helper, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, toolcall_note, workspace
+from . import boatrun, boxpool, config, db, modalrun, fingerprint, fix_helper, hostload, hub, pause, plan, progress, proofs, proxy, rerun_guard, runner_image, spend, staleness, toolcall_note, env_check, workspace
 from .spend import table_cost
 
 log = logging.getLogger("portal.runner")
@@ -1451,6 +1451,10 @@ class Runner:
             toolcall_note.after_review(chat, db.get_run(run_id), status)
         except Exception:  # noqa: BLE001 - a helper message must never break finishing the run
             log.exception("tool-call note failed for %s", attempt)
+        try:  # env data check after /hardness: records the Opus run read that neither base data nor the SQL has
+            env_check.schedule(chat, db.get_run(run_id), status)
+        except Exception:  # noqa: BLE001
+            log.exception("env check scheduling failed for %s", attempt)
         self._stale_notice(attempt, run_id)
         self.activity.pop(run_id, None)
         await self._check_spend(attempt)
