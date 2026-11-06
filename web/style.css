@@ -585,6 +585,15 @@ kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px s
 .overlay.broadcast .modal.dialog { width: min(640px, 100%); }
 .broadcast-body { border: 0; background: none; }
 
+/* The guide pop-up: one button per guide, ticked once opened */
+.gi-list { display: grid; gap: 8px; margin-top: 12px; }
+.gi-guide { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; text-align: left; font-size: 15px; }
+.gi-guide .grow { flex: 1; }
+.gi-guide .gi-mark { width: 1.2em; text-align: center; font-weight: 700; }
+.gi-guide .gi-state { font-size: 12px; color: var(--muted, #888); }
+.gi-guide.read { border-color: var(--positive, #2e9e5b); }
+.gi-guide.read .gi-mark { color: var(--positive, #2e9e5b); }
+
 /* A pass an admin issued over a non-passing review: always visible on the pass screen and /verify */
 .proof .sub.override { color: var(--warn, #b26a00); font-weight: 500; margin-top: 4px; }
 

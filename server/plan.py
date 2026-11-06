@@ -9,6 +9,12 @@
 - The early guard: one bullet in the assistant's standing instructions for every chat (runner.GUARD). It covers the
   request the card suggests: checking the contributor's own idea or draft against the guides.
 
+- The guide pop-up (Evan, 2026-11-06): the same chats, before the first /prompt, open with a pop-up asking the
+  contributor to read the Hardness, Tool calls and Failure patterns guides first. Each guide counts as read when its
+  tab is loaded (GET /api/guides/<name> records it in guide_reads); "I've read all three" (POST /api/guides/ack) works
+  only once all three were opened, and stores guide 'ack'. Until then the pop-up comes back every time the chat opens;
+  "Later" only closes it for now. Its text is server/prompts/guide_intro.md.
+
 (A "Plan my task with the guides" button that sent a hidden planning note was tried and dropped on 2026-10-31: one
 planning run wasn't reliable enough.)
 
@@ -18,12 +24,13 @@ The texts are files in server/prompts/ (config.PROMPTS_DIR), so final wording is
 import logging
 import re
 import threading
+import time
 
 from . import blocks, broadcasts, config, db, hub
 
 log = logging.getLogger("portal.plan")
 
-FILES = {"card": "plan_kickoff_card.md", "guard": "early_guard.md"}
+FILES = {"card": "plan_kickoff_card.md", "guard": "early_guard.md", "guide_intro": "guide_intro.md"}
 _LEADING_COMMENTS = re.compile(r"\A(?:\s*<!--.*?-->)+", re.S)
 _lock = threading.Lock()  # two tabs opening the same chat at once must not post two cards
 
@@ -98,3 +105,50 @@ def maybe_kickoff(session, chat):
     hub.publish(attempt_id, "message", msg)
     log.info("plan kickoff card posted for %s", attempt_id)
     return msg
+
+
+# ---- the guide pop-up ----
+INTRO_GUIDES = (("hardness", "Hardness"), ("toolcalls", "Tool calls"), ("patterns", "Failure patterns"))
+_INTRO_KEYS = {k for k, _ in INTRO_GUIDES}
+
+
+def guides_read(attempt_id):
+    return {r["guide"] for r in db.q("select guide from guide_reads where attempt_id=?", (attempt_id,))}
+
+
+def _intro_open(session, chat):
+    return not session.get("admin") and _eligible_chat(chat)
+
+
+def guide_intro(session, chat):
+    """The pop-up's state for /api/me, or None when it isn't shown (admin, not eligible, acknowledged, or a /prompt
+    already started)."""
+    if not _intro_open(session, chat):
+        return None
+    opened = guides_read(chat["attempt_id"])
+    if "ack" in opened or has_prompt(chat["attempt_id"]):
+        return None
+    return {"text": read(FILES["guide_intro"]),
+            "guides": [{"key": k, "label": label, "read": k in opened} for k, label in INTRO_GUIDES]}
+
+
+def record_guide_read(session, chat, name):
+    """A contributor loaded one of the pop-up's guides in their own chat. Admins viewing a chat never count."""
+    if name not in _INTRO_KEYS or not _intro_open(session, chat):
+        return False
+    if name in guides_read(chat["attempt_id"]):
+        return False
+    db.ex("insert or ignore into guide_reads(attempt_id, guide, created_at) values (?,?,?)",
+          (chat["attempt_id"], name, time.time()))
+    return True
+
+
+def ack_guides(session, chat):
+    """'I've read all three'. Returns the guides still unopened (empty = saved)."""
+    if session.get("admin"):
+        return []
+    missing = [label for k, label in INTRO_GUIDES if k not in guides_read(chat["attempt_id"])]
+    if not missing:
+            db.ex("insert or ignore into guide_reads(attempt_id, guide, created_at) values (?,?,?)",
+              (chat["attempt_id"], "ack", time.time()))
+    return missing

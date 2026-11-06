@@ -101,6 +101,7 @@ async function showApp(prefetched = null) {
   setRun(state.me.active_run);
   connect();
   checkBroadcasts();
+  showGuideIntro();
   openGuideFromUrl();
 }
 
@@ -151,6 +152,57 @@ function showBroadcast(b) {
   // No close button, no click-outside, no Esc: only Acknowledge removes it.
   document.body.appendChild(wrap);
   btn.focus();
+}
+
+// ---- the guide pop-up (plan.guide_intro): read Hardness, Tool calls and Failure patterns before the first /prompt ----
+// Each guide counts once its tab loads; "I've read all three" works only after all three were opened; "Later" closes it
+// until the chat is opened again.
+function showGuideIntro() {
+  const intro = state.me && state.me.guide_intro;
+  if (!intro || document.querySelector(".overlay[data-guide-intro]")) return;
+  const wrap = document.createElement("div");
+  wrap.className = "overlay broadcast guide-intro";
+  wrap.dataset.guideIntro = "1";
+  wrap.innerHTML = `<div class="modal dialog" role="alertdialog" aria-modal="true" aria-labelledby="gi-title">
+      <header><div class="grow" id="gi-title">📘 Before you start: read the guides</div></header>
+      <div class="content"><div class="bubble broadcast-body">${md(intro.text)}</div>
+        <div class="gi-list">${intro.guides.map(g => `<button type="button" class="gi-guide${g.read ? " read" : ""}" data-gi="${esc(g.key)}">
+          <span class="gi-mark" aria-hidden="true">${g.read ? "✓" : "○"}</span><span class="grow">${esc(g.label)}</span>
+          <span class="gi-state">${g.read ? "Opened" : "Open"}</span></button>`).join("")}</div></div>
+      <div class="dialog-actions"><span class="muted grow gi-left" style="font-size:12px"></span>
+        <button data-gi-later>Later</button><button class="primary" data-gi-ack>I've read all three</button></div></div>`;
+  const ack = wrap.querySelector("[data-gi-ack]");
+  const refresh = () => {
+    const left = intro.guides.filter(g => !g.read).length;
+    ack.disabled = left > 0;
+    wrap.querySelector(".gi-left").textContent = left ? `${left} still to open` : "All three opened";
+  };
+  wrap.addEventListener("click", async e => {
+    const g = e.target.closest("[data-gi]");
+    if (g) {
+      const item = intro.guides.find(x => x.key === g.dataset.gi);
+      await openGuide(item.key);  // loading the tab records the read on the server
+      item.read = true;
+      g.classList.add("read");
+      g.querySelector(".gi-mark").textContent = "✓";
+      g.querySelector(".gi-state").textContent = "Opened";
+      return refresh();
+    }
+    if (e.target.closest("[data-gi-later]")) return wrap.remove();
+    if (!e.target.closest("[data-gi-ack]")) return;
+    ack.disabled = true;
+    try {
+      await api("/api/guides/ack", { method: "POST" });
+      state.me.guide_intro = null;
+      wrap.remove();
+    } catch (err) {
+      refresh();
+      uiAlert("Couldn't save that", err.message);
+    }
+  });
+  refresh();
+  // Oldest on top: broadcasts added before it stay underneath; a guide opened from it opens above it.
+  document.body.appendChild(wrap);
 }
 
 // After a deploy the reconnect brings a new build: reload so the tab never runs old code. Not while the

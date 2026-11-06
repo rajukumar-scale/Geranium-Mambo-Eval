@@ -565,7 +565,16 @@ def me(request: Request):
     return for_viewer(session, {**chat_state(session["attempt_id"]), "admin": session.get("admin"),
                                 "cost_access": bool(session.get("admin")) and admin_role(session["admin"]) == "owner",
                                 "spend": spend.status(db.get_chat(session["attempt_id"])),
+                                "guide_intro": _guide_intro(session),
                                 "review_minutes": {c: progress.calibration(c)["minutes"] for c in progress.DEFAULTS}})
+
+
+def _guide_intro(session):
+    try:  # the "read these 3 guides first" pop-up (plan.guide_intro); never stops the chat from opening
+        return plan.guide_intro(session, db.get_chat(session["attempt_id"]))
+    except Exception:  # noqa: BLE001
+        log.exception("guide pop-up state failed for %s", session["attempt_id"])
+        return None
 
 
 class UniverseBody(BaseModel):
@@ -638,8 +647,22 @@ def guide(name: str, request: Request):
         text = (config.GUIDELINES_DIR / file).read_text(encoding="utf-8")
     except OSError:
         raise HTTPException(404, "That guide isn't available.")
+    try:  # counts toward the guide pop-up (plan.record_guide_read: the contributor's own chat only)
+        plan.record_guide_read(session, db.get_chat(session["attempt_id"]), name)
+    except Exception:  # noqa: BLE001 - reading the guide must never fail on this
+        log.exception("guide read not recorded for %s", session["attempt_id"])
     return PlainTextResponse(for_viewer(session, _GUIDE_MAINTAINER_LINE.sub("", text)),
                              media_type="text/markdown; charset=utf-8", headers=NO_CACHE)
+
+
+@app.post("/api/guides/ack")
+def guides_ack(request: Request):
+    """The guide pop-up's "I've read all three": saved only once all three guides were opened."""
+    session = current_user(request)
+    missing = plan.ack_guides(session, db.get_chat(session["attempt_id"]))
+    if missing:
+        raise HTTPException(409, "Open " + ", ".join(missing) + " first.")
+    return {"ok": True}
 
 
 SPEND_TTL = 5  # seconds one attempt's spend figure is reused: every open chat page polls it (~400 calls a minute)

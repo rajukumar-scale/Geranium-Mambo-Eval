@@ -90,6 +90,9 @@ create table if not exists status_updates (
   id integer primary key autoincrement, incident_id integer, status text, body text, created_at real, created_by text
 );
 create table if not exists status_notified (key text primary key, created_at real);
+create table if not exists guide_reads (
+  attempt_id text not null, guide text not null, created_at real, primary key (attempt_id, guide)
+);
 create table if not exists cb_training (
   user_id text primary key, email text, trained_at real, trained_by text, note text
 );
