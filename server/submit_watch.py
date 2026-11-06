@@ -84,8 +84,8 @@ async def check_once():
 
 
 async def send(text):
-    """A DM to Evan when the bot token is set, else the admin-notification webhook. False if neither worked."""
-    if config.SLACK_BOT_TOKEN and await linter_alerts.dm(text):
+    """A DM to Evan (bot token or the DM workflow's webhook), else the admin-notification webhook. False if neither worked."""
+    if linter_alerts.dm_configured() and await linter_alerts.dm(text):
         return True
     if notify.configured():
         return await notify.slack(text)

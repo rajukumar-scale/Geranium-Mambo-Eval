@@ -25,5 +25,40 @@ class MessageTest(unittest.TestCase):
         self.assertNotEqual(linter_alerts._key(a), linter_alerts._key({**a, "STAGE": "Prompt"}))
 
 
+
+@unittest.skipUnless(importlib.util.find_spec("fastapi"), "server packages not installed here")
+class DmWebhookTest(unittest.TestCase):
+    """2026-11-06: no bot token, so the DM goes through a Slack workflow webhook that DMs Evan."""
+
+    def send(self, token, hook, status=200):
+        import asyncio
+        from unittest import mock
+        from server import config, linter_alerts
+        posted = []
+
+        class Client:
+            def __init__(self, **kw): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def post(self, url, **kw):
+                posted.append((url, kw.get("json")))
+                return mock.Mock(status_code=status, text="", json=lambda: {"ok": True})
+        with mock.patch.object(config, "SLACK_BOT_TOKEN", token), mock.patch.object(config, "SLACK_DM_WEBHOOK_URL", hook), \
+                mock.patch.object(linter_alerts.httpx, "AsyncClient", Client):
+            return asyncio.run(linter_alerts.dm("hi")), posted, linter_alerts.dm_configured()
+
+    def test_webhook_when_there_is_no_bot_token(self):
+        self.assertEqual(self.send("", "https://hooks.example/dm"), (True, [("https://hooks.example/dm", {"text": "hi"})], True))
+
+    def test_the_bot_token_wins(self):
+        ok, posted, _ = self.send("xoxb-1", "https://hooks.example/dm")
+        self.assertEqual(posted[0][0], "https://slack.com/api/chat.postMessage")
+
+    def test_neither_is_off(self):
+        self.assertEqual(self.send("", ""), (False, [], False))
+
+    def test_a_failed_webhook_is_false(self):
+        self.assertFalse(self.send("", "https://hooks.example/dm", status=500)[0])
+
 if __name__ == "__main__":
     unittest.main()

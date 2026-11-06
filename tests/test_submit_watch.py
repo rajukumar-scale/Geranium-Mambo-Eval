@@ -110,7 +110,7 @@ class SubmitWatchTest(unittest.TestCase):
             sent.append(("webhook", text)); return True
         with mock.patch.object(submit_watch.linter_alerts, "dm", dm), mock.patch.object(submit_watch.notify, "slack", hook), \
                 mock.patch.object(submit_watch.notify, "configured", lambda: True):
-            with mock.patch.object(config, "SLACK_BOT_TOKEN", ""):
+            with mock.patch.object(config, "SLACK_BOT_TOKEN", ""), mock.patch.object(config, "SLACK_DM_WEBHOOK_URL", ""):
                 self.assertTrue(asyncio.run(submit_watch.__dict__["_send_real"]("a")))
             with mock.patch.object(config, "SLACK_BOT_TOKEN", "x"):
                 self.assertTrue(asyncio.run(submit_watch.__dict__["_send_real"]("b")))

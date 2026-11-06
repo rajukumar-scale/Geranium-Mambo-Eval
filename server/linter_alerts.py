@@ -27,10 +27,15 @@ def _mark(key):
     db.ex("insert or replace into status_notified(key, created_at) values (?,?)", (key, time.time()))
 
 
+def dm_configured():
+    return bool((config.SLACK_BOT_TOKEN and config.LINTER_ALERT_SLACK_USER) or config.SLACK_DM_WEBHOOK_URL)
+
+
 async def dm(text):
-    """Post a DM to LINTER_ALERT_SLACK_USER with the bot token. False if it can't."""
+    """Post a DM to LINTER_ALERT_SLACK_USER with the bot token, else through the DM workflow's webhook
+    (SLACK_DM_WEBHOOK_URL). False if it can't."""
     if not (config.SLACK_BOT_TOKEN and config.LINTER_ALERT_SLACK_USER):
-        return False
+        return await _dm_webhook(text) if config.SLACK_DM_WEBHOOK_URL else False
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post("https://slack.com/api/chat.postMessage",
@@ -42,6 +47,18 @@ async def dm(text):
         return ok
     except (httpx.HTTPError, ValueError) as error:
         log.warning("linter DM error: %s", error)
+        return False
+
+
+async def _dm_webhook(text):
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(config.SLACK_DM_WEBHOOK_URL, json={"text": text})
+        if resp.status_code != 200:
+            log.warning("DM webhook failed: %s %s", resp.status_code, resp.text[:300])
+        return resp.status_code == 200
+    except httpx.HTTPError as error:
+        log.warning("DM webhook error: %s", error)
         return False
 
 
@@ -71,15 +88,15 @@ async def check_once():
 
 
 async def _hello():
-    if _sent("linterdm:hello") or _sent("linterdm:cant-dm"):
-        return
+    if _sent("linterdm:hello") or (_sent("linterdm:cant-dm") and not dm_configured()):
+        return  # a DM route added since the last "can't DM" gets its hello
     if await dm("👋 Fingerprint linter alerts are on. I'll DM you here when a CB is stuck on a "
                 "\"… fingerprint must match the pass screen\" linter (3+ fails since their last pass). "
                 f"Dashboard: {config.LINTER_ALERT_DASHBOARD_URL}"):
         _mark("linterdm:hello")
     else:
         _mark("linterdm:cant-dm")
-        log.warning("linter-stuck DM alerts can't DM %s: no working SLACK_BOT_TOKEN; they stay off",
+        log.warning("linter-stuck DM alerts can't DM %s: no working SLACK_BOT_TOKEN or SLACK_DM_WEBHOOK_URL; they stay off",
                     config.LINTER_ALERT_SLACK_USER)
 
 

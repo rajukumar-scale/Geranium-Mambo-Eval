@@ -133,7 +133,10 @@ SLACK_WEBHOOK_URL = _get("SLACK_WEBHOOK_URL", "")
 SLACK_ALERT_DETAIL = _int("SLACK_ALERT_DETAIL", 0)
 SLACK_BOT_TOKEN = _get("SLACK_BOT_TOKEN", "")
 SLACK_CHANNEL = _get("SLACK_CHANNEL", "")
-# Slack DM to Evan when a CB is stuck on a fingerprint linter (server/linter_alerts.py): needs SLACK_BOT_TOKEN.
+# A Slack workflow webhook whose workflow DMs Evan (2026-11-06: there is no bot token). The DM route for the
+# linter-stuck and outdated-pass-submit alerts when SLACK_BOT_TOKEN is unset; posts {"text": ...} like SLACK_WEBHOOK_URL.
+SLACK_DM_WEBHOOK_URL = _get("SLACK_DM_WEBHOOK_URL", "")
+# Slack DM to Evan when a CB is stuck on a fingerprint linter (server/linter_alerts.py): SLACK_BOT_TOKEN or SLACK_DM_WEBHOOK_URL.
 LINTER_ALERT_QUERY_ID = _int("LINTER_ALERT_QUERY_ID", 395304)  # 0 = off
 LINTER_ALERT_SLACK_USER = _get("LINTER_ALERT_SLACK_USER", "U0BD6FV1PJ4")
 LINTER_ALERT_EVERY_MIN = _int("LINTER_ALERT_EVERY_MIN", 15)
