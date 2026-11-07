@@ -769,4 +769,4 @@ kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px s
 .pg-dot.current.locked { background: var(--grey-90); border-color: var(--grey-80); color: var(--muted); }
 
 /* Lite admins (open /admin requests only): hide the chat actions the server refuses them */
-body.lite-admin [data-override], body.lite-admin [data-budget], body.lite-admin [data-block], body.lite-admin [data-unblock] { display: none !important; }
+body.lite-admin [data-block], body.lite-admin [data-unblock] { display: none !important; }

@@ -238,6 +238,31 @@ def lite_chat(admin, attempt_id):
         raise HTTPException(403, LITE_ONLY_OPEN)
 
 
+def track(admin, action, attempt_id, detail):
+    """Every pass override and budget approval, by any admin, in admin_actions (Admins → Recent actions). A lite
+    admin's also alerts the owner: a DM when one is set up, else the admin channel (attempt prefix only unless
+    SLACK_ALERT_DETAIL)."""
+    db.ex("insert into admin_actions(admin, role, action, attempt_id, detail, created_at) values (?,?,?,?,?,?)",
+          (admin["email"], admin.get("role"), action, attempt_id, detail[:500], time.time()))
+    if admin.get("role") != "lite":
+        return
+    what = {"override_pass": "issued a pass override", "budget": "approved more budget"}.get(action, action)
+
+    async def tell():
+        try:
+            full = f":memo: Lite admin {admin['email']} {what} on attempt `{attempt_id}`: {detail[:300]}\n{notify.admin_link(attempt_id)}"
+            if linter_alerts.dm_configured() and await linter_alerts.dm(full):
+                return
+            await notify.slack(full if config.SLACK_ALERT_DETAIL else
+                               f":memo: A lite admin {what} on attempt `{attempt_id[:8]}…`. {notify.admin_link(attempt_id)}")
+        except Exception:  # noqa: BLE001 - the action itself is already saved
+            log.exception("lite admin action alert failed")
+    try:
+        asyncio.get_running_loop().create_task(tell())
+    except RuntimeError:  # no event loop (a sync endpoint's worker thread): send it from a fresh one
+        threading.Thread(target=lambda: asyncio.run(tell()), daemon=True).start()
+
+
 def lite_run(admin, run_id):
     if admin.get("role") == "lite":
         lite_chat(admin, (db.get_run(run_id) or {}).get("attempt_id"))
@@ -1728,7 +1753,8 @@ class OverrideBody(BaseModel):
 def admin_override_pass(attempt_id: str, body: OverrideBody, request: Request):
     """Issue a pass card over a review that didn't pass. Signed like any pass, but marked as an admin override
     (who, why, and the review's own verdict) on the pass screen and on /verify."""
-    admin = current_admin(request)
+    admin = current_admin(request, lite=True)
+    lite_chat(admin, attempt_id)
     chat = db.get_chat(attempt_id)
     if not chat:
         raise HTTPException(404, "No such chat.")
@@ -1753,6 +1779,7 @@ def admin_override_pass(attempt_id: str, body: OverrideBody, request: Request):
                                                "Press **Show pass screen** on the card above to open it.", {"admin": admin["email"]})
     hub.publish(attempt_id, "message", note)
     log.info("admin %s issued an override %s pass on %s (run %s): %s", admin["email"], body.stage, attempt_id, body.run_id, reason)
+    track(admin, "override_pass", attempt_id, f"/{body.stage} (run {body.run_id}): {reason}")
     return {"code": payload["code"], "fingerprint": payload["fingerprint"]}
 
 
@@ -1787,7 +1814,7 @@ def image_kind(data):
 @app.post("/api/admin/chat/{attempt_id}/image")
 async def admin_chat_image(attempt_id: str, request: Request, file: UploadFile = File(...)):
     """An image for an admin reply: stored, and its link returned for the message (Markdown ![image](link))."""
-    current_admin(request)
+    lite_chat(current_admin(request, lite=True), attempt_id)
     if not re.fullmatch(r"[0-9a-zA-Z]{1,64}", attempt_id) or not db.get_chat(attempt_id):
         raise HTTPException(404, "No such chat.")
     data = await file.read(CHAT_IMAGE_MAX + 1)
@@ -1849,7 +1876,8 @@ class BudgetBody(BaseModel):
 @app.post("/api/admin/chat/{attempt_id}/budget")
 async def admin_budget_raise(attempt_id: str, body: BudgetBody, request: Request):
     """Approve more budget for one attempt (its runs stop at the budget until an admin does this)."""
-    admin = current_admin(request)
+    admin = current_admin(request, lite=True)
+    lite_chat(admin, attempt_id)
     chat = db.get_chat(attempt_id)
     if not chat:
         raise HTTPException(404, "No such chat.")
@@ -1858,6 +1886,8 @@ async def admin_budget_raise(attempt_id: str, body: BudgetBody, request: Request
     new_limit, spent = spend.approve(attempt_id, body.add_usd, admin["email"], body.note)
     log.info("admin %s approved $%.0f more budget for %s: now $%.0f ($%.2f spent)", admin["email"], body.add_usd,
              attempt_id, new_limit, spent)
+    track(admin, "budget", attempt_id, f"+${body.add_usd:,.0f} (now ${new_limit:,.0f}, ${spent:,.2f} spent)"
+                                       + (f": {body.note}" if body.note else ""))
     msg = db.add_message(attempt_id, "system", f"✅ An admin approved **${body.add_usd:,.0f}** more budget for this task. "
                                                f"Its budget is now **${new_limit:,.0f}** (${spent:,.2f} spent). Please use it "
                                                "carefully: plan before you run, and fix everything a report raised first.",
@@ -2283,6 +2313,14 @@ async def evalfiles_update(body: EvalUpdateBody, request: Request):
 @app.get("/admin/invite/{token}")
 def invite_page(token: str):
     return page("admin.html")
+
+
+@app.get("/api/admin/actions")
+def admin_actions(request: Request):
+    """Recent pass overrides and budget approvals by any admin (owner only)."""
+    current_admin(request, owner=True)
+    return {"actions": db.q("select admin, role, action, attempt_id, detail, created_at from admin_actions "
+                            "order by id desc limit 200")}
 
 
 @app.get("/api/admin/admins")

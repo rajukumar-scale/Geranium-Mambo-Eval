@@ -76,6 +76,10 @@ class LiteAdminTest(unittest.TestCase):
         self.assertEqual(c.get("/api/admin/reports/closed1/1_prompt.md").status_code, 403)
         self.assertEqual(c.post("/api/admin/open-chat", json={"attempt_id": "closed1"}).status_code, 403)
         self.assertEqual(c.post("/api/admin/open-chat", json={}).status_code, 403)  # "the latest chat" isn't theirs
+        self.assertEqual(c.post("/api/admin/chat/closed1/override-pass",
+                                json={"run_id": "run-closed1", "stage": "prompt", "reason": "x"}).status_code, 403)
+        self.assertEqual(c.post("/api/admin/chat/closed1/budget", json={"add_usd": 100}).status_code, 403)
+        self.assertEqual(c.post("/api/admin/chat/closed1/image", files={"file": ("a.png", b"x", "image/png")}).status_code, 403)
 
     def test_reply_then_resolve_ends_access(self):
         c = self.admin(LITE)
@@ -89,13 +93,37 @@ class LiteAdminTest(unittest.TestCase):
                                   ("get", "/api/admin/broadcasts", None), ("get", "/api/admin/evalfiles", None),
                                   ("get", "/api/admin/budget", None), ("get", "/api/admin/cbs", None),
                                   ("get", "/api/admin/rubric-done", None), ("get", "/api/admin/status/incidents", None),
-                                  ("post", "/api/admin/chat/open1/override-pass", {"run_id": "run-open1", "stage": "prompt", "reason": "x"}),
-                                  ("post", "/api/admin/chat/open1/budget", {"add_usd": 100}),
                                   ("post", "/api/admin/block", {"kind": "attempt", "attempt_id": "open1"}),
                                   ("get", "/api/admin/admins", None)):
             res = getattr(c, method)(url, **({"json": body} if body is not None else {}))
             self.assertEqual(res.status_code, 403, url)
             self.assertTrue(res.json()["detail"].startswith(("Lite admins", "Only the owner")), url)
+
+    def test_budget_on_an_open_request_is_tracked_and_alerted(self):
+        alerts = []
+
+        async def slack(text):
+            alerts.append(text)
+            return True
+        with mock.patch.object(portal.notify, "slack", slack), mock.patch.object(portal.linter_alerts, "dm_configured", lambda: False), \
+                mock.patch.object(portal.spend, "approve", lambda a, add, by, note: (600.0, 512.5)), \
+                mock.patch.object(portal.spend, "status", lambda chat: {}):
+            res = self.admin(LITE).post("/api/admin/chat/open1/budget", json={"add_usd": 100, "note": "big task"})
+            self.assertEqual(res.status_code, 200, res.text)
+            self.admin(FULL).post("/api/admin/chat/closed1/budget", json={"add_usd": 50})
+            for _ in range(50):  # the alert goes out in the background
+                if alerts:
+                    break
+                time.sleep(0.02)
+        rows = db.q("select admin, role, action, attempt_id, detail from admin_actions order by id")
+        self.assertEqual([(r["admin"], r["role"], r["action"], r["attempt_id"]) for r in rows],
+                         [(LITE, "lite", "budget", "open1"), (FULL, "admin", "budget", "closed1")])
+        self.assertIn("+$100 (now $600, $512.50 spent): big task", rows[0]["detail"])
+        self.assertEqual(len(alerts), 1)  # only the lite admin's action alerts
+        self.assertIn("lite admin approved more budget", alerts[0].lower())
+        listing = self.admin("owner@scale.com").get("/api/admin/actions").json()["actions"]
+        self.assertEqual(len(listing), 2)
+        self.assertEqual(self.admin(LITE).get("/api/admin/actions").status_code, 403)
 
     def test_chat_page_follows_the_request(self):
         with mock.patch.object(portal.workspace, "list_reports", lambda a: []), \

@@ -541,15 +541,24 @@ async function openAdmins() {
       <a href="#" data-rm="${esc(a.email)}" style="color:var(--fail)">remove</a>`}</td></tr>`).join("");
   const w = openModal("Admins", `
     <p class="muted" style="margin-top:0">Admins can see every chat, reply as Admin, resolve /admin requests and cancel runs.
-      <b>Lite</b> admins see only chats with an open /admin request: they can read them, reply, resolve and cancel runs there,
-      nothing else (no other chats, spend, blocks, budgets, pass overrides, broadcasts or eval files).
+      <b>Lite</b> admins see only chats with an open /admin request: they can read them, reply, resolve, cancel runs, issue
+      pass overrides and approve budget there, nothing else (no other chats, spend, blocks, broadcasts or eval files).
+      Every override and budget approval is listed below, and a lite admin's also alerts you.
       Only owners (set in the server settings) can add or remove admins.</p>
     <table class="runs"><tr><th>Email</th><th>Role</th><th>Status</th><th></th></tr>${rows}</table>
     <form id="add-admin" style="display:flex;gap:8px;margin-top:14px">
       <input id="new-admin" type="email" placeholder="teammate@scale.com" required>
       <select id="new-admin-role" aria-label="Role"><option value="admin">Admin</option><option value="lite">Lite (open /admin requests only)</option></select>
       <button class="primary">Add</button></form>
-    <div id="invite-out" class="hidden" style="margin-top:12px"></div>`);
+    <div id="invite-out" class="hidden" style="margin-top:12px"></div>
+    <h3 style="margin:18px 0 6px">Recent pass overrides and budget approvals</h3><div id="adm-actions" class="muted">Loading…</div>`);
+  api("/api/admin/actions").then(r => {
+    const name = { override_pass: "Pass override", budget: "Budget" };
+    w.querySelector("#adm-actions").outerHTML = r.actions.length ? `<table class="runs"><tr><th>When</th><th>Admin</th><th>Action</th><th>Attempt</th><th>Detail</th></tr>${
+      r.actions.map(a => `<tr><td>${esc(fmtTime(a.created_at))}</td><td>${esc(a.admin)}${a.role === "lite" ? ' <span class="chip">lite</span>' : ""}</td>
+        <td>${esc(name[a.action] || a.action)}</td><td class="mono">${esc(a.attempt_id)}</td><td>${esc(a.detail)}</td></tr>`).join("")}</table>`
+      : `<div class="muted">None yet.</div>`;
+  }).catch(err => { w.querySelector("#adm-actions").textContent = err.message; });
   const showLink = r => {
     const out = w.querySelector("#invite-out");
     out.classList.remove("hidden");
