@@ -184,8 +184,11 @@ def current_user(request):
     if not chat:
         raise HTTPException(401, "Please sign in again.")
     if session.get("admin"):
-        if not admin_role(session["admin"]):  # that admin login was removed or renamed
+        role = admin_role(session["admin"])
+        if not role:  # that admin login was removed or renamed
             raise HTTPException(401, "Please sign in again.")
+        if role == "lite" and not lite_can_open(chat["attempt_id"]):  # its /admin request was resolved
+            raise HTTPException(403, LITE_ONLY_OPEN)
         return session  # blocks never apply to admins
     if session.get("user_id") and chat["user_id"] and session["user_id"] != chat["user_id"]:
         raise HTTPException(401, "This attempt has been re-assigned to another contributor. Sign in with your current attempt ID.")
@@ -209,11 +212,35 @@ def chat_writable(session, chat):
 
 
 def admin_role(email):
-    """owner = listed in ADMIN_EMAILS (can manage admins); admin = added from the admin page."""
+    """owner = listed in ADMIN_EMAILS (can manage admins); admin = added from the admin page; lite = added from the
+    admin page as lite: only chats with an open /admin request (Evan, 2026-11-07; see lite_can_open)."""
     if email in config.ADMIN_EMAILS:
         return "owner"
-    row = db.one("select password_hash from admins where email=?", (email,))
-    return "admin" if row and row["password_hash"] else None
+    row = db.one("select password_hash, role from admins where email=?", (email,))
+    if not row or not row["password_hash"]:
+        return None
+    return "lite" if row["role"] == "lite" else "admin"
+
+
+LITE_ONLY_OPEN = "Lite admins can only open chats that have an open /admin request."
+LITE_NO = "Lite admins can only work on chats with an open /admin request."
+
+
+def lite_can_open(attempt_id):
+    """A lite admin's whole reach: a chat whose /admin request is open (chats.admin_open, cleared by Resolve)."""
+    chat = db.get_chat(attempt_id or "")
+    return bool(chat and chat.get("admin_open") and not chat.get("archived_from"))
+
+
+def lite_chat(admin, attempt_id):
+    """For endpoints a lite admin may use: the chat must have an open /admin request."""
+    if admin.get("role") == "lite" and not lite_can_open(attempt_id):
+        raise HTTPException(403, LITE_ONLY_OPEN)
+
+
+def lite_run(admin, run_id):
+    if admin.get("role") == "lite":
+        lite_chat(admin, (db.get_run(run_id) or {}).get("attempt_id"))
 
 
 def admin_password_ok(email, password):
@@ -227,13 +254,17 @@ def admin_password_ok(email, password):
         hmac.compare_digest(password.encode(), config.ADMIN_PASSWORD.encode())
 
 
-def current_admin(request, owner=False):
+def current_admin(request, owner=False, lite=False):
+    """lite=True: lite admins may use this endpoint too (each one then checks the chat with lite_chat/lite_run).
+    Everything else refuses them: allowlist, so a new admin endpoint is closed to lite admins by default."""
     session = auth.unsign(request.cookies.get(auth.ADMIN_COOKIE, ""), 12 * 3600)
     role = admin_role(session.get("email")) if session else None  # removal takes effect immediately
     if not role:
         raise HTTPException(401, "Admin sign-in required.")
     if owner and role != "owner":
         raise HTTPException(403, "Only the owner can manage admins.")
+    if role == "lite" and not lite:
+        raise HTTPException(403, LITE_NO)
     return {**session, "role": role}
 
 
@@ -253,7 +284,7 @@ def viewer_is_admin(request):
         return True
     except HTTPException:
         session = auth.unsign(request.cookies.get(auth.USER_COOKIE, ""), config.SESSION_DAYS * 86400)
-        return bool(session and session.get("admin") and admin_role(session["admin"]))
+        return bool(session and session.get("admin") and admin_role(session["admin"]) in ("owner", "admin"))
 
 
 def set_cookie(response, name, value, max_age):
@@ -321,8 +352,9 @@ async def event_stream(request, key, hello, view=lambda payload: payload):
         yield hub.sse(view({"event": "hello", "attempt_id": None, "data": hello}))
         while not await request.is_disconnected():
             try:
-                payload = await asyncio.wait_for(q.get(), timeout=15)
-                yield hub.sse(view(payload))
+                payload = view(await asyncio.wait_for(q.get(), timeout=15))
+                if payload is not None:  # view None = not for this viewer (a lite admin, another chat)
+                    yield hub.sse(payload)
             except asyncio.TimeoutError:
                 yield ": ping\n\n"
     finally:
@@ -357,7 +389,7 @@ def cost_page(request: Request):
 def cbs_page(request: Request):
     """The CB tracker: any admin."""
     session = auth.unsign(request.cookies.get(auth.ADMIN_COOKIE, ""), 12 * 3600)
-    if not session or not admin_role(session.get("email")):
+    if not session or admin_role(session.get("email")) not in ("owner", "admin"):
         return RedirectResponse("/admin", status_code=303)
     return page("cbs.html")
 
@@ -483,7 +515,9 @@ async def login(body: LoginBody, request: Request):
         # Admins may open any attempt (not theirs, another project, or not in Redash yet), but only with
         # proof they are the admin: the admin password, or an admin session for this email in this browser.
         session = auth.unsign(request.cookies.get(auth.ADMIN_COOKIE, ""), 12 * 3600)
-        if (session and session.get("email") == admin_email) or admin_password_ok(admin_email, body.password):
+        if admin_role(admin_email) == "lite" and not lite_can_open(attempt_id):
+            reason = LITE_ONLY_OPEN
+        elif (session and session.get("email") == admin_email) or admin_password_ok(admin_email, body.password):
             ok, bypass, reason = True, True, "admin bypass"
         elif not body.password:
             return JSONResponse({"detail": "This is an admin account. Enter the admin password to open any attempt.",
@@ -713,6 +747,11 @@ def my_spend(request: Request):
 def history_chats(session):
     """The signed-in person's chats: every attempt with their Outlier ID. An admin session sees every
     contributor's chat ("god mode"; admins can see them all on /admin anyway)."""
+    if session.get("admin") and admin_role(session["admin"]) == "lite":  # lite: the open /admin requests only
+        rows = db.q("select * from chats where admin_open=1 and archived_from is null order by last_activity desc")
+        if not any(r["attempt_id"] == session["attempt_id"] for r in rows):
+            rows.append(db.get_chat(session["attempt_id"]))
+        return sorted(rows, key=lambda r: r["last_activity"] or 0, reverse=True)
     if session.get("admin"):
         rows = db.q("select * from chats where coalesce(task_id, '') != 'loadtest' order by last_activity desc limit 500")
         if not any(r["attempt_id"] == session["attempt_id"] for r in rows):
@@ -731,14 +770,14 @@ _god_history = {"at": 0.0, "data": None}
 @app.get("/api/history")
 def history(request: Request):
     session = current_user(request)
-    god = bool(session.get("admin"))
+    god = bool(session.get("admin")) and admin_role(session["admin"]) != "lite"  # the shared cache is the full list
     c = _god_history
     if god and c["data"] is not None and time.time() - c["at"] < GOD_HISTORY_TTL \
             and any(r["attempt_id"] == session["attempt_id"] for r in c["data"]):
         return [r | {"current": r["attempt_id"] == session["attempt_id"]} for r in c["data"]]
     with db.reading():
         out = _history(request)
-    if god:
+    if god and session.get("admin"):
         c["data"], c["at"] = out, time.time()
     return out
 
@@ -787,7 +826,9 @@ class OpenChatBody(BaseModel):
 @app.post("/api/admin/open-chat")
 def admin_open_chat(body: OpenChatBody, request: Request):
     """From /admin: open a chat on the chat page as this admin (the selected one, else the latest)."""
-    admin = current_admin(request)
+    admin = current_admin(request, lite=True)
+    if admin["role"] == "lite":
+        lite_chat(admin, body.attempt_id.strip().lower())
     chat = db.get_chat(body.attempt_id.strip().lower()) if body.attempt_id else \
         db.one("select * from chats where coalesce(task_id, '') != 'loadtest' order by last_activity desc limit 1")
     if not chat:
@@ -868,7 +909,9 @@ async def events(request: Request):
     hello = {"active_run": run_view(db.active_run(attempt_id)), "build": WEB_BUILD}
     # The chat's task id, looked up once for this stream: for_viewer() read it from the database for every event of
     # every open page, on the event loop (a busy disk then froze the whole portal, 2026-11-02).
-    if session.get("admin"):
+    if session.get("admin") and admin_role(session["admin"]) == "lite":  # stops the moment the request is resolved
+        view = lambda payload: payload if lite_can_open(attempt_id) else None  # noqa: E731
+    elif session.get("admin"):
         view = lambda payload: payload  # noqa: E731
     else:
         chat = db.get_chat(attempt_id)
@@ -950,10 +993,10 @@ async def send(body: SendBody, request: Request):
         if not note:
             raise HTTPException(400, "Add a short message after /admin so the admins know what you need.")
         user_msg = db.add_message(attempt_id, "user", text, {"command": "admin"})
-        hub.publish(attempt_id, "message", user_msg)
         db.ex("insert into admin_requests(attempt_id, message, status, created_at) values (?,?,?,?)",
               (attempt_id, note, "open", time.time()))
-        db.update("chats", "attempt_id", attempt_id, admin_open=1)
+        db.update("chats", "attempt_id", attempt_id, admin_open=1)  # before the publish: lite admins' streams check it
+        hub.publish(attempt_id, "message", user_msg)
         if config.SLACK_ALERT_DETAIL:
             alert = (f":rotating_light: *Eval portal /admin request*\n"
                      f"Attempt `{attempt_id}` · task `{chat['task_id']}` · {chat['email']}\n"
@@ -1132,7 +1175,7 @@ def proof_for_viewer(code, request):
         session = current_user(request)
     except (HTTPException, Disabled):
         pass
-    if session and session.get("admin"):
+    if session and session.get("admin") and admin_role(session["admin"]) in ("owner", "admin"):
         return payload
     if session and session["attempt_id"] == payload["attempt_id"]:
         if staleness.annotate(payload["attempt_id"], [dict(payload)])[0].get("locked"):
@@ -1545,8 +1588,11 @@ async def admin_chats_data():
 
 @app.get("/api/admin/chats")
 async def admin_chats(request: Request):
-    me_admin = current_admin(request)
+    me_admin = current_admin(request, lite=True)
     data = await admin_chats_data()
+    if me_admin["role"] == "lite":  # the open /admin requests only, and none of the portal-wide figures
+        return {"chats": [c for c in data.get("chats", []) if c.get("admin_open") and not c.get("archived_from")],
+                "lite": True, "me": {"email": me_admin["email"], "role": "lite"}}
     return data | {"queued": RUNNER.queued(), "me": {"email": me_admin["email"], "role": me_admin["role"]}}
 
 
@@ -1627,7 +1673,7 @@ def admin_spend(request: Request, group: str = "user", days: int = 30, format: s
 
 @app.get("/api/admin/chat/{attempt_id}")
 def admin_chat(attempt_id: str, request: Request):
-    current_admin(request)
+    lite_chat(current_admin(request, lite=True), attempt_id)
     if not db.get_chat(attempt_id):
         raise HTTPException(404, "No such chat.")
     state = chat_state(attempt_id)
@@ -1786,7 +1832,8 @@ def chat_image(attempt_id: str, name: str, request: Request):
 
 @app.post("/api/admin/chat/{attempt_id}/reply")
 def admin_reply(attempt_id: str, body: AdminReply, request: Request):
-    admin = current_admin(request)
+    admin = current_admin(request, lite=True)
+    lite_chat(admin, attempt_id)
     if not db.get_chat(attempt_id) or not body.text.strip():
         raise HTTPException(400, "Nothing to send.")
     msg = db.add_message(attempt_id, "admin", body.text.strip(), {"admin": admin["email"]})
@@ -1822,7 +1869,8 @@ async def admin_budget_raise(attempt_id: str, body: BudgetBody, request: Request
 
 @app.post("/api/admin/chat/{attempt_id}/resolve")
 def admin_resolve(attempt_id: str, request: Request):
-    admin = current_admin(request)
+    admin = current_admin(request, lite=True)
+    lite_chat(admin, attempt_id)
     db.update("chats", "attempt_id", attempt_id, admin_open=0)
     db.ex("update admin_requests set status='resolved', resolved_at=?, resolved_by=? where attempt_id=? and status='open'",
           (time.time(), admin["email"], attempt_id))
@@ -1835,7 +1883,8 @@ def admin_resolve(attempt_id: str, request: Request):
 def admin_recover_report(run_id: str, request: Request):
     """A finished review whose report the portal missed (e.g. a restart in the seconds it finished): post it, and
     its pass card if it passed (Runner.recover_report)."""
-    admin = current_admin(request)
+    admin = current_admin(request, lite=True)
+    lite_run(admin, run_id)
     try:
         out = RUNNER.recover_report(run_id)
     except ValueError as error:
@@ -1846,7 +1895,7 @@ def admin_recover_report(run_id: str, request: Request):
 
 @app.post("/api/admin/runs/{run_id}/cancel")
 async def admin_cancel(run_id: str, request: Request):
-    current_admin(request)
+    lite_run(current_admin(request, lite=True), run_id)
     return {"ok": await RUNNER.cancel(run_id)}
 
 
@@ -1998,7 +2047,7 @@ def admin_blocks(request: Request):
 
 @app.get("/api/admin/runs/{run_id}/log")
 def admin_run_log(run_id: str, request: Request):
-    current_admin(request)
+    lite_run(current_admin(request, lite=True), run_id)
     run = db.get_run(run_id)
     if not run:
         raise HTTPException(404, "No such run.")
@@ -2013,7 +2062,7 @@ def admin_run_log(run_id: str, request: Request):
 
 @app.get("/api/admin/reports/{attempt_id}/{name}")
 def admin_report(attempt_id: str, name: str, request: Request):
-    current_admin(request)
+    lite_chat(current_admin(request, lite=True), attempt_id)
     if name not in workspace.STAGE_BY_FILE:
         raise HTTPException(404, "No such report.")
     text = workspace.read_report(attempt_id, name)
@@ -2024,8 +2073,14 @@ def admin_report(attempt_id: str, name: str, request: Request):
 
 @app.get("/api/admin/events")
 async def admin_events(request: Request):
-    current_admin(request)
-    return StreamingResponse(event_stream(request, hub.ADMIN, {}), media_type="text/event-stream", headers=SSE_HEADERS)
+    admin = current_admin(request, lite=True)
+    if admin["role"] != "lite":
+        return StreamingResponse(event_stream(request, hub.ADMIN, {}), media_type="text/event-stream", headers=SSE_HEADERS)
+    # lite: only events of chats with an open /admin request (checked per event, so a resolve cuts it off at once);
+    # an event that opens a request (a contributor's /admin) passes because admin_open is set before it's published
+    return StreamingResponse(event_stream(request, hub.ADMIN, {"lite": True},
+                                          view=lambda p: p if p.get("attempt_id") is None or lite_can_open(p["attempt_id"]) else None),
+                             media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # ---- admin management (owner only) ------------------------------------------------
@@ -2241,6 +2296,7 @@ def list_admins(request: Request):
 
 class AdminInvite(BaseModel):
     email: str
+    role: str | None = None  # "admin" or "lite" (only chats with an open /admin request); None keeps an existing role
 
 
 @app.post("/api/admin/admins")
@@ -2250,13 +2306,16 @@ def invite_admin(body: AdminInvite, request: Request):
     email = body.email.strip().lower()
     if not auth.EMAIL_RE.match(email) or email in config.ADMIN_EMAILS:
         raise HTTPException(400, "Enter a valid email that isn't already an owner.")
+    if body.role not in (None, "admin", "lite"):
+        raise HTTPException(400, "Role must be admin or lite.")
     token, token_hash = auth.new_invite()
     expires = time.time() + 72 * 3600
     if db.one("select 1 from admins where email=?", (email,)):
-        db.update("admins", "email", email, invite_hash=token_hash, invite_expires=expires)
+        db.update("admins", "email", email, invite_hash=token_hash, invite_expires=expires,
+                  **({"role": body.role} if body.role else {}))  # a password reset keeps the role
     else:
         db.ex("insert into admins(email, role, invite_hash, invite_expires, created_by, created_at) values (?,?,?,?,?,?)",
-              (email, "admin", token_hash, expires, owner["email"], time.time()))
+              (email, body.role or "admin", token_hash, expires, owner["email"], time.time()))
     return {"ok": True, "invite_url": f"{config.PUBLIC_BASE_URL}/admin/invite/{token}", "expires": expires}
 
 

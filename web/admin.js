@@ -11,7 +11,7 @@ async function boot() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   connect();
-  loadBudget();
+  if (!S.lite) loadBudget();
   const hash = location.hash.slice(1);
   if (hash) select(hash);
 }
@@ -197,7 +197,7 @@ function openBudget() {
   btn.onclick = async () => { btn.disabled = true; btn.textContent = "Refreshing…"; await loadBudget(true); w.remove(); openBudget(); };
 }
 $("#budget-btn").onclick = openBudget;
-setInterval(() => { if (S.chats.length) loadBudget(); }, 300000);
+setInterval(() => { if (S.chats.length && !S.lite) loadBudget(); }, 300000);
 
 // ---- spend (any admin) ----
 $("#spend-btn").onclick = () => openSpend("user", 30);
@@ -541,10 +541,14 @@ async function openAdmins() {
       <a href="#" data-rm="${esc(a.email)}" style="color:var(--fail)">remove</a>`}</td></tr>`).join("");
   const w = openModal("Admins", `
     <p class="muted" style="margin-top:0">Admins can see every chat, reply as Admin, resolve /admin requests and cancel runs.
+      <b>Lite</b> admins see only chats with an open /admin request: they can read them, reply, resolve and cancel runs there,
+      nothing else (no other chats, spend, blocks, budgets, pass overrides, broadcasts or eval files).
       Only owners (set in the server settings) can add or remove admins.</p>
     <table class="runs"><tr><th>Email</th><th>Role</th><th>Status</th><th></th></tr>${rows}</table>
     <form id="add-admin" style="display:flex;gap:8px;margin-top:14px">
-      <input id="new-admin" type="email" placeholder="teammate@scale.com" required><button class="primary">Add admin</button></form>
+      <input id="new-admin" type="email" placeholder="teammate@scale.com" required>
+      <select id="new-admin-role" aria-label="Role"><option value="admin">Admin</option><option value="lite">Lite (open /admin requests only)</option></select>
+      <button class="primary">Add</button></form>
     <div id="invite-out" class="hidden" style="margin-top:12px"></div>`);
   const showLink = r => {
     const out = w.querySelector("#invite-out");
@@ -555,7 +559,7 @@ async function openAdmins() {
   };
   w.querySelector("#add-admin").addEventListener("submit", async e => {
     e.preventDefault();
-    try { showLink(await api("/api/admin/admins", { json: { email: w.querySelector("#new-admin").value } })); }
+    try { showLink(await api("/api/admin/admins", { json: { email: w.querySelector("#new-admin").value, role: w.querySelector("#new-admin-role").value } })); }
     catch (err) { uiAlert("Couldn't add that admin", err.message); }
   });
   w.addEventListener("click", async e => {
@@ -574,6 +578,7 @@ async function openAdmins() {
 async function loadChats() {
   const res = await api("/api/admin/chats");
   $("#whoami").innerHTML = `<b>${esc(res.me.email)}</b> · ${esc(res.me.role)}`;
+  if (res.lite) return loadLite(res);
   $("#admins-btn").classList.toggle("hidden", res.me.role !== "owner");
   S.owner = res.me.role === "owner";  // only owners see the Cost page
   document.querySelector('#view-switch [data-view="cost"]').classList.toggle("hidden", !S.owner);
@@ -585,6 +590,20 @@ async function loadChats() {
   $("#slack").textContent = res.slack ? "Slack alerts on" : "Slack alerts off";
   $("#slack").className = "slack-status " + (res.slack ? "on" : "off");
   renderFunnel(res.steps);
+  renderChats();
+}
+
+// A lite admin (2026-11-07): only chats with an open /admin request; none of the portal-wide tools or figures.
+// The server refuses everything else anyway; this just doesn't show what they can't use.
+function loadLite(res) {
+  S.lite = true;
+  document.body.classList.add("lite-admin");
+  ["#spend-btn", "#blocks-btn", "#broadcast-btn", "#status-btn", "#evalfiles-btn", "#admins-btn", "#budgetreq-btn",
+   "#budget-btn", "#funnel", "#slack"].forEach(sel => $(sel) && $(sel).classList.add("hidden"));
+  document.querySelectorAll('#view-switch [data-view="cost"], #view-switch [data-view="cbs"]').forEach(b => b.classList.add("hidden"));
+  $("#stats").innerHTML = `<span class="sb-label">Lite admin</span><span>You see only chats with an open /admin request
+    (${res.chats.length} now). A chat leaves this list when its request is resolved.</span>`;
+  S.chats = res.chats;
   renderChats();
 }
 
