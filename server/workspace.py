@@ -14,6 +14,7 @@ swaps them into one hardlinked workspace instead.
 import hashlib
 import importlib.util
 import json
+import logging
 import os
 import re
 import shutil
@@ -25,6 +26,8 @@ import time
 from pathlib import Path
 
 from . import config, skill_effort
+
+log = logging.getLogger("portal.workspace")
 
 STAGE_BY_FILE = {
     "0_injection.md": "injection",
@@ -362,6 +365,9 @@ def recover_local():
 
 # ---- docker mounts -------------------------------------------------------------
 
+_simcheck_warned = []
+
+
 def docker_mounts(attempt_id):
     base, root = config.EVAL_BASE_DIR, ensure_attempt(attempt_id)
     mounts = [
@@ -374,6 +380,12 @@ def docker_mounts(attempt_id):
         (config.GUIDELINES_DIR, "/work/guidelines", "ro"),
     ]
     mounts += [(base / name, f"/work/{name}", "ro") for name in config.universe_dirs(base)]
+    if (config.SIMCHECK_DIR / "model" / "model.onnx").is_file():  # the eval's similarity check looks in /opt/simcheck
+        mounts.append((config.SIMCHECK_DIR, "/opt/simcheck", "ro"))
+    elif not _simcheck_warned:
+        _simcheck_warned.append(1)
+        log.warning("similarity runtime missing at %s: docker /prompt reviews will end PARTIAL; run deploy/setup_similarity.sh",
+                    config.SIMCHECK_DIR)
     args = []
     for src, dst, mode in mounts:
         args += ["--mount", f"type=bind,source={src},target={dst}" + (",readonly" if mode == "ro" else "")]

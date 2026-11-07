@@ -68,6 +68,10 @@ def universe_dirs(base=None):
 # hardlinked workspace (development only, no isolation).
 RUNNER_MODE = _get("RUNNER_MODE", "local")
 RUNNER_IMAGE = _get("RUNNER_IMAGE", "eval-runner:latest")
+# The dataset-similarity runtime (deploy/setup_similarity.sh) on this machine, mounted read-only into docker reviews.
+# Boat review boxes have it baked in; the docker image (runner/Dockerfile) doesn't, so without this mount every /prompt
+# run in docker ended PARTIAL "dataset similarity runtime is missing" (eval-portal.scale.com, 2026-11-07).
+SIMCHECK_DIR = Path(_get("SIMCHECK_DIR", "/opt/simcheck"))
 CONTAINER_MEMORY = _get("CONTAINER_MEMORY", "4g")
 CONTAINER_CPUS = _get("CONTAINER_CPUS", "2")
 # An --internal docker network (no internet) whose gateway is where the proxy listens. setup_vm.sh creates it.
