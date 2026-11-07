@@ -612,8 +612,11 @@ function loadLite(res) {
   document.querySelectorAll('#view-switch [data-view="cost"], #view-switch [data-view="cbs"]').forEach(b => b.classList.add("hidden"));
   $("#stats").innerHTML = `<span class="sb-label">Lite admin</span><span>You see only chats with an open /admin request
     (${res.chats.length} now). A chat leaves this list when its request is resolved.</span>`;
+  ["#funnel-pick", "#list-tools"].forEach(sel => $(sel) && $(sel).classList.add("hidden"));
   S.chats = res.chats;
   renderChats();
+  if (!res.chats.length) $("#chats").innerHTML = `<div class="muted" style="padding:12px">No open /admin requests right now.</div>`;
+  else if (!S.selected && !location.hash) select(res.chats[0].attempt_id);  // straight into the first request
 }
 
 // "Where they are now": each person once, at their furthest review step.

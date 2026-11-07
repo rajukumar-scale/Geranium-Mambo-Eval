@@ -151,6 +151,13 @@ class LiteAdminTest(unittest.TestCase):
         self.assertEqual(db.one("select role from admins where email='new@scale.com'")["role"], "lite")
         self.assertEqual(owner.post("/api/admin/admins", json={"email": "x@scale.com", "role": "boss"}).status_code, 400)
 
+    def test_the_page_shows_only_the_help_queue(self):
+        js = (Path(__file__).resolve().parent.parent / "web" / "admin.js").read_text()
+        for sel in ("#spend-btn", "#blocks-btn", "#broadcast-btn", "#status-btn", "#evalfiles-btn", "#admins-btn",
+                    "#budgetreq-btn", "#budget-btn", "#funnel", "#list-tools"):
+            self.assertIn(f'"{sel}"', js[js.index("function loadLite"):])
+        self.assertIn('[data-view="cost"], #view-switch [data-view="cbs"]', js)
+
     def test_streams_drop_other_chats(self):
         src = (Path(__file__).resolve().parent.parent / "server" / "app.py").read_text()
         self.assertIn("view=lambda p: p if p.get(\"attempt_id\") is None or lite_can_open(p[\"attempt_id\"]) else None", src)
