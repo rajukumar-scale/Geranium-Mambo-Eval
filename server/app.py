@@ -1771,7 +1771,11 @@ def admin_override_pass(attempt_id: str, body: OverrideBody, request: Request):
                                  "match. Run the review on the current version first.")
     meta = _latest_reports(attempt_id)[body.stage]
     run = db.get_run(body.run_id)
-    payload = proofs.create(run, chat, meta, override={"by": admin["email"], "reason": reason})
+    # The saved inputs go on the card like on any pass (staleness.check), or an override is "current" forever: a later
+    # SQL change never marked it outdated or locked it (attempt 6aed99b3..., 2026-11-08, /prompt override shown as
+    # "ready to use" after the SQL changed). same_input above means the stage's own input is the one that was reviewed.
+    payload = proofs.create(run, chat, meta, override={"by": admin["email"], "reason": reason},
+                            inputs=staleness.snapshot(attempt_id))
     msg = db.add_message(attempt_id, "proof", f"{payload['stage']} {payload['verdict']}", payload)
     hub.publish(attempt_id, "message", msg)
     hub.publish(attempt_id, "proof", payload)
