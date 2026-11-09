@@ -55,7 +55,7 @@ CB_FACTS = [user(X, "x@gmail.com+outlier1@x.com"), user(Y, "y@x.com"), user(S, "
             {"KIND": "incomplete", "TASK": "staff", "WORKER": Q}, node("chat2", X)]
 CHATS = [{"task_id": "one", "user_id": X, "email": "x@gmail.com"}, {"task_id": "staff", "user_id": W, "email": "w@scale.com+outlier2@x.com"},
          {"task_id": "chat2", "user_id": W, "email": "w@x.com"}]
-PORTAL = ({}, {}, {}, {"billed": 0.0, "estimated": 0.0}, [{"at": RECENT + 60, "usd": 6.0, "task": "two", "user": Y, "email": "y@x.com", "admin": False}])
+PORTAL = ({}, {}, {}, {"billed": 0.0, "estimated": 0.0}, [{"at": RECENT + 60, "usd": 6.0, "task": "two", "user": Y, "email": "y@x.com", "admin": False}], {})
 
 
 class PendingMultiTest(unittest.TestCase):
@@ -64,7 +64,7 @@ class PendingMultiTest(unittest.TestCase):
         def sources(ids):
             asked.append(set(ids))
             return cb_facts, chats
-        with mock.patch.object(cost, "_portal", lambda s, b, e: PORTAL), mock.patch.object(cost.time, "time", lambda: NOW), \
+        with mock.patch.object(cost, "_portal", lambda s, b, e, *_: PORTAL), mock.patch.object(cost.time, "time", lambda: NOW), \
                 mock.patch.object(cost, "_claim_sources", sources):
             r = cost.build(FACTS, utc(2026, 10, 7), utc(2026, 10, 20), states=STATES)
         return r, asked
@@ -106,7 +106,7 @@ class PendingMultiTest(unittest.TestCase):
         self.assertEqual(p["tasks"][0]["holder_spend"], 6)
 
     def test_no_task_state_query(self):
-        with mock.patch.object(cost, "_portal", lambda s, b, e: PORTAL), mock.patch.object(cost.time, "time", lambda: NOW):
+        with mock.patch.object(cost, "_portal", lambda s, b, e, *_: PORTAL), mock.patch.object(cost.time, "time", lambda: NOW):
             self.assertIsNone(cost.build(FACTS, utc(2026, 10, 7), utc(2026, 10, 20))["pending_multi"])
 
 

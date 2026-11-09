@@ -7,10 +7,21 @@
 const URLQ = new URLSearchParams(location.search);
 const C = { days: +(URLQ.get("days") || localStorage.getItem("evp_cost_days") || 14), view: localStorage.getItem("evp_cost_view") || "both", data: null, sort: {},
             start: URLQ.get("start") || "", end: URLQ.get("end") || "",
-            period: localStorage.getItem("evp_cost_period") || "day", chart: localStorage.getItem("evp_cost_chart") || "bar" };
+            period: localStorage.getItem("evp_cost_period") || "day", chart: localStorage.getItem("evp_cost_chart") || "bar",
+            layer: URLQ.get("layer") || localStorage.getItem("evp_cost_layer") || "all" };
 if (!URLQ.get("days") && !C.start) [C.start, C.end] = (localStorage.getItem("evp_cost_custom") || "").split("..").concat("").slice(0, 2);
 if (!(C.start && C.end)) C.start = C.end = "";
 const FIRST_DAY = "2026-08-01";  // the cost data starts here
+// The pipeline layer switch (Evan, 2026-11-09): every figure for all layers, or only what was spent at L-1 / L0 and the
+// tasks submitted there (the server cuts it, server/cost.py). In the all-layers view a chart and the task table split
+// the spend by layer: L-1, L0, L10 and later, and no layer known (the hint pipeline, older runs never tied to a submission).
+const LAYERS = { all: "All layers", l1: "L-1", l0: "L0" };
+if (!LAYERS[C.layer]) C.layer = "all";
+const LAYER_SERIES = [{ key: "l1", label: "L-1", cls: "s-l1" }, { key: "l0", label: "L0", cls: "s-l0" },
+                      { key: "later", label: "L10 and later", cls: "s-later" }, { key: "unknown", label: "No layer known", cls: "s-nolayer" }];
+// A {key: [task runs, evals]} layer split, in the chosen view.
+const layerOf = (layers, k) => { const v = (layers || {})[k] || [0, 0]; return (C.view !== "evals" ? v[0] : 0) + (C.view !== "runs" ? v[1] : 0); };
+const layerName = () => (C.layer === "all" ? "" : ` at ${LAYERS[C.layer]}`);
 // Charts show the range by UTC day, week (Monday start) or month; a week or month cut by the range is marked.
 const PERIODS = { day: "day", week: "week", month: "month" };
 // What the page counts: evals (portal reviews + the old in-task sandbox, where the evals ran before the portal), the platform's
@@ -26,7 +37,7 @@ function viewOf(c) {
   const rowTotal = r => (inView("runs") ? r.agent_runs || 0 : 0) + (inView("sandbox") ? r.sandbox || 0 : 0) + (inView("portal") ? r.portal || 0 : 0);
   const daily = c.daily.map(d => ({ ...d, total: SERIES.reduce((t, x) => t + (inView(x.key) ? d[x.key] || 0 : 0), 0) }));
   const split = (r, prefix) => lostOf({ agent_runs: r[`${prefix}_agent_runs`], evals: r[`${prefix}_evals`] });
-  const tasks = c.tasks.map(t => ({ ...t, total: rowTotal(t), lost_before: split(t, "lost_before") }));
+  const tasks = c.tasks.map(t => ({ ...t, total: rowTotal(t), lost_before: split(t, "lost_before"), l1: layerOf(t.layers, "l1"), l0: layerOf(t.layers, "l0") }));
   const people = c.people.map(p => ({ ...p, total: rowTotal(p), lost: split(p, "lost"), per_task: p.tasks_submitted ? rowTotal(p) / p.tasks_submitted : null }));
   // the five parts of the total; when they're there, the total is their sum, so the page adds up to the cent
   const breakdown = c.breakdown && { ...c.breakdown, parts: PARTS.map(p => ({ ...p, amount: lostOf(c.breakdown[p.key]), detail: c.breakdown[p.key] })) };
@@ -88,10 +99,11 @@ function chartRows(c) {
 }
 const chartSince = () => C.period === "day" ? "" : `${rangeOf(C.shown)}, by UTC ${C.period === "week" ? "week (Monday start)" : "month"} · `;
 
-const rangeQuery = () => (C.start ? `start=${C.start}&end=${C.end}` : `days=${C.days}`);
+const rangeQuery = () => (C.start ? `start=${C.start}&end=${C.end}` : `days=${C.days}`) + (C.layer === "all" ? "" : `&layer=${C.layer}`);
 async function load(refresh = false, quiet = false) {
   document.querySelectorAll("#range [data-days]").forEach(b => b.classList.toggle("on", !C.start && +b.dataset.days === C.days));
   $("#custom").classList.toggle("on", !!C.start);
+  document.querySelectorAll("#layer [data-layer]").forEach(b => b.classList.toggle("on", b.dataset.layer === C.layer));
   history.replaceState(null, "", `${location.pathname}?${rangeQuery()}`);
   clearTimeout(C.poll);
   if (!quiet) { $("#app").classList.add("refetching"); $("#asof").textContent = "Loading…"; }  // keep the last render, dimmed
@@ -131,11 +143,17 @@ function render() {
   // Portal runs before the proxy tagged its calls (2026-10-26 20:00 UTC) are priced at list, not at SMIG's billed cost.
   const est = (c.summary || {}).portal_estimated;
   const info = est > 0 && C.view !== "runs" ? `Portal reviews before Oct 26, 20:00 UTC (${usd(est)} in this range) are the portal's list-price estimate, about 40% above what's billed; later reviews are SMIG's billed cost.` : "";
-  $("#notes").innerHTML = notes.map(n => `<div class="error">${esc(n)}</div>`).join("") + (info ? `<p class="muted">${esc(info)}</p>` : "");
+  // one layer: say what's left out (spend with no layer known, and the other layers' share is elsewhere)
+  const lay = c.layers && C.layer !== "all" ? `Showing ${LAYERS[C.layer]} only: task runs, in-task sandbox and portal reviews spent while the task was at ${LAYERS[C.layer]}, and the tasks submitted at ${LAYERS[C.layer]}. `
+    + `Left out in this range: ${usd(layerOf(c.layers, C.layer === "l1" ? "l0" : "l1"))} at ${C.layer === "l1" ? "L0" : "L-1"}, ${usd(layerOf(c.layers, "later"))} at L10 and later, `
+    + `and ${usd(layerOf(c.layers, "unknown"))} with no layer known (the hint pipeline, and runs never tied to a submission before calls carried the task id, ~Oct 31).` : "";
+  $("#notes").innerHTML = notes.map(n => `<div class="error">${esc(n)}</div>`).join("") + (info ? `<p class="muted">${esc(info)}</p>` : "")
+    + (lay ? `<p class="muted">${esc(lay)}</p>` : "");
   if (c.error) return;
   document.querySelectorAll("#view [data-view-pick]").forEach(x => x.classList.toggle("on", x.dataset.viewPick === C.view));
   document.querySelectorAll("#period [data-period]").forEach(x => x.classList.toggle("on", x.dataset.period === C.period));
   document.querySelectorAll("#chart-type [data-chart-type]").forEach(x => x.classList.toggle("on", x.dataset.chartType === C.chart));
+  document.querySelectorAll("#layer [data-layer]").forEach(x => x.classList.toggle("on", x.dataset.layer === C.layer));
   C.shown = viewOf(c);
   c = C.shown;
   renderTiles(c, b);
@@ -144,6 +162,9 @@ function render() {
   $("#allin-card").innerHTML = c.breakdown ? allInCard(c) : "";
   $("#allin-card").classList.toggle("hidden", !c.breakdown);
   $("#daily-card").innerHTML = dailyCard(c, b);
+  const byLayer = C.layer === "all" && !!c.layers;
+  $("#layer-card").innerHTML = byLayer ? layerCard(c) : "";
+  $("#layer-card").classList.toggle("hidden", !byLayer);
   $("#pertask-card").innerHTML = perTaskCard(c);
   $("#percb-card").innerHTML = perCbCard(c);
   $("#lost-card").innerHTML = c.lost ? lostCard(c) : "";
@@ -170,6 +191,9 @@ function render() {
     platform state stands in (live claim or paused, and they're its last worker). A submitted task's cost is only what the people who submitted it spent;
     what earlier holders spent shows as "lost before". <b>Internal tests</b> are @scale.com and internal accounts and admin runs in the portal. Task runs that never
     reached a submission, the hint pipeline, untagged sandbox calls and portal runs with no task <b>can't be tied to a task</b>.
+    <b>Layers</b>: a task-run or sandbox call counts at the layer of the task's pipeline node that was open when it was made (calls carry the task id from about Oct 31),
+    else the node it was launched from, else the layer of the first submission that carries its run ID; a portal review counts at its chat's node's layer.
+    The hint pipeline and older runs never tied to a submission have no layer. With L-1 or L0 picked, every figure counts only that layer's spend and the tasks submitted there.
     ${q.states ? `Task states: <a href="${esc(q.states)}" target="_blank" rel="noopener">platform state per task</a>. ` : ""}Source: <a href="${esc(q.facts || "#")}" target="_blank" rel="noopener">every figure since Aug 1</a>,
     refreshed in the background every 15 minutes.`;
 }
@@ -195,8 +219,13 @@ function perTaskTile(c) {
 function renderTiles(c, b) {
   const s = c.summary;
   $("#tiles").innerHTML = [
-    tile(`${VIEWS[C.view].label}, ${rangeName(c)}`, esc(usd(s.total)),
+    tile(`${VIEWS[C.view].label}${layerName()}, ${rangeName(c)}`, esc(usd(s.total)),
       SERIES.filter(x => inView(x.key) && s[x.key]).map(x => `${esc(usd(s[x.key]))} ${esc(x.label.toLowerCase())}`).join(" · ") || "nothing"),
+    ...(C.layer === "all" && c.layers ? ["l1", "l0"].map(k => {  // the two layers' shares; the rest is L10+ or no layer known
+      const v = layerOf(c.layers, k), all = LAYER_SERIES.reduce((t, x) => t + layerOf(c.layers, x.key), 0);
+      return tile(`At ${LAYERS[k]}, ${rangeName(c)}`, esc(usd(v)), `${all ? Math.round(100 * v / all) : 0}% of ${esc(VIEWS[C.view].label.toLowerCase())}`
+        + (k === "l0" ? ` · ${esc(usd(layerOf(c.layers, "later")))} at L10+, ${esc(usd(layerOf(c.layers, "unknown")))} no layer known` : ""));
+    }) : []),
     inView("runs") && tile("Task runs tied to a submission", s.runs ? `${Math.round(100 * s.runs_linked / s.runs)}%` : "–",
       `${esc(usd(s.runs_linked))} of ${esc(usd(s.runs))} · the rest are re-runs or unsubmitted work`),
     c.lost ? tile(`Lost spend, ${rangeName(c)}`, esc(usd(c.lost.total)),
@@ -207,7 +236,7 @@ function renderTiles(c, b) {
       s.tasks_submitted ? `${esc(usd(s.total))} ÷ ${fmtInt(s.tasks_submitted)} tasks submitted · lost, tests and untied spend included` : "no submissions yet"),
     perTaskTile(c),
     tile("Per active contributor, per day", s.per_cb_day == null ? "–" : esc(usd(s.per_cb_day)), `${esc(VIEWS[C.view].label.toLowerCase())} ÷ contributor-days`),
-    tile("Tasks submitted", esc(fmtInt(s.tasks_submitted)), `by ${fmtInt(s.submitters)} contributors · L-1/L0`),
+    tile("Tasks submitted", esc(fmtInt(s.tasks_submitted)), `by ${fmtInt(s.submitters)} contributors · ${C.layer === "all" ? "L-1/L0" : `at ${LAYERS[C.layer]}`}`),
     tile("Key budget this cycle", b.pct == null ? "–" : `${esc(b.pct)}%`,
       b.max_budget ? `${esc(usd(b.spend))} of ${esc(usd(b.max_budget))}${b.resets_at ? ` · resets ${esc(when(b.resets_at))}` : ""}` : esc(b.error || "")),
   ].filter(Boolean).join("");
@@ -334,6 +363,27 @@ function dailyCard(c, b) {
   return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>Day (UTC)</th><th>Total</th>
     <th>Task runs</th><th>…tied to a submission</th><th>In-task sandbox</th><th>Hint pipeline</th><th>Portal reviews</th><th>Active contributors</th>
     <th>Tasks submitted</th><th>Runs logged / in submissions</th></tr>${rows}</table></details>`;
+}
+
+// Spend per day / week / month split by the pipeline layer it was spent at (all-layers view only).
+function layerCard(c) {
+  const days = chartRows(c).map(d => {
+    const r = { ...d };
+    LAYER_SERIES.forEach(x => { r[`ly_${x.key}`] = layerOf(d.layers, x.key); });
+    return r;
+  });
+  const period = C.period, tot = d => LAYER_SERIES.reduce((t, x) => t + d[`ly_${x.key}`], 0);
+  const chart = columns({
+    id: "layer", title: `Spend per ${PERIODS[period]}, by layer`, period, days,
+    sub: `${chartSince() || "UTC days · "}${VIEWS[C.view].label.toLowerCase()} by the layer the task was at when the money was spent · layers are known for nearly all spend from ~Oct 31 (calls carry the task id); before that only for runs tied to a submission`,
+    series: LAYER_SERIES.map(x => ({ ...x, key: `ly_${x.key}` })), value: (d, k) => d[k],
+    tip: d => [[usd(tot(d)), ` ${VIEWS[C.view].label.toLowerCase()}`],
+      ...LAYER_SERIES.filter(x => d[`ly_${x.key}`]).map(x => [usd(d[`ly_${x.key}`]), ` ${x.label}`, x.cls])],
+  });
+  const rows = days.slice().reverse().map(d => `<tr><td>${periodRow(d, period)}</td>${LAYER_SERIES.map(x => `<td>${esc(usd(d[`ly_${x.key}`]))}</td>`).join("")}
+    <td>${esc(usd(tot(d)))}</td></tr>`).join("");
+  return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "day" ? "Day" : period === "week" ? "Week" : "Month"} (UTC)</th>
+    ${LAYER_SERIES.map(x => `<th>${esc(x.label)}</th>`).join("")}<th>Total</th></tr>${rows}</table></details>`;
 }
 
 // Where the range's money went: five parts, in whole dollars that add up to the total shown, with each one's share.
@@ -604,6 +654,7 @@ const TABLES = {
     title: "Cost per submitted task",
     sub: "Tasks a contributor submitted in the range: what the people who submitted each one spent on it since it started. Task runs = runs whose IDs are in the task's submissions plus runs launched from the task itself; in-task sandbox and portal reviews are the evals. Lost before = what earlier holders spent on it (their claim ended without them submitting).",
     rows: () => C.shown.tasks, key: "total",
+    // the per-layer columns: the submitters' own spend, by the layer it was spent at (Total - L-1 - L0 = L10+ / no layer known)
     cols: [
       ["Task", "task_id", r => `<span class="mono" title="${esc(r.task_id)}">${esc(r.task_id.slice(-6))}</span>`],
       ["Submitted", "last_submitted", r => r.last_submitted ? esc(longDay(r.last_submitted)) : "–"],
@@ -612,6 +663,8 @@ const TABLES = {
       ["In-task sandbox", "sandbox", r => esc(usd(r.sandbox)), true, "sandbox"],
       ["Portal reviews", "portal", r => esc(usd(r.portal)), true, "portal"],
       ["Total", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+      ["…at L-1", "l1", r => esc(usd(r.l1)), true, "layers"],
+      ["…at L0", "l0", r => esc(usd(r.l0)), true, "layers"],
       ["Lost before", "lost_before", r => (r.lost_before ? esc(usd(r.lost_before)) : "–"), true],
     ],
   },
@@ -643,7 +696,8 @@ function renderTable(name, all = false) {
     return (typeof x === "number" ? x - y : String(x).localeCompare(String(y))) * sort.dir;
   });
   const shown = all ? rows : rows.slice(0, 25);
-  const cols = t.cols.filter(col => !col[4] || inView(col[4]));  // only the columns the chosen view counts
+  // only the columns the chosen view counts; the per-layer split only in the all-layers view
+  const cols = t.cols.filter(col => (col[4] === "layers" ? C.layer === "all" : !col[4] || inView(col[4])));
   const head = cols.map(([label, key, , num]) => `<th class="${num ? "num" : ""}"><button type="button" class="th-sort" data-sort="${key}">${esc(label)}${
     sort.key === key ? (sort.dir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("");
   const body = shown.map(r => `<tr>${cols.map(([, , cell, num]) => `<td class="${num ? "num" : ""}">${cell(r)}</td>`).join("")}</tr>`).join("");
@@ -700,6 +754,14 @@ $("#view").addEventListener("click", e => {
   localStorage.setItem("evp_cost_view", C.view);
   C.sort = {};
   render();
+});
+$("#layer").addEventListener("click", e => {
+  const b = e.target.closest("[data-layer]");
+  if (!b || b.dataset.layer === C.layer) return;
+  C.layer = b.dataset.layer;
+  localStorage.setItem("evp_cost_layer", C.layer);
+  C.sort = {};
+  load();
 });
 $("#period").addEventListener("click", e => {
   const b = e.target.closest("[data-period]");

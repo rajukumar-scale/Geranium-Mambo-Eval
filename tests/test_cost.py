@@ -28,12 +28,12 @@ FACTS = [
     {"KIND": "sub", "T": utc(2026, 9, 2) + 60, "TASK": "t1", "CB": "b", "EMAIL": "b@x.com"},
     {"KIND": "sub", "T": utc(2026, 9, 2) + 90, "TASK": "t3", "CB": "b", "EMAIL": "b@x.com"},
 ]
-NO_PORTAL = ({}, {}, {}, {"billed": 0.0, "estimated": 0.0}, [])
+NO_PORTAL = ({}, {}, {}, {"billed": 0.0, "estimated": 0.0}, [], {})
 
 
 class BuildTest(unittest.TestCase):
     def build(self, start, end, now=utc(2026, 9, 2) + 7200):
-        with mock.patch.object(cost, "_portal", lambda s, b, e: NO_PORTAL), mock.patch.object(cost.time, "time", lambda: now):
+        with mock.patch.object(cost, "_portal", lambda s, b, e, *_: NO_PORTAL), mock.patch.object(cost.time, "time", lambda: now):
             return cost.build(FACTS, start, end)
 
     def test_periods(self):
@@ -99,8 +99,8 @@ class BuildTest(unittest.TestCase):
         # portal reviews: a contributor's on "quiet" counts; an admin's is an internal test
         portal = ({}, {}, {}, {"billed": 0.0, "estimated": 0.0},
                   [{"at": utc(2026, 10, 14) + 60, "usd": 6.0, "task": "quiet", "user": "q", "email": "q@x.com", "admin": False},
-                   {"at": utc(2026, 10, 14) + 90, "usd": 2.0, "task": "quiet", "user": None, "email": "boss@scale.com", "admin": True}])
-        with mock.patch.object(cost, "_portal", lambda s, b, e: portal), mock.patch.object(cost.time, "time", lambda: now), \
+                   {"at": utc(2026, 10, 14) + 90, "usd": 2.0, "task": "quiet", "user": None, "email": "boss@scale.com", "admin": True}], {})
+        with mock.patch.object(cost, "_portal", lambda s, b, e, *_: portal), mock.patch.object(cost.time, "time", lambda: now), \
                 mock.patch.object(cost, "_claim_sources", lambda ids: ([], [])):
             r = cost.build(facts, utc(2026, 10, 7), utc(2026, 10, 20), states=states)
             off = cost.build(facts, utc(2026, 10, 7), utc(2026, 10, 20))
@@ -175,7 +175,7 @@ def claim_case():
               st("cx", "canceled", CANCEL_REASON="dup"), st("int", PENDING=1)]
     run = lambda usd, task, user, email, admin=False: {"at": d(18) + 60, "usd": usd, "task": task, "user": user, "email": email, "admin": admin}  # noqa: E731
     runs = [run(4.0, "pause", E, "e@x.com"), run(3.0, "int", None, "boss@scale.com", admin=True), run(1.5, None, A, "a@x.com")]
-    portal = ({d(18): 8.5}, {E: 4.0, A: 1.5}, {d(18): {E, A}}, {"billed": 0.0, "estimated": 8.5}, runs)
+    portal = ({d(18): 8.5}, {E: 4.0, A: 1.5}, {d(18): {E, A}}, {"billed": 0.0, "estimated": 8.5}, runs, {})
     return facts, claims, states, portal
 
 
@@ -184,7 +184,7 @@ class LostByClaimTest(unittest.TestCase):
 
     def build(self, claims=True):
         facts, cb_facts, states, portal = claim_case()
-        with mock.patch.object(cost, "_portal", lambda s, b, e: portal), mock.patch.object(cost.time, "time", lambda: NOW), \
+        with mock.patch.object(cost, "_portal", lambda s, b, e, *_: portal), mock.patch.object(cost.time, "time", lambda: NOW), \
                 mock.patch.object(cost, "_claim_sources", lambda ids: (cb_facts if claims else None, [])):
             return cost.build(facts, utc(2026, 10, 14), utc(2026, 10, 20), states=states)
 
@@ -265,7 +265,7 @@ class ServeTest(unittest.IsolatedAsyncioTestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         for p in (mock.patch.object(cost, "CACHE_FILE", self.tmp / "cost_facts.json"),
-                  mock.patch.object(cost, "_portal", lambda s, b, e: NO_PORTAL),
+                  mock.patch.object(cost, "_portal", lambda s, b, e, *_: NO_PORTAL),
                   mock.patch.dict(cost._facts, {"at": 0.0, "rows": None, "billed": [], "task": None, "error": None, "failed_at": 0.0})):
             p.start()
             self.addCleanup(p.stop)

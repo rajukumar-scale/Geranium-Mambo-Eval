@@ -467,6 +467,17 @@ kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px s
 .legend .ln { width: 18px; border-top: 1px solid var(--muted); opacity: .7; display: inline-block; }
 .cost-app { --runs: #2e7d55; --untagged: #2a78d6; --sandbox: #8fbf9f; --hint: #c98a2b; --lost: #c2454b; --internal: #9a9a9a; }
 :root[data-theme="dark"] .cost-app { --runs: #45a674; --untagged: #3987e5; --sandbox: #6e9c7e; --hint: #d99a3b; --lost: #e0666b; --internal: #8a8a8a; }
+/* pipeline layers (validated with the dataviz palette checker, light #fff / dark #171717; the gray is "no layer known") */
+.cost-app { --l1: #2a78d6; --l0: #c98a2b; --later: #7d5bbf; --nolayer: #9a9a9a; }
+:root[data-theme="dark"] .cost-app { --l1: #3987e5; --l0: #b97c22; --later: #9b7ee0; --nolayer: #8a8a8a; }
+.cost-app .bar.s-l1, .cost-app .sw.s-l1 { fill: var(--l1); background: var(--l1); } .sc-tip .tk.s-l1 { border-color: var(--l1); }
+.cost-app .bar.s-l0, .cost-app .sw.s-l0 { fill: var(--l0); background: var(--l0); } .sc-tip .tk.s-l0 { border-color: var(--l0); }
+.cost-app .bar.s-later, .cost-app .sw.s-later { fill: var(--later); background: var(--later); } .sc-tip .tk.s-later { border-color: var(--later); }
+.cost-app .bar.s-nolayer, .cost-app .sw.s-nolayer { fill: var(--nolayer); background: var(--nolayer); } .sc-tip .tk.s-nolayer { border-color: var(--nolayer); }
+.cost-app .line.s-l1 { stroke: var(--l1); } .cost-app .dot.s-l1 { fill: var(--l1); }
+.cost-app .line.s-l0 { stroke: var(--l0); } .cost-app .dot.s-l0 { fill: var(--l0); }
+.cost-app .line.s-later { stroke: var(--later); } .cost-app .dot.s-later { fill: var(--later); }
+.cost-app .line.s-nolayer { stroke: var(--nolayer); } .cost-app .dot.s-nolayer { fill: var(--nolayer); }
 .cost-app .bar.s-runs, .cost-app .sw.s-runs { fill: var(--runs); background: var(--runs); }
 .cost-app .bar.s-untagged, .cost-app .sw.s-untagged { fill: var(--untagged); background: var(--untagged); }
 .sc-tip .tk { display: inline-block; width: 12px; height: 0; border-top: 2px solid; margin-right: 6px; vertical-align: middle; }

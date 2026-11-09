@@ -32,6 +32,9 @@
           <button type="submit">Apply</button>
           <span class="muted">UTC days, from Aug 1</span>
         </form>
+        <div class="seg" id="layer" role="group" aria-label="Pipeline layer">
+          <button type="button" data-layer="all">All layers</button><button type="button" data-layer="l1">L-1</button><button type="button" data-layer="l0">L0</button>
+        </div>
         <div class="seg" id="view" role="group" aria-label="What to count">
           <button type="button" data-view-pick="evals">Evals</button><button type="button" data-view-pick="runs">Task runs</button><button type="button" data-view-pick="both">Both</button>
         </div>
@@ -50,6 +53,7 @@
       <section class="cost-card hidden" id="split-card"></section>
       <section class="cost-card hidden" id="allin-card"></section>
       <section class="cost-card" id="daily-card"></section>
+      <section class="cost-card hidden" id="layer-card"></section>
       <section class="cost-card hidden" id="lost-card"></section>
       <section class="cost-card" id="pertask-card"></section>
       <section class="cost-card" id="percb-card"></section>
