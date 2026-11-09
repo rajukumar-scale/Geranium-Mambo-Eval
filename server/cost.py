@@ -126,12 +126,13 @@ def _portal(days_start, billed=None, days_end=None, node_lvl=None, layer=None):
     node_lvl = node_lvl or {}
     basis = {"billed": 0.0, "estimated": 0.0}
     for run in db.q("select r.id, r.attempt_id, r.cost_estimate, r.models, r.created_at, coalesce(r.actor_admin, 0) by_admin, r.actor_user_id, r.actor_email, "
-                    "c.task_id, c.user_id chat_user, c.email chat_email "
+                    "c.task_id, c.user_id chat_user, c.email chat_email, c.archived_from "
                     "from runs r left join chats c on c.attempt_id = r.attempt_id where coalesce(r.loadtest, 0) = 0"):
         usd = billed[run["id"]] if run["id"] in billed else spend.run_spend(run)
         if not usd or run["created_at"] >= stop:
             continue
-        lk = _lkey(node_lvl.get(run["attempt_id"]))
+        # an archived chat (and its runs) moved to a new 0000... id; its node is the one it was archived from
+        lk = _lkey(node_lvl.get(run.get("archived_from") or run["attempt_id"]))
         if run["created_at"] >= days_start:
             day = int(run["created_at"] // DAY * DAY)
             layer_day.setdefault(day, {})[lk] = layer_day.get(day, {}).get(lk, 0.0) + usd
