@@ -636,7 +636,9 @@ class Runner:
         while True:
             await asyncio.sleep(ORPHAN_SWEEP_S)
             try:
-                for run in self._orphans():
+                # In a thread (2026-11-09): during boat's full-disk snapshots this read waited up to 53 s on the
+                # disk, and on the event loop that froze the whole portal ("Eval Portal unavailable").
+                for run in await asyncio.to_thread(self._orphans):
                     log.warning("orphaned run %s (%s) was still 'running': marking it finished", run["id"],
                                 run["attempt_id"])
                     await self._fail_crashed(run["id"], "the run stopped without finishing", tries=1)

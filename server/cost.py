@@ -599,7 +599,7 @@ async def _refresh():
             log.warning("task state lookup failed: %s", states)
             states = _facts["states"]
         _facts.update(at=time.time(), rows=rows, billed=billed, states=states, error=None, failed_at=0.0)
-        _save()
+        await asyncio.to_thread(_save)  # a large file write: off the event loop (a slow disk froze the portal, 2026-11-09)
     except Exception as error:  # noqa: BLE001 - the page keeps the last figures and says so
         log.warning("cost lookup failed: %s", error)
         _facts.update(error=f"Couldn't read the cost data: {str(error)[:200]}", failed_at=time.time())
