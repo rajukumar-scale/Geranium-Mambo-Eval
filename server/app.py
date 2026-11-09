@@ -2017,11 +2017,11 @@ def admin_unblock(body: UnblockBody, request: Request):
 
 
 @app.get("/api/admin/cost")
-async def admin_cost(request: Request, days: int = 14, start: str = "", end: str = "", refresh: int = 0):
+async def admin_cost(request: Request, days: int = 14, start: str = "", end: str = "", refresh: int = 0, layer: str = ""):
     """The Cost page (owners only): the key's budget plus spend per day / week / month, per submitted task and per
-    contributor, for the last `days` days or start..end (YYYY-MM-DD, UTC)."""
+    contributor, for the last `days` days or start..end (YYYY-MM-DD, UTC); layer l1 / l0 = only that pipeline layer."""
     current_admin(request, owner=True)
-    key, report = await asyncio.gather(budget.status(force=bool(refresh)), cost.report(days, start, end, force=bool(refresh)))
+    key, report = await asyncio.gather(budget.status(force=bool(refresh)), cost.report(days, start, end, force=bool(refresh), layer=layer or None))
     return {"budget": key, "cost": report}
 
 

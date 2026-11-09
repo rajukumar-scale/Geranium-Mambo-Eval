@@ -37,6 +37,14 @@ The range's total splits into parts that add up to it exactly, in each view (tas
 submitted, lost, in progress, internal tests, and what can't be tied to a task (task runs never seen in a submitted
 attempt, the hint pipeline, untagged in-task sandbox calls and portal runs with no task).
 
+Layers (Evan, 2026-11-09): every task-run and in-task sandbox call carries the pipeline layer it was spent at (facts query
+v5, column lvl): the layer of the task's node that was open when the call was made (calls carry the platform task id
+since ~2026-10-31), else the node an aect-<node> run was launched from, else the layer of the first submitted attempt that
+carries its run ID. A portal review takes its chat's node's layer (a chat is keyed by its pipeline node). Older unlinked
+runs and the hint pipeline have no layer. With layer=l1 or l0 every figure on the page counts only that layer's spend
+and that layer's submissions (who submitted, and so who counts as "submitted", still looks at both layers); in the
+all-layers view each day, week, month and submitted task also carries its spend split by layer.
+
 Tasks not submitted yet (by anyone), not cancelled, with spend in the range that 2 or more people have claimed are
 listed on their own with their spend in the range, how much of it is lost and what the current holder spent. Claimers
 are the distinct people on the task's L-1 claims and incomplete attempts in the CB tracker's cached facts (since
@@ -62,6 +70,8 @@ LOST_REASONS = {"cancelled": "Task cancelled", "released": "Claim released or ex
 INTERNAL_SOURCES = ("queue_manager", "Scale API")
 PARTS = ("submitted", "lost", "in_progress", "internal", "untied")  # the total, split (see the module docstring)
 PART_KEYS = tuple(f"p_{k}_{side}" for k in PARTS for side in ("runs", "evals"))  # each day's parts (the all-in chart)
+LAYERS = {"l1": -1, "l0": 0}  # the page's layer switch: key -> review level
+LAYER_KEYS = ("l1", "l0", "later", "unknown")  # the all-layers split: L-1, L0, L10 and later, no layer known
 CACHE_FILE = config.DATA_DIR / "cost_facts.json"
 _facts = {"at": 0.0, "rows": None, "billed": [], "states": [], "task": None, "error": None, "failed_at": 0.0}
 
@@ -70,25 +80,67 @@ def _rows(rows):
     return [{k.lower(): v for k, v in row.items()} for row in rows]
 
 
-def _portal(days_start, billed=None, days_end=None):
+def _lkey(lvl):
+    """A review level (or None) as a LAYER_KEYS key."""
+    try:
+        lvl = int(float(lvl))
+    except (TypeError, ValueError):
+        return "unknown"
+    return "l1" if lvl == -1 else "l0" if lvl == 0 else "later" if lvl > 0 else "unknown"
+
+
+def _layer_rows(rows, layer):
+    """The facts cut to one layer: days re-totalled from that layer's dl rows (no hint pipeline: it has no layer), with
+    active people and tasks touched from that layer's tcd rows; tcd rows of that layer only. Submissions are all kept
+    (build filters the range's own), so who counts as "submitted" still looks at every layer."""
+    dl = {int(r["t"]): r for r in rows if r["kind"] == "dl" and _lkey(r.get("lvl")) == layer}
+    tcd = [r for r in rows if r["kind"] == "tcd" and _lkey(r.get("lvl")) == layer]
+    people, touched = {}, {}
+    for r in tcd:
+        if r.get("cb"):
+            people.setdefault(int(r["t"]), set()).add(r["cb"])
+        if r.get("task"):
+            touched.setdefault(int(r["t"]), set()).add(r["task"])
+    out = []
+    for r in rows:
+        if r["kind"] == "day":
+            t, d = int(r["t"]), dl.get(int(r["t"]), {})
+            out.append({**r, "runs": d.get("runs") or 0, "runs_linked": d.get("runs_linked") or 0, "sandbox": d.get("sandbox") or 0,
+                        "hint": 0, "requests": d.get("requests") or 0, "cb_ids": ",".join(sorted(people.get(t, ()))),
+                        "tasks_touched": len(touched.get(t, ()))})
+        elif r["kind"] not in ("tcd", "dl"):
+            out.append(r)
+    return out + tcd
+
+
+def _portal(days_start, billed=None, days_end=None, node_lvl=None, layer=None):
     """This portal's run costs: per UTC day in the range and per contributor in it (and who was active each day), plus
     every run up to the range's end with its task and person (the actor, or the chat's holder when there's no actor;
     admins' runs are marked). A run SMIG billed (tagged with its runId) counts at that cost; older runs at the list-price
-    estimate, which runs ~40% above what's billed. Also returns how much of the range is billed vs estimated."""
+    estimate, which runs ~40% above what's billed. Also returns how much of the range is billed vs estimated, and each
+    day's spend per layer (every layer). A run's layer is its chat's node's (node_lvl); with `layer` set, only that
+    layer's runs count anywhere else."""
     stop = (days_end + DAY) if days_end is not None else float("inf")
     billed = billed or {}
-    per_day, per_person, people_day, runs = {}, {}, {}, []
+    per_day, per_person, people_day, runs, layer_day = {}, {}, {}, [], {}
+    node_lvl = node_lvl or {}
     basis = {"billed": 0.0, "estimated": 0.0}
-    for run in db.q("select r.id, r.cost_estimate, r.models, r.created_at, coalesce(r.actor_admin, 0) by_admin, r.actor_user_id, r.actor_email, "
+    for run in db.q("select r.id, r.attempt_id, r.cost_estimate, r.models, r.created_at, coalesce(r.actor_admin, 0) by_admin, r.actor_user_id, r.actor_email, "
                     "c.task_id, c.user_id chat_user, c.email chat_email "
                     "from runs r left join chats c on c.attempt_id = r.attempt_id where coalesce(r.loadtest, 0) = 0"):
         usd = billed[run["id"]] if run["id"] in billed else spend.run_spend(run)
         if not usd or run["created_at"] >= stop:
             continue
+        lk = _lkey(node_lvl.get(run["attempt_id"]))
+        if run["created_at"] >= days_start:
+            day = int(run["created_at"] // DAY * DAY)
+            layer_day.setdefault(day, {})[lk] = layer_day.get(day, {}).get(lk, 0.0) + usd
+        if layer and lk != layer:
+            continue
         admin = bool(run["by_admin"])
         user = None if admin else (run["actor_user_id"] or run["chat_user"])
         email = ((run["actor_email"] if run["actor_user_id"] or admin else run["chat_email"]) or "").split("+outlier")[0].lower()
-        runs.append({"at": run["created_at"], "usd": usd, "task": run["task_id"], "user": user, "email": email, "admin": admin})
+        runs.append({"at": run["created_at"], "usd": usd, "task": run["task_id"], "user": user, "email": email, "admin": admin, "layer": lk})
         if run["created_at"] >= days_start:
             basis["billed" if run["id"] in billed else "estimated"] += usd
             day = int(run["created_at"] // DAY * DAY)
@@ -96,7 +148,7 @@ def _portal(days_start, billed=None, days_end=None):
             if user:
                 per_person[user] = per_person.get(user, 0) + usd
                 people_day.setdefault(day, set()).add(user)
-    return per_day, per_person, people_day, basis, runs
+    return per_day, per_person, people_day, basis, runs, layer_day
 
 
 def _period_start(day, period):
@@ -149,7 +201,8 @@ def _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop
 
     def pair(task, uid, email):
         p = pairs.setdefault((task, uid), {"task_id": task, "user_id": uid, "agent_runs": 0.0, "sandbox": 0.0, "portal": 0.0,
-                                            "upto": [0.0, 0.0, 0.0], "days": {}, "last": 0, "seen": 0})
+                                            "upto": [0.0, 0.0, 0.0], "days": {}, "last": 0, "seen": 0,
+                                            "upto_layer": {}})
         if email:
             emails.setdefault(uid, set()).add(email.lower())
         return p
@@ -166,6 +219,9 @@ def _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop
         p = pair(r["task"], r.get("cb") or "", r.get("email"))
         p["upto"][0] += runs
         p["upto"][1] += sandbox
+        lu = p["upto_layer"].setdefault(_lkey(r.get("lvl")), [0.0, 0.0])
+        lu[0] += runs
+        lu[1] += sandbox
         p["last"] = max(p["last"], min(t + DAY, int(now)))  # a day's spend could be as late as its end
         p["seen"] = max(p["seen"], t)  # the day itself, for "last seen"
         if t >= start:
@@ -185,6 +241,7 @@ def _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop
             continue
         p = pair(run["task"], run["user"] or "", run["email"])
         p["upto"][2] += usd
+        p["upto_layer"].setdefault(run.get("layer") or "unknown", [0.0, 0.0])[1] += usd
         p["last"] = max(p["last"], int(at))
         p["seen"] = max(p["seen"], int(at))
         if at >= start:
@@ -224,6 +281,17 @@ def _spend_by_claim(tcd, portal_runs, all_subs, states, claim_facts, start, stop
     return pairs, other
 
 
+def _day_layers(day_row, dl, portal):
+    """One day's spend (every layer) split by layer: {key: [task runs, evals]} over LAYER_KEYS. Task runs and sandbox
+    come from the dl rows, portal reviews from the portal's runs; the hint pipeline and anything else with no layer
+    (and everything before the facts carried layers) is "unknown", so the parts add up to the day's total."""
+    num = lambda k: float(day_row.get(k) or 0)  # noqa: E731
+    out = {k: [round((dl.get(k) or (0, 0))[0], 2), round((dl.get(k) or (0, 0))[1] + portal.get(k, 0.0), 2)] for k in LAYER_KEYS[:-1]}
+    out["unknown"] = [round(num("runs") + num("hint") - sum(v[0] for v in out.values()), 2),
+                      round(num("sandbox") + sum(portal.values()) - sum(v[1] for v in out.values()), 2)]
+    return out
+
+
 def _claim_sources(task_ids):
     """What _claimers counts from: the CB tracker's cached Snowflake facts (None until they've loaded) and the portal's
     chats on these tasks."""
@@ -256,19 +324,30 @@ def _claimers(task_ids, facts, chats):
     return out
 
 
-def build(facts, start, end, billed_rows=(), days=None, states=None):
-    """The report for UTC days start..end (epoch seconds of each day's midnight), cut from the facts query's rows."""
+def build(facts, start, end, billed_rows=(), days=None, states=None, layer=None):
+    """The report for UTC days start..end (epoch seconds of each day's midnight), cut from the facts query's rows;
+    layer "l1" / "l0" counts only that layer (module docstring), None every layer."""
     now = time.time()
     today = int(now // DAY * DAY)
+    layer = layer if layer in LAYERS else None
     billed = {r["run_id"]: float(r.get("cost_usd") or 0) for r in _rows(billed_rows) if r.get("run_id")}
-    portal_day, portal_person, portal_people, portal_basis, portal_runs = _portal(start, billed, end)
-    rows = _rows(facts)
+    all_rows = _rows(facts)
+    node_lvl = {r["task"]: r.get("lvl") for r in all_rows if r["kind"] == "node" and r.get("task")}
+    portal_day, portal_person, portal_people, portal_basis, portal_runs, portal_layer_day = _portal(start, billed, end, node_lvl, layer)
+    rows = _layer_rows(all_rows, layer) if layer else all_rows
     num = lambda r, k: float(r.get(k) or 0)  # noqa: E731
     stop = end + DAY
     logged = {int(r["t"]): r for r in rows if r["kind"] == "day"}
+    logged_all = {int(r["t"]): r for r in all_rows if r["kind"] == "day"}
+    dl_day = {}  # every layer's task runs and sandbox per day (the all-layers split)
+    for r in all_rows:
+        if r["kind"] == "dl":
+            x = dl_day.setdefault(int(r["t"]), {}).setdefault(_lkey(r.get("lvl")), [0.0, 0.0])
+            x[0] += num(r, "runs")
+            x[1] += num(r, "sandbox")
     tcd = [r for r in rows if r["kind"] == "tcd"]
     all_subs = [r for r in rows if r["kind"] == "sub"]
-    subs = [r for r in all_subs if start <= int(r["t"]) < stop]
+    subs = [r for r in all_subs if start <= int(r["t"]) < stop and (not layer or _lkey(r.get("lvl")) == layer)]
     sub_day = {}
     for r in subs:
         d = sub_day.setdefault(int(r["t"]) // DAY * DAY, ({}, set()))
@@ -323,7 +402,8 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                       "requests": int(r.get("requests") or 0), "active_cbs": len(people), "people": people,
                       "tasks_touched": int(r.get("tasks_touched") or 0), "tasks_submitted": len(day_tasks),
                       "submitters": len(day_submitters), "sub_runs": int(r.get("sub_runs") or 0), "sub_runs_logged": int(r.get("sub_runs_logged") or 0),
-                      "lost_runs": round(lost_runs, 2), "lost_evals": round(lost_evals, 2)})
+                      "lost_runs": round(lost_runs, 2), "lost_evals": round(lost_evals, 2),
+                      "layers": _day_layers(logged_all.get(d, {}), dl_day.get(d, {}), portal_layer_day.get(d, {}))})
         if states is not None:
             parts = part_day.get(d) or {k: [0.0, 0.0] for k in PARTS[:-1]}
             for k in PARTS[:-1]:
@@ -359,7 +439,9 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                       "portal": round(reviews_usd, 2), "total": round(runs_usd + sandbox_usd + reviews_usd, 2),
                       "lost_before_agent_runs": round(lost_runs, 2), "lost_before_evals": round(lost_evals, 2),
                       "lost_before": round(lost_runs + lost_evals, 2),
-                      "requests": p["requests"], "contributors": len(p["cbs"]), "first_run": p["first"]})
+                      "requests": p["requests"], "contributors": len(p["cbs"]), "first_run": p["first"],
+                      "layers": {k: [round(sum((x["upto_layer"].get(k) or (0, 0))[i] for x in mine if x["status"] == "submitted"), 2) for i in (0, 1)]
+                                 for k in LAYER_KEYS}})
     tasks.sort(key=lambda t: -t["total"])
 
     # contributors: what's tied to them in the range, and the tasks they submitted in it
@@ -414,11 +496,17 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
             for k in ("runs", "runs_linked", "sandbox", "hint", "portal", "lost_runs", "lost_evals") + PART_KEYS:
                 if k in d:
                     b[k] = b.get(k, 0.0) + d[k]
+            for k, (runs_usd, evals_usd) in d["layers"].items():
+                lb = b.setdefault("layers", {}).setdefault(k, [0.0, 0.0])
+                lb[0] += runs_usd
+                lb[1] += evals_usd
             b["people"] |= d["people"]
             b["cb_days"] += len(d["people"])
             b["today"] = b["today"] or d["today"]
         for r in subs:
             out[_period_start(int(r["t"]) // DAY * DAY, period)]["tasks"].add(r["task"])
+        for b in out.values():
+            b["layers"] = {k: [round(v[0], 2), round(v[1], 2)] for k, v in b.get("layers", {}).items()}
         periods[period] = [{**{k: v for k, v in b.items() if k not in ("people", "tasks")},
                             **{k: round(b[k], 2) for k in ("runs", "runs_linked", "sandbox", "hint", "portal", "lost_runs", "lost_evals") + PART_KEYS if k in b},
                             "total": round(b["runs"] + b["sandbox"] + b["hint"] + b["portal"], 2),
@@ -517,7 +605,9 @@ def build(facts, start, end, billed_rows=(), days=None, states=None):
                    "evals": round(sum(t["sandbox"] + t["portal"] for t in multi), 2), "partial": claim_facts is None}
 
     return {
-        "days": days, "start": start, "end": end, "today": today,
+        "days": days, "start": start, "end": end, "today": today, "layer": layer or "all",
+        # the range's spend (every layer) by layer: {key: [task runs, evals]}
+        "layers": {k: [round(sum(d["layers"][k][i] for d in daily), 2) for i in (0, 1)] for k in LAYER_KEYS},
         "summary": {
             "total": total, "task_runs": add("task_runs"), "runs": add("runs"), "runs_linked": add("runs_linked"),
             "unlinked": round(add("runs") - add("runs_linked"), 2), "sandbox": add("sandbox"), "hint": add("hint"), "portal": add("portal"),
@@ -559,7 +649,7 @@ def span(days=None, start=None, end=None):
     return min(max(lo, START), hi), hi
 
 
-async def report(days=None, start=None, end=None, force=False):
+async def report(days=None, start=None, end=None, force=False, layer=None):
     """The cost report for a range, cut from the cached facts at once. With nothing cached yet (first start) the page
     gets {"loading": true} and asks again; Refresh starts a fresh lookup and shows the current figures meanwhile."""
     if force or not _facts["rows"]:
@@ -568,7 +658,7 @@ async def report(days=None, start=None, end=None, force=False):
         return {"error": _facts["error"]} if _facts["error"] else {"loading": True}
     lo, hi = span(days, start, end)
     data = build(_facts["rows"], lo, hi, _facts["billed"], days=None if start and end else int(days or 14),
-                 states=_facts["states"] if config.COST_TASK_STATES_QUERY_ID else None)
+                 states=_facts["states"] if config.COST_TASK_STATES_QUERY_ID else None, layer=layer)
     data.update(fetched_at=_facts["at"], refreshing=bool(_facts["task"]))
     if _facts["error"]:
         data["stale"] = _facts["error"]
