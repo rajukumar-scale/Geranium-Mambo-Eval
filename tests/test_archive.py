@@ -134,5 +134,25 @@ class ArchiveTest(unittest.TestCase):
             self.assertIn(f"session of {a}", (archive.attempt_dir(a) / "home" / ".claude" / "session.jsonl").read_text())
 
 
+    def test_packing_one_part_at_a_time_never_repacks_a_chat(self):
+        """2026-11-09: 12 GB free and 15 GB to pack, so one part per pack; a pending bundle's chats are skipped."""
+        first = archive.pack(days=14, part_gb=1e-9, max_parts=1)
+        one = set(archive.load(first)["chats"])
+        self.assertEqual(len(one), 1)
+        second = archive.pack(days=14, part_gb=1e-9, max_parts=1)
+        two = set(archive.load(second)["chats"])
+        self.assertEqual(len(two), 1)
+        self.assertFalse(one & two)
+        self.assertIsNone(archive.pack(days=14, part_gb=1e-9, max_parts=1))  # a1 and a2 both packed; a3 is active
+
+    def test_a_removed_bundle_no_longer_holds_its_chats(self):
+        bundle = archive.pack(days=14)
+        for n in range(len(archive.load(bundle)["parts"])):
+            archive.link(bundle, n, self.upload(bundle, n))
+        archive.remove(bundle)
+        workspace.thaw("a1")  # used again: restored from the link, its marker gone
+        self.assertNotIn("a1", archive.in_pending_bundles())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,12 +62,31 @@ def candidates(days, busy):
     from . import db
     rows = db.q("select attempt_id from chats where coalesce(last_activity, created_at, 0) < ? order by last_activity",
                 (time.time() - days * 86400,))
+    pending = in_pending_bundles()
     out = []
     for r in rows:
         a = r["attempt_id"]
         d = attempt_dir(a)
-        if (d / COLD).is_file() and not (d / MARKER).exists() and not busy(a):
+        if (d / COLD).is_file() and not (d / MARKER).exists() and a not in pending and not busy(a):
             out.append(a)
+    return out
+
+
+def in_pending_bundles():
+    """Chats already packed into a bundle that isn't removed yet (waiting for its link). Without this, packing one
+    part at a time (2026-11-09: 12 GB free, 15 GB to pack) put the same chats into every new part."""
+    out = set()
+    base = root()
+    for path in base.glob("*/manifest.json") if base.exists() else []:
+        try:
+            m = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        removed = {p["n"] for p in m.get("parts", []) if p.get("removed_at")}
+        for attempt, where in m.get("chats", {}).items():
+            # a removed part's chats are archived (or were restored and may be packed again later)
+            if where.get("part") not in removed and not (attempt_dir(attempt) / MARKER).exists():
+                out.add(attempt)
     return out
 
 
@@ -92,7 +111,11 @@ def pack(days=14, part_gb=4.5, max_parts=None, busy=None):
     chats = candidates(days, busy)
     if not chats:
         return None
-    bundle = time.strftime("chats-%Y%m%dT%H%M%SZ", time.gmtime())
+    bundle = stamp = time.strftime("chats-%Y%m%dT%H%M%SZ", time.gmtime())
+    n = 1
+    while (root() / bundle).exists():  # two packs in the same second
+        n += 1
+        bundle = f"{stamp}-{n}"
     out = root() / bundle
     out.mkdir(parents=True)
     os.chmod(out, 0o755)  # parts are encrypted; the ssh user downloads them
