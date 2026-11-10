@@ -1,4 +1,4 @@
-"""Slack alert when the boat wallet runs low or boat can't start machines (2026-11-01: the plan ran out and every
+"""Slack alert when boat can't start machines (low-wallet alerts dropped 2026-11-09) (2026-11-01: the plan ran out and every
 /prompt and /rubric hung at "Starting a fresh review machine")."""
 
 import asyncio
@@ -25,21 +25,21 @@ class BoatWalletTest(unittest.TestCase):
         self.limits = {"canStart": can_start, "wallet": {"balanceDollars": wallet}, "blockedReason": None if can_start else "usage_depleted"}
         return asyncio.run(boat_wallet.check(1_000_000 + t))
 
-    def test_alerts_under_20_once_then_every_6_hours_then_recovery(self):
-        self.at(0, 40)
-        self.at(H, 30)
+    def test_a_low_wallet_alone_never_alerts(self):
+        """2026-11-09 (Evan: "stop saying this in slack pls"): no "running low" alerts any more."""
+        for i, w in enumerate((40, 18, 8, 2, 0.5)):
+            self.at(i * 7 * H, w)
         self.assertEqual(self.sent, [])
-        self.at(2 * H, 18)
+
+    def test_blocked_alerts_every_6_hours_then_recovery(self):
+        self.at(0, 5, can_start=False)
         self.assertEqual(len(self.sent), 1)
-        self.assertIn("running low", self.sent[0])
-        self.assertIn("about 2 more hours", self.sent[0])  # 40 -> 18 over 2 h = $11/h, 18 left
-        self.assertNotIn("$", self.sent[0])  # no amounts in the channel
-        self.at(3 * H, 8)
+        self.at(3 * H, 5, can_start=False)
         self.assertEqual(len(self.sent), 1)  # not again within 6 h
-        self.at(8.5 * H, 2)
+        self.at(6.5 * H, 5, can_start=False)
         self.assertEqual(len(self.sent), 2)
-        self.at(9 * H, 120)  # topped up
-        self.assertIn("topped up", self.sent[-1])
+        self.at(7 * H, 120)
+        self.assertIn("can start review machines again", self.sent[-1])
         self.assertNotIn("$", self.sent[-1])
 
     def test_blocked_boat_alerts_even_with_money(self):

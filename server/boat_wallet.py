@@ -4,6 +4,8 @@ review machine" until Evan topped up. Every CHECK_EVERY this reads the account w
 to the Slack alert channel when the wallet is under BOAT_WALLET_ALERT_USD or boat can't start machines, repeating every
 REPEAT while it stays that way, with roughly how long it lasts; and once when it's back above the line. No dollar
 amounts in the message (Evan, 2026-11-01).
+2026-11-09 (Evan: "stop saying this in slack pls"): no more "running low" alerts. Slack hears only when boat really
+can't start review machines (an outage: reviews hang), and once when it can again.
 """
 
 import asyncio
@@ -47,7 +49,7 @@ async def check(now=None):
     _state["samples"] = (_state["samples"] + [(now, wallet)])[-60:]
     rate = burn_per_hour(_state["samples"])
     threshold = config.BOAT_WALLET_ALERT_USD
-    low = wallet < threshold or not limits.get("canStart", True)
+    low = not limits.get("canStart", True)  # only a real block alerts now; a low wallet alone doesn't (2026-11-09)
     if low:
         if _state["low_since"] is None:
             _state["low_since"] = now
@@ -56,8 +58,8 @@ async def check(now=None):
             await notify.slack(message(limits, wallet, rate))
     elif _state["low_since"] is not None:
         _state.update(low_since=None, alerted=0.0)
-        await notify.slack("✅ Eval portal: the boat wallet is topped up and review machines can start.")
-    return {"wallet": wallet, "rate": rate, "low": low}
+        await notify.slack("✅ Eval portal: boat can start review machines again.")
+    return {"wallet": wallet, "rate": rate, "low": low, "under_threshold": wallet < threshold}
 
 
 async def loop():
