@@ -124,7 +124,7 @@ async def status(force=False):
     data = summarize(rows[0]) if rows else {"key_alias": config.BUDGET_KEY_ALIAS,
                                             "error": "The key wasn't found in LiteLLM's tables."}
     if rows:
-        data["daily"] = daily(day_rows, data) if day_rows is not None else None
+        data["daily"] = await asyncio.to_thread(daily, day_rows, data) if day_rows is not None else None  # reads runs
         data["log_gap"] = log_gap(data)
     if config.BACKUP_BUDGET_QUERY_ID:
         data["backup"] = backup(backup_rows)

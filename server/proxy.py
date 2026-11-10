@@ -185,11 +185,11 @@ async def forward(path: str, request: Request):
             model = json.loads(body).get("model")
         except ValueError:
             pass
-        run = db.get_run(run_id)
+        run = await asyncio.to_thread(db.get_run, run_id)  # every model call: off the event loop (slow disk, 2026-11-09)
         if run and run.get("loadtest"):  # canned reply after a model-like pause; never reaches LiteLLM
             await asyncio.sleep(random.uniform(0.5, 3.0))
             usage = {"input_tokens": 12, "output_tokens": 4}
-            _record(run_id, model or "loadtest", path, 200, usage, 0.0)
+            await asyncio.to_thread(_record, run_id, model or "loadtest", path, 200, usage, 0.0)
             return JSONResponse({"id": "msg_loadtest", "type": "message", "role": "assistant", "model": model or "loadtest",
                                  "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn", "usage": usage})
         if run and config.MAX_CALLS_PER_RUN and run["calls"] >= config.MAX_CALLS_PER_RUN:
@@ -234,7 +234,7 @@ async def forward(path: str, request: Request):
                     yield chunk
             finally:
                 await upstream.aclose()
-                _record(run_id, model, path, upstream.status_code, meter.usage, _cost(upstream.headers))
+                await asyncio.to_thread(_record, run_id, model, path, upstream.status_code, meter.usage, _cost(upstream.headers))
 
         return StreamingResponse(stream(), status_code=upstream.status_code, headers=out_headers)
 
@@ -247,5 +247,5 @@ async def forward(path: str, request: Request):
             usage = json.loads(data).get("usage") or {}
         except ValueError:
             pass
-        _record(run_id, model, path, upstream.status_code, usage, _cost(upstream.headers))
+        await asyncio.to_thread(_record, run_id, model, path, upstream.status_code, usage, _cost(upstream.headers))
     return Response(content=data, status_code=upstream.status_code, headers=out_headers)

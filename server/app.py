@@ -1064,7 +1064,7 @@ async def send(body: SendBody, request: Request):
     # send it again with force, once per identical inputs (rerun_guard). Admins' runs always start.
     forced = False
     if command and not rest.strip() and not files and not session.get("admin"):
-        same = rerun_guard.same_as_last(attempt_id, command)
+        same = await asyncio.to_thread(rerun_guard.same_as_last, attempt_id, command)  # db reads: off the event loop
         if same and (not body.force or same["forced"]):
             log.info("identical re-run not started: %s /%s (last %s, %s min ago, $%.2f)%s", attempt_id, command,
                      same["verdict"], same["minutes_ago"], same["cost"], " - already forced once" if body.force else "")

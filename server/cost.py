@@ -658,8 +658,9 @@ async def report(days=None, start=None, end=None, force=False, layer=None):
     if not _facts["rows"]:
         return {"error": _facts["error"]} if _facts["error"] else {"loading": True}
     lo, hi = span(days, start, end)
-    data = build(_facts["rows"], lo, hi, _facts["billed"], days=None if start and end else int(days or 14),
-                 states=_facts["states"] if config.COST_TASK_STATES_QUERY_ID else None, layer=layer)
+    # build() reads the runs and model-call tables: off the event loop (a slow disk froze the portal, 2026-11-09)
+    data = await asyncio.to_thread(build, _facts["rows"], lo, hi, _facts["billed"], days=None if start and end else int(days or 14),
+                                   states=_facts["states"] if config.COST_TASK_STATES_QUERY_ID else None, layer=layer)
     data.update(fetched_at=_facts["at"], refreshing=bool(_facts["task"]))
     if _facts["error"]:
         data["stale"] = _facts["error"]

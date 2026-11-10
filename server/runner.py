@@ -1329,7 +1329,7 @@ class Runner:
         chat = db.get_chat(attempt)
         result = outcome.get("result") or {}
         cc_cost = result.get("total_cost_usd")
-        cost = run_cost(run, cc_cost)
+        cost = await asyncio.to_thread(run_cost, run, cc_cost)  # a db read: off the event loop
         fields = {"cc_cost_usd": cc_cost, "cost_estimate": cost,
                   "cc_result": json.dumps({k: result.get(k) for k in
                                            ("subtype", "is_error", "num_turns", "duration_ms", "modelUsage", "usage")})}

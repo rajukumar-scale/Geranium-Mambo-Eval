@@ -65,7 +65,7 @@ async def loop():
     """Heartbeat every 30 s; refresh the page data and send Slack notices for new or resolved incidents."""
     while True:
         try:
-            beat()
+            await asyncio.to_thread(beat)  # a db write that can wait on a busy disk: off the event loop
             data = await current(force=True)
             await _notify(data)
         except Exception as error:  # noqa: BLE001 - the status loop must never stop
