@@ -45,6 +45,13 @@ runs and the hint pipeline have no layer. With layer=l1 or l0 every figure on th
 and that layer's submissions (who submitted, and so who counts as "submitted", still looks at both layers); in the
 all-layers view each day, week, month and submitted task also carries its spend split by layer.
 
+Everything spent on a task (Evan, 2026-11-10: "track all of the spend"): a submitted task's cost on the page is what
+anyone spent on it from its start to the range's end - the task runs tied to it (facts v6 kind tr: by the run ID in a
+submission, the aect node, or the platform task id the calls carry since ~2026-10-31, whoever ran them) plus every
+holder's evals (the submitters' own, earlier holders', internal and admin runs on it). The range's total also splits into
+what was spent on the tasks submitted in it, on other tasks (not submitted yet, dropped, cancelled, or submitted
+earlier), and what can't be tied to any task (the hint pipeline, older runs never in a submission, untagged calls).
+
 Tasks not submitted yet (by anyone), not cancelled, with spend in the range that 2 or more people have claimed are
 listed on their own with their spend in the range, how much of it is lost and what the current holder spent. Claimers
 are the distinct people on the task's L-1 claims and incomplete attempts in the CB tracker's cached facts (since
@@ -94,9 +101,11 @@ def _layer_rows(rows, layer):
     active people and tasks touched from that layer's tcd rows; tcd rows of that layer only. Submissions are all kept
     (build filters the range's own), so who counts as "submitted" still looks at every layer."""
     dl = {int(r["t"]): r for r in rows if r["kind"] == "dl" and _lkey(r.get("lvl")) == layer}
-    tcd = [r for r in rows if r["kind"] == "tcd" and _lkey(r.get("lvl")) == layer]
+    tcd = [r for r in rows if r["kind"] in ("tcd", "tr") and _lkey(r.get("lvl")) == layer]
     people, touched = {}, {}
     for r in tcd:
+        if r["kind"] != "tcd":
+            continue
         if r.get("cb"):
             people.setdefault(int(r["t"]), set()).add(r["cb"])
         if r.get("task"):
@@ -108,7 +117,7 @@ def _layer_rows(rows, layer):
             out.append({**r, "runs": d.get("runs") or 0, "runs_linked": d.get("runs_linked") or 0, "sandbox": d.get("sandbox") or 0,
                         "hint": 0, "requests": d.get("requests") or 0, "cb_ids": ",".join(sorted(people.get(t, ()))),
                         "tasks_touched": len(touched.get(t, ()))})
-        elif r["kind"] not in ("tcd", "dl"):
+        elif r["kind"] not in ("tcd", "dl", "tr"):
             out.append(r)
     return out + tcd
 
@@ -347,6 +356,21 @@ def build(facts, start, end, billed_rows=(), days=None, states=None, layer=None)
             x[0] += num(r, "runs")
             x[1] += num(r, "sandbox")
     tcd = [r for r in rows if r["kind"] == "tcd"]
+    # everything spent on each task, by anyone (facts v6 kind tr): task runs up to the range's end, in the range, by layer
+    tr_upto, tr_range, tr_layer = {}, {}, {}
+    for r in rows:
+        if r["kind"] == "tr" and r.get("task") and int(r["t"]) < stop:
+            tr_upto[r["task"]] = tr_upto.get(r["task"], 0.0) + num(r, "runs")
+            k = _lkey(r.get("lvl"))
+            tr_layer.setdefault(r["task"], {})[k] = tr_layer.get(r["task"], {}).get(k, 0.0) + num(r, "runs")
+            if int(r["t"]) >= start:
+                tr_range[r["task"]] = tr_range.get(r["task"], 0.0) + num(r, "runs")
+    admin_upto, admin_range = {}, {}  # admins' portal runs on a task (internal tests, still spent on it)
+    for x in portal_runs:
+        if x["admin"] and x["task"]:
+            admin_upto[x["task"]] = admin_upto.get(x["task"], 0.0) + x["usd"]
+            if x["at"] >= start:
+                admin_range[x["task"]] = admin_range.get(x["task"], 0.0) + x["usd"]
     all_subs = [r for r in rows if r["kind"] == "sub"]
     subs = [r for r in all_subs if start <= int(r["t"]) < stop and (not layer or _lkey(r.get("lvl")) == layer)]
     sub_day = {}
@@ -435,15 +459,29 @@ def build(facts, start, end, billed_rows=(), days=None, states=None, layer=None)
         upto = lambda status, i: sum(x["upto"][i] for x in mine if x["status"] == status)  # noqa: E731
         runs_usd, sandbox_usd, reviews_usd = upto("submitted", 0), upto("submitted", 1), upto("submitted", 2)
         lost_runs, lost_evals = upto("lost", 0), upto("lost", 1) + upto("lost", 2)
+        # everything anyone spent on it (Evan, 2026-11-10): every holder's evals + all task runs tied to it
+        evals_all = sum(x["upto"][1] + x["upto"][2] for x in mine) + admin_upto.get(task_id, 0.0)
+        runs_all = tr_upto[task_id] if task_id in tr_upto else sum(x["upto"][0] for x in mine)
+        evals_sub = sandbox_usd + reviews_usd
+        lay = {k: [0.0, 0.0] for k in LAYER_KEYS}
+        for x in mine:
+            for k, (r_usd, e_usd) in x["upto_layer"].items():
+                lay[k][1] += e_usd
+                if task_id not in tr_upto:
+                    lay[k][0] += r_usd
+        for k, usd in (tr_layer.get(task_id) or {}).items():
+            lay[k][0] += usd
+        lay["unknown"][1] += admin_upto.get(task_id, 0.0)
         tasks.append({"task_id": task_id, "last_submitted": t["last"], "submissions": t["n"], "submitters": ", ".join(sorted(t["who"])),
                       "task_runs": round(runs_usd + sandbox_usd, 2), "agent_runs": round(runs_usd, 2), "sandbox": round(sandbox_usd, 2),
                       "portal": round(reviews_usd, 2), "total": round(runs_usd + sandbox_usd + reviews_usd, 2),
                       "lost_before_agent_runs": round(lost_runs, 2), "lost_before_evals": round(lost_evals, 2),
                       "lost_before": round(lost_runs + lost_evals, 2),
                       "requests": p["requests"], "contributors": len(p["cbs"]), "first_run": p["first"],
-                      "layers": {k: [round(sum((x["upto_layer"].get(k) or (0, 0))[i] for x in mine if x["status"] == "submitted"), 2) for i in (0, 1)]
-                                 for k in LAYER_KEYS}})
-    tasks.sort(key=lambda t: -t["total"])
+                      "runs_all": round(runs_all, 2), "evals_all": round(evals_all, 2), "evals_submitters": round(evals_sub, 2),
+                      "evals_others": round(evals_all - evals_sub, 2), "total_all": round(runs_all + evals_all, 2),
+                      "layers": {k: [round(v[0], 2), round(v[1], 2)] for k, v in lay.items()}})
+    tasks.sort(key=lambda t: -t["total_all"])
 
     # contributors: what's tied to them in the range, and the tasks they submitted in it
     by_person = {}
@@ -517,7 +555,7 @@ def build(facts, start, end, billed_rows=(), days=None, states=None, layer=None)
 
     add = lambda key: round(sum(d[key] for d in daily), 2)  # noqa: E731
     cb_days = sum(d["active_cbs"] for d in daily)
-    task_totals = [t["total"] for t in tasks]
+    task_totals = [t["total_all"] for t in tasks]
     recent = [d for d in daily if d["day"] > end - COVERAGE_DAYS * DAY]
     sub_runs, sub_logged = sum(d["sub_runs"] for d in recent), sum(d["sub_runs_logged"] for d in recent)
     # The total, split so the parts add up to it exactly in each view: task runs = runs + hint pipeline, evals = in-task
@@ -526,6 +564,24 @@ def build(facts, start, end, billed_rows=(), days=None, states=None, layer=None)
     runs_total = round(sum(d["runs"] + d["hint"] for d in daily), 2)
     evals_total = round(sum(d["sandbox"] + d["portal"] for d in daily), 2)
     total = round(runs_total + evals_total, 2)
+    # The range's total in three parts that add up to it: spent (in the range) on the tasks submitted in it, on other tasks
+    # (not submitted yet, dropped, cancelled, submitted earlier) and what can't be tied to any task.
+    on_task = {}
+    for x in pairs.values():
+        if x["task_id"]:
+            v = on_task.setdefault(x["task_id"], [0.0, 0.0])
+            v[1] += x["sandbox"] + x["portal"]
+            if x["task_id"] not in tr_range and x["task_id"] not in tr_upto:
+                v[0] += x["agent_runs"]
+    for t, usd in tr_range.items():
+        on_task.setdefault(t, [0.0, 0.0])[0] += usd
+    for t, usd in admin_range.items():
+        on_task.setdefault(t, [0.0, 0.0])[1] += usd
+    sub_part = [sum(v[i] for t, v in on_task.items() if t in by_task) for i in (0, 1)]
+    other_part = [sum(v[i] for t, v in on_task.items() if t not in by_task) for i in (0, 1)]
+    split = {"submitted_tasks": [round(v, 2) for v in sub_part], "other_tasks": [round(v, 2) for v in other_part],
+             "untied": [round(runs_total - sub_part[0] - other_part[0], 2), round(evals_total - sub_part[1] - other_part[1], 2)],
+             "hint": add("hint")}
     breakdown = None
     if states is not None:
         acc = {k: [0.0, 0.0] for k in PARTS}
@@ -541,6 +597,9 @@ def build(facts, start, end, billed_rows=(), days=None, states=None, layer=None)
                                "evals": round(evals_total - sum(breakdown[k]["evals"] for k in PARTS[:-1]), 2),
                                "hint": add("hint"), "portal_no_task": round(other["untied_portal"], 2)}
         breakdown["internal"]["admin_portal"] = round(other["admin_portal"], 2)
+        # of the runs not tied to a person: those tied to a task all the same (by the task id they carry), and the rest
+        on_tasks = split["submitted_tasks"][0] + split["other_tasks"][0] - sum(breakdown[k]["agent_runs"] for k in PARTS[:-1])
+        breakdown["untied"]["runs_on_tasks"] = round(max(0.0, min(on_tasks, breakdown["untied"]["agent_runs"])), 2)
         breakdown["total"] = {"agent_runs": runs_total, "evals": evals_total, "all": total}
         breakdown["claims"] = counts  # people x tasks with spend in the range, per part
         breakdown["partial"] = claim_facts is None
@@ -619,6 +678,8 @@ def build(facts, start, end, billed_rows=(), days=None, states=None, layer=None)
             "per_task_all_in": round(total / len(tasks), 2) if tasks else None,
             "active_cbs": sum(1 for p in people if p["task_runs"] > 0),
             "portal_billed": round(portal_basis["billed"], 2), "portal_estimated": round(portal_basis["estimated"], 2),
+            # the range's total: on the tasks submitted in it / on other tasks / not tied to any task, each [task runs, evals]
+            "split": split,
         },
         # How many task runs in the range's last few days' submissions have any spend in LiteLLM's log or SMIG: low = both miss them.
         "coverage": {"days": COVERAGE_DAYS, "runs": sub_runs, "logged": sub_logged,
