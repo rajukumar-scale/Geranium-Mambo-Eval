@@ -28,15 +28,17 @@ FACTS = [
     {"KIND": "node", "T": D1, "TASK": "n1", "CB": "a", "LVL": -1},
     {"KIND": "node", "T": D1, "TASK": "n0", "CB": "r", "LVL": 0},
 ]
-# portal reviews: 5 on a's L-1 chat, 3 on r's L0 chat, 1 on a chat whose node isn't known
-RUNS = [{"id": "p1", "attempt_id": "n1", "at": D1 + 100, "usd": 5.0, "task": "t1", "user": "a", "email": "a@x.com"},
+# portal reviews: 5 on a's L-1 chat (2 of it after the chat was archived to a new id), 3 on r's L0 chat, 1 on a chat whose
+# node isn't known
+RUNS = [{"id": "p1", "attempt_id": "n1", "at": D1 + 100, "usd": 3.0, "task": "t1", "user": "a", "email": "a@x.com"},
+        {"id": "p1b", "attempt_id": "0000aa", "archived_from": "n1", "at": D1 + 150, "usd": 2.0, "task": "t1", "user": "a", "email": "a@x.com"},
         {"id": "p2", "attempt_id": "n0", "at": D2 + 100, "usd": 3.0, "task": "t1", "user": "r", "email": "r@x.com"},
         {"id": "p3", "attempt_id": "old", "at": D2 + 200, "usd": 1.0, "task": "t1", "user": "a", "email": "a@x.com"}]
 
 
 def fake_q(sql, params=()):
     return [{"id": r["id"], "attempt_id": r["attempt_id"], "cost_estimate": r["usd"], "models": "{}", "created_at": r["at"], "by_admin": 0,
-             "actor_user_id": r["user"], "actor_email": r["email"], "task_id": r["task"], "chat_user": r["user"], "chat_email": r["email"]} for r in RUNS]
+             "actor_user_id": r["user"], "actor_email": r["email"], "task_id": r["task"], "chat_user": r["user"], "chat_email": r["email"], "archived_from": r.get("archived_from")} for r in RUNS]
 
 
 class LayerTest(unittest.TestCase):
