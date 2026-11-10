@@ -72,5 +72,39 @@ class LayerTest(unittest.TestCase):
         self.assertEqual(self.build("bogus")["layer"], "all")
 
 
+# Everything spent on each task (Evan, 2026-11-10): runs tied by the task id (tr rows, whoever ran them) + every holder's evals
+TR = [{"KIND": "tr", "T": D1, "TASK": "t1", "LVL": -1, "RUNS": 12, "SANDBOX": 0},  # 8 in a submission + 4 never in one
+      {"KIND": "tr", "T": D1, "TASK": "t1", "LVL": 0, "RUNS": 4, "SANDBOX": 0},
+      {"KIND": "tr", "T": D2, "TASK": "t1", "LVL": 0, "RUNS": 9, "SANDBOX": 0}]
+DROPPER = {"id": "p4", "attempt_id": "nx", "at": D1 + 300, "usd": 4.0, "task": "t1", "user": "d", "email": "d@x.com"}
+
+
+class EverythingTest(unittest.TestCase):
+    def build(self, layer=None):
+        runs = RUNS + [DROPPER]
+        q = lambda sql, params=(): [{"id": r["id"], "attempt_id": r["attempt_id"], "cost_estimate": r["usd"], "models": "{}", "created_at": r["at"],  # noqa: E731
+                                     "by_admin": 0, "actor_user_id": r["user"], "actor_email": r["email"], "task_id": r["task"],
+                                     "chat_user": r["user"], "chat_email": r["email"], "archived_from": r.get("archived_from")} for r in runs]
+        with mock.patch.object(cost.db, "q", q), mock.patch.object(cost.spend, "run_spend", lambda run: run["cost_estimate"]), \
+                mock.patch.object(cost.time, "time", lambda: D2 + 7200):
+            return cost.build(FACTS + TR, D1, D2, layer=layer)
+
+    def test_task_cost_is_everything_spent_on_it(self):
+        t1 = self.build()["tasks"][0]
+        self.assertEqual((t1["runs_all"], t1["evals_submitters"], t1["evals_others"], t1["evals_all"], t1["total_all"]), (25, 9, 4, 13, 38))
+        self.assertEqual((t1["agent_runs"], t1["portal"]), (21, 9))  # the submitters' own, as before
+        self.assertEqual((t1["layers"]["l1"], t1["layers"]["l0"], t1["layers"]["unknown"]), ([12, 5], [13, 3], [0, 5]))
+
+    def test_range_total_splits_into_task_spend_and_untied(self):
+        r = self.build()
+        s = r["summary"]["split"]
+        self.assertEqual((s["submitted_tasks"], s["other_tasks"], s["untied"]), ([25, 13], [0, 0], [8, 0]))  # untied: 4 runs + 4 hint
+        self.assertAlmostEqual(sum(sum(s[k]) for k in ("submitted_tasks", "other_tasks", "untied")), r["summary"]["total"])
+
+    def test_one_layer(self):
+        t1 = self.build("l0")["tasks"][0]
+        self.assertEqual((t1["runs_all"], t1["evals_all"], t1["total_all"]), (13, 3, 16))
+
+
 if __name__ == "__main__":
     unittest.main()

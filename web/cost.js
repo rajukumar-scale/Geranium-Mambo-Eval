@@ -37,7 +37,17 @@ function viewOf(c) {
   const rowTotal = r => (inView("runs") ? r.agent_runs || 0 : 0) + (inView("sandbox") ? r.sandbox || 0 : 0) + (inView("portal") ? r.portal || 0 : 0);
   const daily = c.daily.map(d => ({ ...d, total: SERIES.reduce((t, x) => t + (inView(x.key) ? d[x.key] || 0 : 0), 0) }));
   const split = (r, prefix) => lostOf({ agent_runs: r[`${prefix}_agent_runs`], evals: r[`${prefix}_evals`] });
-  const tasks = c.tasks.map(t => ({ ...t, total: rowTotal(t), lost_before: split(t, "lost_before"), l1: layerOf(t.layers, "l1"), l0: layerOf(t.layers, "l0") }));
+  // each submitted task: everything anyone spent on it from its start (task runs tied to it + every holder's evals); older
+  // cached figures without it fall back to the submitters' own
+  const tasks = c.tasks.map(t => {
+    const has = t.total_all != null;
+    const r = { ...t, runs_v: C.view !== "evals" ? (has ? t.runs_all : t.agent_runs) || 0 : 0,
+                evals_sub_v: C.view !== "runs" ? (has ? t.evals_submitters : (t.sandbox || 0) + (t.portal || 0)) || 0 : 0,
+                evals_oth_v: C.view !== "runs" ? (has ? t.evals_others : 0) || 0 : 0,
+                lost_before: split(t, "lost_before"), l1: layerOf(t.layers, "l1"), l0: layerOf(t.layers, "l0") };
+    r.total = r.runs_v + r.evals_sub_v + r.evals_oth_v;
+    return r;
+  });
   const people = c.people.map(p => ({ ...p, total: rowTotal(p), lost: split(p, "lost"), per_task: p.tasks_submitted ? rowTotal(p) / p.tasks_submitted : null }));
   // the five parts of the total; when they're there, the total is their sum, so the page adds up to the cent
   const breakdown = c.breakdown && { ...c.breakdown, parts: PARTS.map(p => ({ ...p, amount: lostOf(c.breakdown[p.key]), detail: c.breakdown[p.key] })) };
@@ -61,8 +71,10 @@ const PARTS = [
   { key: "lost", label: "Lost", what: () => "spent by people whose claim ended without them submitting (released, expired, cancelled)" },
   { key: "in_progress", label: "In progress", what: () => "spent by people who still hold the task" },
   { key: "internal", label: "Internal tests", what: () => "@scale.com and internal accounts, admin runs in the portal" },
-  { key: "untied", label: "Can't be tied to a task", what: d => [
-      inView("runs") && `task runs never in a submission${d.hint ? `, ${usd(d.hint)} hint pipeline` : ""}`,
+  { key: "untied", label: "Not tied to a person", what: d => [
+      inView("runs") && (d.runs_on_tasks != null
+        ? `${usd(d.runs_on_tasks)} task runs on a task, but who ran them isn't recorded; ${usd(Math.max(0, (d.agent_runs || 0) - d.runs_on_tasks - (d.hint || 0)))} task runs with no task${d.hint ? `, ${usd(d.hint)} hint pipeline` : ""}`
+        : `task runs never in a submission${d.hint ? `, ${usd(d.hint)} hint pipeline` : ""}`),
       inView("portal") && `sandbox calls with no task${d.portal_no_task ? `, ${usd(d.portal_no_task)} portal runs with no task` : ""}`].filter(Boolean).join("; ") },
 ];
 // Rounds each value to a whole number so they still add up to the rounded total (largest remainder).
@@ -159,13 +171,12 @@ function render() {
   renderTiles(c, b);
   $("#split-card").innerHTML = c.breakdown ? splitCard(c) : "";
   $("#split-card").classList.toggle("hidden", !c.breakdown);
-  $("#allin-card").innerHTML = c.breakdown ? allInCard(c) : "";
-  $("#allin-card").classList.toggle("hidden", !c.breakdown);
+  $("#allin-card").innerHTML = taskCostCard(c);
+  $("#allin-card").classList.remove("hidden");
   $("#daily-card").innerHTML = dailyCard(c, b);
   const byLayer = C.layer === "all" && !!c.layers;
   $("#layer-card").innerHTML = byLayer ? layerCard(c) : "";
   $("#layer-card").classList.toggle("hidden", !byLayer);
-  $("#pertask-card").innerHTML = perTaskCard(c);
   $("#percb-card").innerHTML = perCbCard(c);
   $("#lost-card").innerHTML = c.lost ? lostCard(c) : "";
   $("#lost-card").classList.toggle("hidden", !c.lost);
@@ -184,7 +195,7 @@ function render() {
     (run named after the task's pipeline node); earlier sandbox-viewer runs can't be tied to a task and only show in the daily totals. <b>In-task sandbox</b> is the old in-task chat
     (<span class="mono">${esc(b.key_alias || "")}</span>), <b>hint pipeline</b> the autohint runs. Other teams' work that carries the project tag
     (CoopBench, checkpoint evals) is left out. <b>Portal reviews</b> come from this portal's own records: SMIG's billed cost per run from Oct 26, 20:00 UTC, the list-price estimate before that. A <b>submitted task</b> is a contributor's
-    submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is its task runs from when it started to the range's end, plus the portal reviews run on it.
+    submission at L-1 or L0 (the bot and @scale.com accounts excluded); its cost is everything anyone spent on it from its start to the range's end: every task run tied to it (by the run ID in a submission, the task it was launched from, or, since about Oct 31, the task id the run carries) and every holder's evals.
     Contributors count only what falls inside the range. <b>Lost spend</b> is counted per person and task: when someone's claim ends (released, expired, taken away, task cancelled)
     without them submitting that task, what they spent on it is lost at once, even if someone else submits it later; if they claim it again and submit, it isn't.
     Someone who holds a live or paused claim now is <b>in progress</b>. Claims come from the CB tracker (L-1 claims since Oct 1); for older work, the task's
@@ -201,19 +212,26 @@ function render() {
 function tile(label, value, sub) {
   return `<div class="tile"><div class="tile-label">${esc(label)}</div><div class="tile-value">${value}</div><div class="tile-sub">${sub}</div></div>`;
 }
-// Per submitted task. Test runs can't be tied to a task, so task runs use all run spend ÷ tasks submitted (an average,
-// test runs included); the median of the runs tied to each task is the smaller, final-batch-only figure.
-function perTaskTile(c) {
-  const s = c.summary, n = s.tasks_submitted || 0;
-  if (C.view === "evals" || !n) return tile("Per submitted task", s.per_task_median == null ? "–" : esc(usd(s.per_task_median)),
-    s.per_task_median == null ? "no submissions yet" : `median · average ${esc(usd(s.per_task_mean))} · ${esc(VIEWS[C.view].label.toLowerCase())}`);
-  const runsAvg = (s.runs || 0) / n, tied = median(c.tasks.map(t => t.agent_runs || 0));
-  const tiedNote = `${esc(usd(tied))} median of the runs tied to each task (final batch)`;
-  if (C.view === "runs") return tile("Task runs per submitted task", esc(usd(runsAvg)),
-    `average: all run spend ÷ ${fmtInt(n)} tasks, test runs included · ${tiedNote}`);
-  const evalsAvg = c.tasks.reduce((t, x) => t + (x.sandbox || 0) + (x.portal || 0), 0) / n;
-  return tile("Per submitted task", esc(usd(runsAvg + evalsAvg)),
-    `average: ${esc(usd(runsAvg))} task runs (test runs included) + ${esc(usd(evalsAvg))} evals · ${tiedNote}`);
+// What each submitted task cost: everything anyone spent on it (average, with the median and the parts), and the range's
+// whole spend ÷ tasks submitted, with how much of it went to these tasks, other tasks, or nothing we can tie to a task.
+const splitOf = v => (C.view !== "evals" ? (v || [0, 0])[0] : 0) + (C.view !== "runs" ? (v || [0, 0])[1] : 0);
+function taskCostTile(c) {
+  const T = c.tasks, n = T.length;
+  if (!n) return tile("Spent on each submitted task", "–", "no submissions yet");
+  const avg = k => T.reduce((a, t) => a + (t[k] || 0), 0) / n;
+  const parts = [C.view !== "evals" && `${esc(usd(avg("runs_v")))} task runs`,
+                 C.view !== "runs" && `${esc(usd(avg("evals_sub_v")))} evals by whoever submitted`,
+                 C.view !== "runs" && `${esc(usd(avg("evals_oth_v")))} evals by others (earlier holders, tests)`].filter(Boolean);
+  return tile("Spent on each submitted task", esc(usd(avg("total"))),
+    `average · median ${esc(usd(median(T.map(t => t.total))))} · ${parts.join(" + ")} · everything anyone spent on it since it started`);
+}
+function allInTile(c) {
+  const s = c.summary, n = s.tasks_submitted;
+  if (!n) return tile("All-in per submitted task", "–", "no submissions yet");
+  const sp = s.split;
+  const sub = sp ? ` · of it ${esc(usd(splitOf(sp.submitted_tasks)))} went to these tasks, ${esc(usd(splitOf(sp.other_tasks)))} to tasks not submitted (yet)`
+    + ` and ${esc(usd(splitOf(sp.untied)))} can't be tied to a task${C.view !== "evals" && sp.hint ? ` (${esc(usd(sp.hint))} hint pipeline)` : ""}` : "";
+  return tile("All-in per submitted task", esc(usd(s.total / n)), `all ${esc(usd(s.total))} spent in the range ÷ ${fmtInt(n)} tasks submitted${sub}`);
 }
 
 function renderTiles(c, b) {
@@ -232,9 +250,8 @@ function renderTiles(c, b) {
       `${fmtInt(c.lost.claims.length)} ${c.lost.claims.length === 1 ? "claim" : "claims"} ended without that person submitting`
       + (c.summary.total ? ` · ${Math.round(100 * c.lost.total / c.summary.total)}% of ${esc(VIEWS[C.view].label.toLowerCase())}` : "")
       + (c.lost.in_progress.total ? ` · ${esc(usd(c.lost.in_progress.total))} in progress (still held)` : "")) : null,
-    tile("Cost per submitted task, all-in", s.per_task_all_in == null ? "–" : esc(usd(s.per_task_all_in)),
-      s.tasks_submitted ? `${esc(usd(s.total))} ÷ ${fmtInt(s.tasks_submitted)} tasks submitted · lost, tests and untied spend included` : "no submissions yet"),
-    perTaskTile(c),
+    taskCostTile(c),
+    allInTile(c),
     tile("Per active contributor, per day", s.per_cb_day == null ? "–" : esc(usd(s.per_cb_day)), `${esc(VIEWS[C.view].label.toLowerCase())} ÷ contributor-days`),
     tile("Tasks submitted", esc(fmtInt(s.tasks_submitted)), `by ${fmtInt(s.submitters)} contributors · ${C.layer === "all" ? "L-1/L0" : `at ${LAYERS[C.layer]}`}`),
     tile("Key budget this cycle", b.pct == null ? "–" : `${esc(b.pct)}%`,
@@ -400,49 +417,42 @@ function splitCard(c) {
     <tr class="split-total"><td class="split-label">Total</td><td></td><td class="num">${esc(usd(Math.round(total)))}</td><td class="num">${total > 0 ? "100%" : "–"}</td></tr></tbody></table></div>`;
 }
 
-// All-in cost per submitted task, per day / week / month (Evan, 2026-11-04): everything spent that period ÷ tasks
-// submitted that period, in four parts: what went into submitted tasks (task runs, evals) and the overhead on each
-// side (lost, internal tests, and what can't be tied to a task: test runs, the hint pipeline, untagged calls).
-// Spend by people still holding a task (in progress) is left out: it may still become a task. Periods with fewer than
-// MIN_TASKS submissions are left out, like the other per-task charts.
-const ALLIN_SERIES = [
-  { key: "direct_runs", label: "Task runs, submitted tasks", cls: "s-runs", side: "runs", parts: ["submitted"] },
-  { key: "direct_evals", label: "Evals, submitted tasks", cls: "s-untagged", side: "evals", parts: ["submitted"] },
-  { key: "over_runs", label: "Task-run overhead", cls: "s-hint", side: "runs", parts: ["lost", "internal", "untied"] },
-  { key: "over_evals", label: "Eval overhead", cls: "s-lost", side: "evals", parts: ["lost", "internal", "untied"] }];
-const allInSeries = () => ALLIN_SERIES.filter(x => x.side === "runs" ? C.view !== "evals" : C.view !== "runs");
-const allInOf = (d, x) => x.parts.reduce((t, k) => t + (d[`p_${k}_${x.side}`] || 0), 0);
-const allInWip = d => (C.view !== "evals" ? d.p_in_progress_runs || 0 : 0) + (C.view !== "runs" ? d.p_in_progress_evals || 0 : 0);
-function allInCard(c) {
-  const period = C.period, series = allInSeries();
+// Cost per submitted task by when it was submitted (Evan, 2026-11-10): each column is the average of everything anyone
+// spent on the tasks submitted that day / week / month, from each task's start, in its parts; the line is the range's
+// average. (It replaces "spend that day ÷ tasks submitted that day", which read low: most of a task's spend falls on
+// the days before it's submitted.)
+const COST_SERIES = [{ key: "runs_v", label: "Task runs", cls: "s-runs", side: "runs" },
+                     { key: "evals_sub_v", label: "Evals by whoever submitted", cls: "s-untagged", side: "evals" },
+                     { key: "evals_oth_v", label: "Evals by others (earlier holders, tests)", cls: "s-lost", side: "evals" }];
+const periodOf = (t, period) => {
+  const day = Math.floor(t / 86400) * 86400, d = new Date(day * 1000);
+  if (period === "week") return day - ((d.getUTCDay() + 6) % 7) * 86400;
+  if (period === "month") return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000;
+  return day;
+};
+function taskCostCard(c) {
+  const period = C.period, series = COST_SERIES.filter(x => x.side === "runs" ? C.view !== "evals" : C.view !== "runs");
+  const groups = {};
+  c.tasks.forEach(t => { if (t.last_submitted) (groups[periodOf(t.last_submitted, period)] ||= []).push(t); });
   const rows = chartRows(c).map(d => {
-    const ok = d.tasks_submitted >= MIN_TASKS, r = { ...d, ok, wip: allInWip(d) };
-    series.forEach(x => { r[x.key] = allInOf(d, x); r[`${x.key}_per`] = ok ? r[x.key] / d.tasks_submitted : 0; });
-    r.all = series.reduce((t, x) => t + r[x.key], 0);
+    const ts = groups[d.day] || [], r = { ...d, n: ts.length, med: ts.length ? median(ts.map(t => t.total)) : 0 };
+    series.forEach(x => { r[x.key] = ts.length ? ts.reduce((a, t) => a + (t[x.key] || 0), 0) / ts.length : 0; });
+    r.avg = series.reduce((a, x) => a + r[x.key], 0);
     return r;
   });
-  const used = rows.filter(r => r.ok), subs = used.reduce((n, r) => n + r.tasks_submitted, 0);
-  const sumOf = k => used.reduce((n, r) => n + r[k], 0), perTask = subs ? sumOf("all") / subs : 0;
+  const n = c.tasks.length, overall = n ? c.tasks.reduce((a, t) => a + t.total, 0) / n : 0;
   const chart = columns({
-    id: "allin", title: `All-in cost per submitted task, by ${period}`, period, days: rows, bars: true,
-    series: series.map(x => ({ ...x, key: `${x.key}_per` })), value: (d, k) => Math.max(0, d[k]),
-    pace: perTask, paceLabel: perTask ? `${kUsd(perTask)} all-in per task over ${rangeName(c)}` : "",
-    sub: `${chartSince() || "UTC days · "}${VIEWS[C.view].label.toLowerCase()}: everything spent that ${period} (except people still holding a task) ÷ tasks submitted that ${period} · ${period}s with fewer than ${MIN_TASKS} submitted tasks left out`,
-    tip: d => d.ok
-      ? [[usd(d.all / d.tasks_submitted), " all-in per submitted task"],
-         ...series.map(x => [usd(d[`${x.key}_per`]), ` ${x.label.toLowerCase()}`, x.cls]),
-         [usd(d.all), ` spent · ${fmtInt(d.tasks_submitted)} tasks submitted`],
-         ...(d.wip >= 1 ? [[usd(d.wip), " in progress, not counted"]] : [])]
-      : [[usd(d.all), " spent"], [d.tasks_submitted ? `Only ${fmtInt(d.tasks_submitted)}` : "No tasks", ` submitted this ${period}, so it's left out`]],
+    id: "taskcost", title: `Cost per submitted task, by ${period} submitted`, period, days: rows, bars: true, series, value: (d, k) => d[k],
+    pace: overall, paceLabel: overall ? `${kUsd(overall)} average over ${rangeName(c)}` : "",
+    sub: `${chartSince() || "UTC days · "}${VIEWS[C.view].label.toLowerCase()}: everything anyone spent on each task from its start, averaged over the tasks submitted that ${period}`,
+    tip: d => d.n ? [[usd(d.avg), " per task (average)"], ...series.map(x => [usd(d[x.key]), ` ${x.label.toLowerCase()}`, x.cls]),
+                     [fmtInt(d.n), ` task${d.n === 1 ? "" : "s"} submitted · median ${usd(d.med)}`]]
+                  : [["No tasks", ` submitted this ${period}`]],
   });
-  const direct = series.filter(x => x.parts[0] === "submitted").reduce((n, x) => n + sumOf(x.key), 0);
-  const head = subs ? `<div class="cc-sub">Over the ${used.length} ${period}${used.length === 1 ? "" : "s"} shown: <b>${esc(usd(perTask))}</b> all-in per submitted task
-    (${fmtInt(subs)} tasks) = ${series.map(x => `${esc(x.label.toLowerCase())} <b>${esc(usd(sumOf(x.key) / subs))}</b>`).join(" + ")}.
-    Overhead is <b>${sumOf("all") > 0 ? Math.round(100 * (sumOf("all") - direct) / sumOf("all")) : 0}%</b> of it.</div>` : "";
-  const table = rows.slice().reverse().map(d => `<tr><td>${periodRow(d, period)}</td>${series.map(x => `<td>${esc(usd(d[x.key]))}</td>`).join("")}
-    <td>${esc(usd(d.all))}</td><td>${fmtInt(d.tasks_submitted)}</td><td>${d.ok ? esc(usd(d.all / d.tasks_submitted)) : "–"}</td><td>${esc(usd(d.wip))}</td></tr>`).join("");
-  return chart + head + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "day" ? "Day" : period === "week" ? "Week" : "Month"} (UTC)</th>
-    ${series.map(x => `<th>${esc(x.label)}</th>`).join("")}<th>All-in</th><th>Tasks submitted</th><th>All-in per submitted task</th><th>In progress (not counted)</th></tr>${table}</table></details>`;
+  const table = rows.slice().reverse().filter(d => d.n).map(d => `<tr><td>${periodRow(d, period)}</td><td>${fmtInt(d.n)}</td>
+    ${series.map(x => `<td>${esc(usd(d[x.key]))}</td>`).join("")}<td>${esc(usd(d.avg))}</td><td>${esc(usd(d.med))}</td></tr>`).join("");
+  return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "day" ? "Day" : period === "week" ? "Week" : "Month"} submitted (UTC)</th>
+    <th>Tasks</th>${series.map(x => `<th>${esc(x.label)}</th>`).join("")}<th>Per task (average)</th><th>Median</th></tr>${table}</table></details>`;
 }
 
 // Lost spend over time, by the day it was spent, split into task runs and evals, plus why the tasks were lost.
@@ -463,103 +473,6 @@ function lostCard(c) {
     ${series.map(x => `<td>${esc(usd(d[x.key]))}</td>`).join("")}<td>${esc(usd(series.reduce((t, x) => t + (d[x.key] || 0), 0)))}</td></tr>`).join("");
   return chart + why + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "day" ? "Day" : period === "week" ? "Week" : "Month"} (UTC)</th>
     ${series.map(x => `<th>${esc(x.label)}</th>`).join("")}<th>Lost</th></tr>${rows}</table></details>`;
-}
-
-// Each task's full cost (task runs since it started + portal reviews), grouped by the UTC day it was submitted:
-// the column is that day's median, so one expensive task doesn't swing it; the line is the range's median.
-// In the "both" view it's split into an evals chart and a task-runs chart, so each part reads on its own.
-function perTaskCard(c) {
-  if (C.period !== "day") return periodPerTaskCard(c);
-  if (C.view === "runs") return runsPerTaskChart(c, "pertask");
-  if (C.view !== "both") return perTaskChart(c, { id: "pertask", title: "Cost per submitted task, by day submitted",
-    what: VIEWS[C.view].label.toLowerCase(), cls: "s-runs", totalOf: t => t.total });
-  return perTaskChart(c, { id: "pertask-evals", title: "Eval cost per submitted task, by day submitted",
-      what: "evals: in-task sandbox + portal reviews", cls: "s-untagged", totalOf: t => (t.sandbox || 0) + (t.portal || 0) })
-    + runsPerTaskChart(c, "pertask-runs");
-}
-
-// Task-run cost per submitted task. Test runs (before the final batch) can't be tied to a task, so each day's column is
-// all task-run spend that day ÷ tasks submitted that day, test runs included; the line is the same over the range (the
-// tile's figure). The median of the runs that do tie to each task (final batch) is in the tooltip and the table.
-function runsPerTaskChart(c, id) {
-  const tied = {};
-  c.tasks.forEach(t => {
-    if (t.last_submitted) (tied[Math.floor(t.last_submitted / 86400) * 86400] ||= []).push(t.agent_runs || 0);
-  });
-  const days = c.daily.map(d => ({ ...d, avg: d.tasks_submitted ? (d.runs || 0) / d.tasks_submitted : 0,
-                                    tied: tied[d.day] ? median(tied[d.day]) : null }));
-  const subs = c.summary.tasks_submitted || 0, overall = subs ? (c.summary.runs || 0) / subs : 0;
-  const chart = columns({
-    id, title: "Task-run cost per submitted task, by day",
-    sub: "all task-run spend that day ÷ tasks submitted that day, test runs included (test runs can't be tied to a task, so this is an average)",
-    days, series: [{ key: "avg", label: "Per submitted task", cls: "s-runs" }], value: (d, k) => d[k],
-    pace: overall, paceLabel: overall ? `${kUsd(overall)} average over ${rangeName(c)}` : "",
-    tip: d => d.tasks_submitted
-      ? [[usd(d.avg), " per submitted task (average)"], [usd(d.runs), ` task-run spend · ${fmtInt(d.tasks_submitted)} task${d.tasks_submitted === 1 ? "" : "s"} submitted`],
-         ...(d.tied != null ? [[usd(d.tied), " median of the runs tied to each task (final batch)"]] : [])]
-      : [[usd(d.runs), " task-run spend"], ["No tasks", " submitted this day"]],
-  });
-  const rows = days.slice().reverse().map(d => `<tr><td>${esc(longDay(d.day))}${d.today ? " (so far)" : ""}</td><td>${esc(usd(d.runs))}</td>
-    <td>${fmtInt(d.tasks_submitted)}</td><td>${d.tasks_submitted ? esc(usd(d.avg)) : "–"}</td><td>${d.tied != null ? esc(usd(d.tied)) : "–"}</td></tr>`).join("");
-  return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>Day (UTC)</th><th>Task-run spend</th>
-    <th>Tasks submitted</th><th>Per submitted task</th><th>Median tied to each task</th></tr>${rows}</table></details>`;
-}
-
-function perTaskChart(c, { id, title, what, cls, totalOf }) {
-  const byDay = {}, all = [];
-  c.tasks.forEach(t => {
-    if (!t.last_submitted) return;
-    const d = Math.floor(t.last_submitted / 86400) * 86400;
-    (byDay[d] = byDay[d] || []).push(totalOf(t));
-    all.push(totalOf(t));
-  });
-  const days = c.daily.map(d => {
-    const v = byDay[d.day] || [];
-    return { ...d, n: v.length, median: v.length ? median(v) : 0, mean: v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0,
-             min: v.length ? Math.min(...v) : 0, max: v.length ? Math.max(...v) : 0 };
-  });
-  const overall = median(all);
-  const chart = columns({
-    id, title,
-    sub: `median cost of the tasks submitted that day (${esc(what)}), since each task started`,
-    days, series: [{ key: "median", label: "Median per task", cls }], value: (d, k) => d[k],
-    pace: overall || 0, paceLabel: overall ? `${kUsd(overall)} median over ${rangeName(c)}` : "",
-    tip: d => d.n ? [[usd(d.median), " median per task"], [fmtInt(d.n), ` task${d.n === 1 ? "" : "s"} submitted · average ${usd(d.mean)}`],
-                     [`${usd(d.min)} – ${usd(d.max)}`, " cheapest – most expensive"]]
-                  : [["No tasks", " submitted this day"]],
-  });
-  const rows = days.slice().reverse().filter(d => d.n).map(d => `<tr><td>${esc(longDay(d.day))}${d.today ? " (so far)" : ""}</td><td>${fmtInt(d.n)}</td>
-    <td>${esc(usd(d.median))}</td><td>${esc(usd(d.mean))}</td><td>${esc(usd(d.min))}</td><td>${esc(usd(d.max))}</td></tr>`).join("");
-  return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>Day submitted (UTC)</th><th>Tasks</th>
-    <th>Median</th><th>Average</th><th>Cheapest</th><th>Most expensive</th></tr>${rows}</table></details>`;
-}
-
-// Weekly / monthly: each column is the period's spend ÷ tasks submitted in it (an average, test runs included), and the
-// line is the same over the periods shown. A period with fewer than MIN_TASKS submissions is left out: one task carrying
-// a whole week's runs would dwarf every other column.
-const MIN_TASKS = 5;
-function periodPerTaskCard(c) {
-  const days = chartRows(c), period = C.period;
-  const evals = d => (d.sandbox || 0) + (d.portal || 0), runs = d => d.runs || 0;
-  const one = (id, title, what, cls, part) => {
-    const rows = days.map(d => ({ ...d, part: part(d), avg: d.tasks_submitted >= MIN_TASKS ? part(d) / d.tasks_submitted : 0 }));
-    const spent = rows.filter(d => d.part > 0 && d.tasks_submitted >= MIN_TASKS), subs = spent.reduce((n, d) => n + d.tasks_submitted, 0);  // evals only start in Sep
-    const overall = subs ? spent.reduce((n, d) => n + d.part, 0) / subs : 0;
-    const chart = columns({
-      id, title, period, sub: `${chartSince()}${esc(what)} spend that ${period} ÷ tasks submitted that ${period} (an average: test runs can't be tied to a task) · ${period}s with fewer than ${MIN_TASKS} submitted tasks left out`,
-      days: rows, series: [{ key: "avg", label: "Per submitted task", cls }], value: (d, k) => d[k],
-      pace: overall, paceLabel: overall ? `${kUsd(overall)} average over the ${spent.length} ${period}s with ${what} spend` : "",
-      tip: d => d.tasks_submitted >= MIN_TASKS ? [[usd(d.avg), " per submitted task (average)"], [usd(d.part), ` ${what} spend · ${fmtInt(d.tasks_submitted)} tasks submitted`]]
-        : [[usd(d.part), ` ${what} spend`], [d.tasks_submitted ? `Only ${fmtInt(d.tasks_submitted)}` : "No tasks", ` submitted this ${period}, so it's left out`]],
-    });
-    const table = rows.slice().reverse().map(d => `<tr><td>${periodRow(d, period)}</td><td>${esc(usd(d.part))}</td><td>${fmtInt(d.tasks_submitted)}</td>
-      <td>${d.tasks_submitted >= MIN_TASKS ? esc(usd(d.avg)) : "–"}</td></tr>`).join("");
-    return chart + `<details class="sc-table"><summary>Show as table</summary><table class="runs"><tr><th>${period === "week" ? "Week" : "Month"} (UTC)</th>
-      <th>Spend (${esc(what)})</th><th>Tasks submitted</th><th>Per submitted task</th></tr>${table}</table></details>`;
-  };
-  const evalsChart = () => one("pertask-evals", `Eval cost per submitted task, by ${period}`, "evals", "s-untagged", evals);
-  const runsChart = () => one("pertask-runs", `Task-run cost per submitted task, by ${period}`, "task-run", "s-runs", runs);
-  return C.view === "evals" ? evalsChart() : C.view === "runs" ? runsChart() : evalsChart() + runsChart();
 }
 
 function perCbCard(c) {
@@ -652,20 +565,19 @@ const TABLES = {
   },
   tasks: {
     title: "Cost per submitted task",
-    sub: "Tasks a contributor submitted in the range: what the people who submitted each one spent on it since it started. Task runs = runs whose IDs are in the task's submissions plus runs launched from the task itself; in-task sandbox and portal reviews are the evals. Lost before = what earlier holders spent on it (their claim ended without them submitting).",
+    sub: "Tasks submitted in the range, with everything anyone spent on each since it started. Task runs = every run tied to the task (its run ID is in a submission, it was launched from the task, or, since about Oct 31, it carries the task's id), whoever ran it. Evals by others = earlier holders whose claim ended without a submit, reviewers and internal tests.",
     rows: () => C.shown.tasks, key: "total",
     // the per-layer columns: the submitters' own spend, by the layer it was spent at (Total - L-1 - L0 = L10+ / no layer known)
     cols: [
       ["Task", "task_id", r => `<span class="mono" title="${esc(r.task_id)}">${esc(r.task_id.slice(-6))}</span>`],
       ["Submitted", "last_submitted", r => r.last_submitted ? esc(longDay(r.last_submitted)) : "–"],
       ["Submitted by", "submitters", r => esc(r.submitters)],
-      ["Task runs", "agent_runs", r => esc(usd(r.agent_runs)), true, "runs"],
-      ["In-task sandbox", "sandbox", r => esc(usd(r.sandbox)), true, "sandbox"],
-      ["Portal reviews", "portal", r => esc(usd(r.portal)), true, "portal"],
-      ["Total", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+      ["Spent on it", "total", r => `<b>${esc(usd(r.total))}</b>`, true],
+      ["Task runs", "runs_v", r => esc(usd(r.runs_v)), true, "runs"],
+      ["Evals by whoever submitted", "evals_sub_v", r => esc(usd(r.evals_sub_v)), true, "portal"],
+      ["Evals by others", "evals_oth_v", r => (r.evals_oth_v ? esc(usd(r.evals_oth_v)) : "–"), true, "portal"],
       ["…at L-1", "l1", r => esc(usd(r.l1)), true, "layers"],
       ["…at L0", "l0", r => esc(usd(r.l0)), true, "layers"],
-      ["Lost before", "lost_before", r => (r.lost_before ? esc(usd(r.lost_before)) : "–"), true],
     ],
   },
   people: {

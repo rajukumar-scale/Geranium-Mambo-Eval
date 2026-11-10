@@ -108,7 +108,8 @@ BACKUP_BUDGET_QUERY_ID = _int("BACKUP_BUDGET_QUERY_ID", 397844)
 # per-range queries 390879 / 390881 / 390882, with the same rules (Atlas Commercial spend on every key, LiteLLM + SMIG).
 # v5 (2026-11-09) = 401890: the same rows as v4 plus the pipeline layer of each (column lvl), per-day x layer rows (dl)
 # and each node's layer (node); 395415 (v4) stays as it was, for a rollback.
-COST_FACTS_QUERY_ID = _int("COST_FACTS_QUERY_ID", 401890)
+# v6 (2026-11-10) = 402024: v5 + kind tr, everything spent on each task by anyone (runs tied by the task id they carry).
+COST_FACTS_QUERY_ID = _int("COST_FACTS_QUERY_ID", 402024)
 # SMIG's billed cost per portal run (runId tag, sent since 2026-10-26 20:00 UTC); untagged runs keep the list-price estimate (0 = estimates only).
 COST_PORTAL_SMIG_QUERY_ID = _int("COST_PORTAL_SMIG_QUERY_ID", 394171)
 # Each Atlas Commercial task's platform state (ever submitted at L-1/L0, cancelled, claimed, paused, last activity), for the

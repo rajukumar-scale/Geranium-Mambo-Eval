@@ -205,7 +205,7 @@ class LostByClaimTest(unittest.TestCase):
         self.assertEqual(b["lost"], {"agent_runs": 5, "evals": 2})
         self.assertEqual(b["in_progress"], {"agent_runs": 5, "evals": 4})  # D's live claim + E's paused one
         self.assertEqual(b["internal"], {"agent_runs": 8, "evals": 4, "admin_portal": 3})  # @scale.com, queue_manager, admin run
-        self.assertEqual(b["untied"], {"agent_runs": 12, "evals": 2, "hint": 2, "portal_no_task": 1.5})
+        self.assertEqual(b["untied"], {"agent_runs": 12, "evals": 2, "hint": 2, "portal_no_task": 1.5, "runs_on_tasks": 0})
         self.assertEqual(r["lost"]["in_progress"], {"claims": 2, "tasks": 2, "agent_runs": 5, "evals": 4})
         day = {d["day"]: d for d in r["daily"]}
         self.assertEqual((day[utc(2026, 10, 15)]["lost_runs"], day[utc(2026, 10, 16)]["lost_evals"]), (5, 2))
