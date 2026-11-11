@@ -70,6 +70,14 @@ def create(run, chat, report, override=None, inputs=None):
     }
     if inputs is not None:
         payload["inputs"] = inputs
+    if report["stage"] in ("oe", "rubric", "hardness"):
+        # The prompt this review was graded with, shown on its pass screen (2026-11-11: two tasks submitted an older
+        # prompt than the one their /oe and /rubric passed with; each field's own pass still matched its own field).
+        from . import fingerprint  # here: fingerprint pulls in workspace lazily
+        try:
+            payload["prompt_fingerprint"] = fingerprint.for_attempt(run["attempt_id"], "prompt")
+        except Exception:  # noqa: BLE001 - a pass is never refused over this note
+            payload["prompt_fingerprint"] = None
     if override:
         payload["admin_override"] = {"by": override["by"], "reason": override["reason"], "at": time.time(),
                                      "original_verdict": report.get("verdict"), "original_score": report.get("score")}

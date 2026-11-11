@@ -102,3 +102,8 @@ async def after_refresh():
         await check_once()
     except Exception:  # noqa: BLE001 - never break the submissions loop
         log.exception("submit-watch check failed")
+    try:  # do the submitted fields match the inputs the passes were reviewed on? (server/submit_match.py)
+        from . import submit_match
+        await submit_match.check_once(send)
+    except Exception:  # noqa: BLE001
+        log.exception("submit-match check failed")

@@ -504,9 +504,14 @@ function showProof(p) {
         ${p.outdated ? `<p class="taxo-warn">⚠ This pass is outdated. ${esc(p.outdated.message)}</p>` : ""}
         <p>This pass is for the exact <b class="mono">${cmd}</b> you sent in this review.</p>
         <p>If you fixed it here to pass, put that <b>latest fixed version into your Outlier task</b>. Don't forget to update it.</p>
+        ${p.prompt_fingerprint && (p.stage === "oe" || p.stage === "rubric") ? `<div class="taxo-warn prompt-bound"><b>This pass is only for this prompt:</b>
+          <div class="mono" style="margin:4px 0">${esc(p.prompt_fingerprint)}</div>
+          Your Outlier task's prompt must be <b>exactly this version</b>, together with the SQL and OE this review read. If you
+          submit a different prompt (an older one with its old /prompt pass, for example), the task gets sent back.</div>` : ""}
         <p class="taxo-warn">If your Outlier task doesn't match the version that passed here, we will know, and your task will be flagged.</p>
         <p class="taxo-note">If you change it again, run <b class="mono">${cmd}</b> again.</p>
-        <label class="taxo-check"><input type="checkbox"> I've updated my Outlier task</label>
+        <label class="taxo-check"><input type="checkbox"> ${p.prompt_fingerprint && (p.stage === "oe" || p.stage === "rubric")
+          ? "I've updated my Outlier task, and its prompt is this exact version" : "I've updated my Outlier task"}</label>
       </div>
       <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
     const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
