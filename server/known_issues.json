@@ -1,998 +1,245 @@
 {
- "verified": "2026-10-30",
- "about": "Base-data contradictions found in portal reports and checked on both sides in the universe exports. Built by deploy/build_known_issues.py; edit there, not here.",
- "issues": [
-  {
-   "id": "SC-4",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 36,
-   "title": "adjoe payments: ledger vs bank wires",
-   "dont": "adjoe payment amounts or dates from FINANCE_LEDGER.",
-   "why": "The ledger books 10,733.60 / 20,537.92 / 14,930.02 on Apr 30 / May 31 / Jun 30, but SVB wires paid 12,005 / 18,890 / 15,306.50 on May 5 / Jul 3 / Aug 29 (the ledger comment even claims 'signed cash movements').",
-   "safer": "Only the 3-month total is safe (both about $46,201.50)."
-  },
-  {
-   "id": "SC-5",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 26,
-   "title": "Victor Barnes paid after he left",
-   "dont": "Sep 2025 payroll, headcount, burn or runway from FINANCE_LEDGER or PAYROLL_ROSTER.",
-   "why": "FINANCE_LEDGER/PAYROLL_ROSTER pay Victor Barnes through Sep 2025, but Slack says he left April 16, 2025."
-  },
-  {
-   "id": "SC-6",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 21,
-   "title": "Node CEO emails from an HG address",
-   "dont": "Who sent a Node Media email.",
-   "why": "Node's CEO 'Brian Cooper' sends from brian.foster@harmonygames.co, but that address belongs to HG engineer Brian Foster.",
-   "safer": "Refer to 'Node's CEO' by role."
-  },
-  {
-   "id": "SC-1",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 19,
-   "title": "Domino Delights September 2025 installs",
-   "dont": "Domino Delights installs in September 2025.",
-   "why": "adjoe Slack (Sep 1-8) says adjoe drove an install spike, but INSTALL_EVENTS/DAU have zero DD installs in September.",
-   "safer": "Use Zombie Match 3D September installs, or DD before June."
-  },
-  {
-   "id": "SC-2",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 19,
-   "title": "CASH_BALANCE burn column comment",
-   "dont": "The CASH_BALANCE.monthly_net_burn column comment.",
-   "why": "The comment says the UA row omits $46,201.50 and leaves a ~$47K residual, but MONTHLY_BURN/FINANCE_LEDGER already hold the adjoe money and reconcile to within $0.49.",
-   "safer": "Use the table rows, never the comment."
-  },
-  {
-   "id": "SC-7",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 18,
-   "title": "People who left channels still listed",
-   "dont": "Channel membership (who is in a channel).",
-   "why": "#adjoe logs Frederick leaving on 2024-10-31, but he keeps posting there through Sep 2025 and channels.json still lists him (all leavers stay listed)."
-  },
-  {
-   "id": "SC-8",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 17,
-   "title": "ZOM-475 glass crash: fixed or not",
-   "dont": "Whether the ZOM-475 glass crash is fixed.",
-   "why": "The ZM3D GDD (Sep 30) says it was fixed by removing the glass FX, but Linear ZOM-475 is still Todo, Trello still lists it, and PR #435 re-added glass FX."
-  },
-  {
-   "id": "SC-9",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 17,
-   "title": "Play Ventures: rejected or no reply",
-   "dont": "Play Ventures' status in the investor sheet or Slack.",
-   "why": "The investor sheet says 'Rejected' with a decline quote (Sep 15), but Leonard says on Sep 23/25 they 'didn't respond'."
-  },
-  {
-   "id": "SC-10",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 16,
-   "title": "LVP meeting date: Sep 7 vs Sep 9",
-   "dont": "The LVP meeting date in the investor sheet.",
-   "why": "The investor sheet says 'Catch up on 09/07' (a Sunday), but calendar, invite and Slack say Tue Sep 9.",
-   "safer": "If a date is needed, accept Sep 9."
-  },
-  {
-   "id": "SC-11",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 14,
-   "title": "Unity spend is $0 in Snowflake",
-   "dont": "Unity spend, CPI or total UA spend from Snowflake.",
-   "why": "Every unity_ads row has spend 0 and CPI 0, but Slack shows paid Unity campaigns ($5-6 bids, $300/day caps); Confluence admits the data feed misses Unity spend.",
-   "safer": "Use install counts, not spend."
-  },
-  {
-   "id": "SC-12",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 14,
-   "title": "Meta spend missing from Snowflake",
-   "dont": "Meta/Facebook spend or ZM3D paid UA spend.",
-   "why": "Snowflake has no Meta rows after Apr 10, 2025 and none ever for ZM3D, but Gmail Meta receipts bill ZM_UK campaigns ($900 in July) and Slack cites FB spend in September."
-  },
-  {
-   "id": "SC-13",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 13,
-   "title": "ZM3D beta date in Trello list name",
-   "dont": "The ZM3D beta date from the Trello list name.",
-   "why": "The list is named 'BETA: Oct 10', but its last rename action (Sep 12) and every later action say 'BETA: Sep 30'.",
-   "safer": "Settle the date in your own task data."
-  },
-  {
-   "id": "SC-14",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 12,
-   "title": "Beta cards' two 'complete' flags disagree",
-   "dont": "Which Trello beta cards are 'complete' (cards 54/56/58/67).",
-   "why": "The Trello card's dueComplete is false, but its badges.dueComplete is true."
-  },
-  {
-   "id": "SC-15",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 11,
-   "title": "ZOM-521 checklist ticked, children still open",
-   "dont": "What is left on the ZOM-521 VFX master ticket.",
-   "why": "The ZOM-521 checklist ticks all six items, but children ZOM-526 and ZOM-528 are still In Progress.",
-   "safer": "Use the child ticket states."
-  },
-  {
-   "id": "SC-16",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 11,
-   "title": "Linear tickets still open after work shipped",
-   "dont": "Linear status as proof of whether work shipped (ZOM-564, ZOM-513/514, ZOM-563, ART-790/792).",
-   "why": "These tickets are still Todo/In Progress, but their PRs merged or the fix was confirmed in DMs/Slack."
-  },
-  {
-   "id": "SC-17",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 11,
-   "title": "Ad-revenue payouts per network don't match",
-   "dont": "Ad-revenue payouts per network.",
-   "why": "AD_REVENUE marks AppLovin/Meta revenue 'paid' (and the ledger books it all as 'AppLovin/MAX'), but Tipalti payout mails and the Meta statement show different amounts."
-  },
-  {
-   "id": "SC-18",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 10,
-   "title": "PR #477: open or closed",
-   "dont": "PR #477's state.",
-   "why": "GitHub says #477 is open, but its CodeRabbit comment says 'The pull request is closed' and cites commits not in the export."
-  },
-  {
-   "id": "SC-19",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 10,
-   "title": "Telemetry app versions vs Slack builds",
-   "dont": "Matching RAW_EVENTS app versions to a store build in Slack.",
-   "why": "RAW_EVENTS uses 0.1.534/0.1.601, but Slack releases are 0.3.x (and also called 1.3.x).",
-   "safer": "Match by date: 0.1.601 starts Sep 30 00:47 UTC."
-  },
-  {
-   "id": "SC-20",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 10,
-   "title": "Node Slack channel creation date",
-   "dont": "When the Node Slack channel started.",
-   "why": "channels.json says it was created 2025-04-09, but its messages start Sep 2024.",
-   "safer": "Date the relationship from messages/email."
-  },
-  {
-   "id": "SC-21",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 9,
-   "title": "Jan 2025 Node wire missing from ledger",
-   "dont": "Cash or burn totals that must include the Jan 2025 Node payment.",
-   "why": "SVB confirms a $16,428.57 wire to Node on Jan 2, 2025, but no FINANCE_LEDGER row can hold it and CASH_BALANCE ties to the ledger."
-  },
-  {
-   "id": "SC-22",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 8,
-   "title": "time_in_status_minutes runs past the clock",
-   "dont": "Ticket durations from Linear's time_in_status_minutes.",
-   "why": "The field runs to 2026-02-13, but the clock is Oct 1, 2025.",
-   "safer": "Compute from created_at/completed_at."
-  },
-  {
-   "id": "SC-23",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 8,
-   "title": "AppLovin spend dates and countries",
-   "dont": "AppLovin spend, geos or campaign dates from Snowflake.",
-   "why": "Snowflake books DD AppLovin spend from Apr 11, 2025, multi-country, incl. paused days, but Slack says the US-only campaign first went live Jun 23."
-  },
-  {
-   "id": "SC-24",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 8,
-   "title": "Tim Steudler works for Mattel, not HG",
-   "dont": "Tim Steudler's employer (he has an HG email and HG accounts).",
-   "why": "He writes from tim.steudler@harmonygames.co and has HG accounts, but he is Mattel's BD manager.",
-   "safer": "Call him 'Mattel's contact'; don't count him as staff."
-  },
-  {
-   "id": "SC-25",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 8,
-   "title": "PAYROLL_ROSTER vs who actually works there",
-   "dont": "Who is on payroll or current staff from PAYROLL_ROSTER.",
-   "why": "The roster pays Felix in Sep 2025 and lists Calvin as 'General Counsel' for April only, but Slack shows Felix left Aug 2024 and Calvin is the active VFX engineer (also Samuel off-roster)."
-  },
-  {
-   "id": "SC-3",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 7,
-   "title": "Runway: investor letter vs CASH_BALANCE",
-   "dont": "A runway figure from the investor letter or CASH_BALANCE.",
-   "why": "The Oct 1 investor letter says ~4 months, but CASH_BALANCE says 2.7 months (Sep 30)."
-  },
-  {
-   "id": "SC-26",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 7,
-   "title": "Slack links to ENG-2367/2368/2373 don't exist",
-   "dont": "Resolving Slack's ENG-2367/2368/2373 links.",
-   "why": "Slack links ENG-2368 etc., but Linear stops at ENG-2366; those tickets are ZOM-436/521/527.",
-   "safer": "Use the ZOM ids; never inject new ENG-2367+ issues."
-  },
-  {
-   "id": "SC-27",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 7,
-   "title": "#god-bugs and #god-gameart archive state",
-   "dont": "Posting in #god-bugs or #god-gameart.",
-   "why": "Each has an 'archived the channel' event (Jul 15), but channels.json says is_archived false.",
-   "safer": "Put deciding messages elsewhere."
-  },
-  {
-   "id": "SC-28",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 6,
-   "title": "Product OKRs page numbers vs Snowflake",
-   "dont": "The Confluence Product OKRs numbers.",
-   "why": "It says D1 27.9% on 408 Aug UK iOS installs, a US-only launch and Facebook volume, but Snowflake has 711 installs at ~35.7% D1, a multi-country launch and no ZM3D Meta rows."
-  },
-  {
-   "id": "SC-29",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 5,
-   "title": "MMP report times before the install",
-   "dont": "MMP reporting latency from INSTALL_ATTRIBUTION.",
-   "why": "INSTALL_ATTRIBUTION has mmp_reported_at earlier than install_ts on 12,730 of 28,609 rows, so the MMP reports installs before they happen."
-  },
-  {
-   "id": "SC-30",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 4,
-   "title": "Done parent tickets with open children",
-   "dont": "A parent ticket's status implying its children's.",
-   "why": "Parents like ENG-2072 / ZOM-457 are Done, but their children are still open.",
-   "safer": "Grade each child on its own state."
-  },
-  {
-   "id": "SC-31",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 4,
-   "title": "Live-ops weekend outage dates and events",
-   "dont": "The live-ops weekend outage end date or affected events.",
-   "why": "Confluence pages say 'no recorded end', River Rush missed weekends, Streak Fever shipped April, but LIVE_EVENT_PERFORMANCE shows recovery by ~Jul 25, River Rush Mon/Wed/Fri only, Streak Fever runs from Mar 1.",
-   "safer": "Measure only from the degraded rows in LIVE_EVENT_PERFORMANCE."
-  },
-  {
-   "id": "SC-32",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 4,
-   "title": "'In Review' tickets with completion dates",
-   "dont": "'In Review' tickets as open or done.",
-   "why": "Their state is In Review, but all 12 carry completed_at."
-  },
-  {
-   "id": "SC-33",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 4,
-   "title": "Investor sheet lists Acterra twice",
-   "dont": "Counts of firms in the investor sheet.",
-   "why": "Acterra is listed twice (No. 71 and 86), but it is one firm (also Treo vs Treeo spelling)."
-  },
-  {
-   "id": "SC-34",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 4,
-   "title": "Investor sheet row 82: Superplay vs Supercell",
-   "dont": "Investor sheet row No. 82.",
-   "why": "The row is labeled 'Superplay', but its contents are Leonard's Supercell outreach."
-  },
-  {
-   "id": "SC-35",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 4,
-   "title": "P&L workbook month headers mislabeled",
-   "dont": "Month columns in the P&L workbooks.",
-   "why": "Salary/Costs tab headers carry wrong years (2025 columns read 2024), but the Cash P&L tab labels the same columns correctly; Gross Margin and Ending Balance formulas are also broken.",
-   "safer": "Pick columns by position or the Cash P&L tab."
-  },
-  {
-   "id": "SC-36",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 4,
-   "title": "Victor Barnes still on invites and channels",
-   "dont": "Invite/share lists built from channel or calendar membership.",
-   "why": "Victor Barnes is still in #god-gameart, recurring invites and owns EPI-4, but he left in April 2025."
-  },
-  {
-   "id": "SC-37",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 4,
-   "title": "Crash-by-level comment vs the rows",
-   "dont": "A ZM3D crash-by-level split.",
-   "why": "The CLIENT_ERROR_EVENTS comment says ~82% of crashes are at levels 3-5, but the rows put ~11% there."
-  },
-  {
-   "id": "SC-38",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 3,
-   "title": "Season Pass ship date and analytics",
-   "dont": "Season Pass ship date or analytics status.",
-   "why": "The spec says production Sep 22-29 and events are tagged, but PR #438 shipped in builds before that window and ZOM-552 analytics is still In Progress.",
-   "safer": "Avoid ZOM-529 (it only exists in injected SQL)."
-  },
-  {
-   "id": "SC-39",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Singular plan: quarterly or two installments",
-   "dont": "The Singular payment plan from the Aug 28 exec sync.",
-   "why": "The Aug 28 exec sync says 2 x $12.5K, but Singular's email, Slack and the Sep 26 $6,250 wire say quarterly."
-  },
-  {
-   "id": "SC-40",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "July board meeting date: 14 vs 16",
-   "dont": "The July 2025 board meeting date from the email body.",
-   "why": "The body says 'July 14, Wednesday', but subject and calendar say Wednesday July 16.",
-   "safer": "Accept July 16."
-  },
-  {
-   "id": "SC-41",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "ENG-2366 cited before it existed",
-   "dont": "When ENG-2366 was documented.",
-   "why": "The Release Checklist (Jul 26 08:50Z) cites ENG-2366, but ENG-2366 was created 13 hours later.",
-   "safer": "Its content is fine to use."
-  },
-  {
-   "id": "SC-42",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Node kickoff date: Sept 22 vs 23",
-   "dont": "The Node kickoff date.",
-   "why": "Node's invoice note says the kickoff was Sept 22 (a Sunday), but the calendar has it Mon Sept 23, 2024.",
-   "safer": "Use the invoiced $1,428.57 as stated."
-  },
-  {
-   "id": "SC-43",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 3,
-   "title": "Simon's Aug-Sep 2024 pay",
-   "dont": "What Simon was owed/paid for Aug-Sep 2024.",
-   "why": "The P&L shows $0, but Slack shows 10 August hours entered in Deel; Simon has no PAYROLL_ROSTER row."
-  },
-  {
-   "id": "SC-44",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Tutorial step events listed but empty",
-   "dont": "A tutorial funnel from Snowflake.",
-   "why": "The SESSION_LEVEL_EVENTS comment lists tutorial_step events, but there are 0 such rows."
-  },
-  {
-   "id": "SC-45",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 3,
-   "title": "Confluence backend pages vs the code",
-   "dont": "Backend deploy/migration/health-check details from Confluence.",
-   "why": "The pages say migrations don't run on boot, /healthz, check.yml existed in March, but the repos run migrations on boot, use /health, and check.yml came later.",
-   "safer": "Read the code instead."
-  },
-  {
-   "id": "SC-46",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "HEADCOUNT comment says 12, rows say 15",
-   "dont": "Total people at Sep 2025 from the HEADCOUNT table comment.",
-   "why": "The HEADCOUNT comment says ALL PEOPLE is 12, but 15 rows are active (12 + 3 founders)."
-  },
-  {
-   "id": "SC-47",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Weekly Quests status and incident timeline",
-   "dont": "Weekly Quests status or the Nov 2024 quest incident timeline.",
-   "why": "The live-ops calendar still says 'Failed Nov 2024' and the postmortem dates the fix Nov 18, but the playbook says fixed, Slack shows the fix on Nov 15, and code types differ."
-  },
-  {
-   "id": "SC-48",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 3,
-   "title": "'Pitch Sep 25' deck date",
-   "dont": "The date of the 'Pitch Sep 25' deck.",
-   "why": "Drive says it was created 2025-07-29, but it contains the $2.5M ask and AUG 25 metrics from late August.",
-   "safer": "Date the ask from the Aug 28 sync."
-  },
-  {
-   "id": "SC-49",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Founder count and Frederick's role",
-   "dont": "Founder counts or Frederick's founder status.",
-   "why": "The persona roster lists 4 co-founders incl. Frederick, but Snowflake has 3 founders and books Frederick as non-founder 'Commercial Lead'."
-  },
-  {
-   "id": "SC-50",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Bot comment authors: Organization vs Bot",
-   "dont": "Which GitHub account posted a bot comment.",
-   "why": "Comments are by 'Organization' users, but matching timeline events are by separate 'Bot' users.",
-   "safer": "Refer to 'CodeRabbit' by content."
-  },
-  {
-   "id": "SC-51",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Node Google Ads link: linked or pending",
-   "dont": "The Node Google Ads link status.",
-   "why": "An 08:04 email says the account 'is now linked', but an 08:06 email says the link request is 'pending'."
-  },
-  {
-   "id": "SC-52",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Backend PR #79 open but already merged",
-   "dont": "Whether game-of-dominoes-backend PR #79 shipped.",
-   "why": "The PR is open and unmerged, but its head commit is already main's head."
-  },
-  {
-   "id": "SC-53",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 2,
-   "title": "One player token used for two players",
-   "dont": "Player identity or counts from [IDENTIFIER_9782].",
-   "why": "#live-incidents uses the token for 'another player', but it is the same token as the earlier player, so the hidden names merged two people."
-  },
-  {
-   "id": "SC-54",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Frederick paid after his last paycheck",
-   "dont": "Frederick's pay after May 2025 in the ledger.",
-   "why": "Leonard says May 2025 is his last paycheck (then $1), but the ledger pays him $3.3-3.9K a month through Sep."
-  },
-  {
-   "id": "SC-55",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Mattel RFP deadline: November 31",
-   "dont": "An exact deadline from the Mattel RFP.",
-   "why": "The RFP says 'November 31, 2025', but that date doesn't exist.",
-   "safer": "Accept 'end of November 2025'."
-  },
-  {
-   "id": "SC-56",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Commit title case: GitHub vs #builds",
-   "dont": "Exact-case commit title matches between GitHub and #builds.",
-   "why": "#builds shows titles in one case, but GitHub has different case/apostrophes (~478 lines).",
-   "safer": "Match by SHA/PR number."
-  },
-  {
-   "id": "SC-57",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 1,
-   "title": "#zm-collect-win archived but still active",
-   "dont": "Posting in #zm-collect-win.",
-   "why": "channels.json says it is archived, but there is no archive event and people posted until Sep 30."
-  },
-  {
-   "id": "SC-58",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 1,
-   "title": "ZM3D monster roster and boss rules",
-   "dont": "The ZM3D monster roster or boss rules.",
-   "why": "The Confluence GDD has the old roster (Punk, etc.) and a tray-fill boss end, but Robert's July Slack roster and the Docs boss GDD differ."
-  },
-  {
-   "id": "SC-59",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 1,
-   "title": "Country of early adjoe installs",
-   "dont": "The country of early adjoe installs (Apr 11-16).",
-   "why": "Slack says they came almost all from Canada, but Snowflake codes every adjoe install US."
-  },
-  {
-   "id": "SC-60",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Josh Dempsey identity mix-up",
-   "dont": "'Josh Dempsey' as a person to DM/assign.",
-   "why": "Named Josh Dempsey accounts are idle, but the work sits under EMPLOYEE_0032 (and Gmail's Josh is Solsten's sales director).",
-   "safer": "Use EMPLOYEE_0032."
-  },
-  {
-   "id": "SC-61",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 1,
-   "title": "ENG-2255 owner: Brian or Samuel",
-   "dont": "Who owns Linear ENG-2255.",
-   "why": "Linear says Brian, but Brian says he assigned it to Samuel, and the unfurl shows Samuel."
-  },
-  {
-   "id": "SC-62",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Reward import: hourly or every 5 minutes",
-   "dont": "The reward-import cadence.",
-   "why": "The live-ops calendar says hourly in prod, but the CDK stack and Douglas's Sep 8 DM say every 5 minutes."
-  },
-  {
-   "id": "SC-63",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Griffin pro-rata range math",
-   "dont": "A Griffin pro-rata dollar figure from the Aug 28 sync.",
-   "why": "The Aug 28 sync says ~$545K-$1.2M, but that range fits a $2M raise, not the $2.5M ask in the same note."
-  },
-  {
-   "id": "SC-64",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Node Media's two addresses",
-   "dont": "Node Media's address on its invoices.",
-   "why": "Invoice 1158 says La Jolla, CA, but invoice 1168 says Miami, FL."
-  },
-  {
-   "id": "SC-65",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 1,
-   "title": "ZM average playtime: 18 vs 37 min",
-   "dont": "ZM average playtime.",
-   "why": "Leonard says ~18 min (30 with Variant C), but PLAYER_DAILY_PROGRESS means are 37-40 min (only the median is ~17).",
-   "safer": "Define the measure and accept either."
-  },
-  {
-   "id": "SC-66",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Closed analytics AWS account still active",
-   "dont": "Whether the analytics AWS account is live.",
-   "why": "AWS mails say it was permanently closed (Aug 21), but Lambda notices keep arriving and Confluence/config still treat it as live."
-  },
-  {
-   "id": "SC-67",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 0,
-   "title": "Build #1621 post lists #1620",
-   "dont": "Which build contained PR #439, from the #builds post.",
-   "why": "The #builds post is headed #1621, but its change list says #1620."
-  },
-  {
-   "id": "SC-68",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 0,
-   "title": "Boss Arena on prod before its code",
-   "dont": "When Boss Arena reached prod.",
-   "why": "Douglas's Aug 25 self-DM runs BossArena on prod, but the first BossArena commit is Sep 1."
-  },
-  {
-   "id": "SC-69",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 0,
-   "title": "April 2025 BigQuery cost: 123.47 vs 126",
-   "dont": "The exact April 2025 BigQuery cost.",
-   "why": "The receipt says $123.47, but the July P&L says 126.",
-   "safer": "Use the receipt."
-  },
-  {
-   "id": "SC-70",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 0,
-   "title": "Slack timezones all Los Angeles",
-   "dont": "A person's timezone from Slack.",
-   "why": "Slack lists everyone as America/Los_Angeles, but calendars show real zones (Istanbul, El Salvador, UTC+3...).",
-   "safer": "Use the calendar zone, non-decisively."
-  },
-  {
-   "id": "SC-71",
-   "universe": "synthcut",
-   "level": "watch",
-   "fails": 0,
-   "title": "ZOM-471 priority: high vs Medium",
-   "dont": "ZOM-471's priority from the Linear-bot post.",
-   "why": "The Linear-bot post says 'high priority', but Linear says Medium (never updated)."
-  },
-  {
-   "id": "SC-72",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 0,
-   "title": "Python 3.9 end-of-life date in the future",
-   "dont": "The Python 3.9 EOL as already passed.",
-   "why": "AWS notices say EOL was 'reached on October 30, 2025', but that is after the Oct 1 clock.",
-   "safer": "Use the Lambda deprecation dates."
-  },
-  {
-   "id": "SC-73",
-   "universe": "synthcut",
-   "level": "avoid",
-   "fails": 0,
-   "title": "Monthly burn in pitch text",
-   "dont": "A monthly burn figure from pitch text.",
-   "why": "Leonard's pitches say ~$100K/month, but he also says $55K and CASH_BALANCE says ~$58K."
-  },
-  {
-   "id": "NB-1",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 37,
-   "title": "Slack channel access after Feb 11",
-   "dont": "Who can read a Slack channel after 2026-02-11 20:40 UTC, or injected posts by someone in a channel they left.",
-   "why": "Julia, Marcus, Owen, Oliver, Martin, Claire and Brian leave their channels on Feb 11 and Leonard makes them single-channel guests, but channels.json still lists them as members.",
-   "safer": "Use #prototype, their DMs, or anything before Feb 11."
-  },
-  {
-   "id": "NB-2",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 9,
-   "title": "P&L forecast sheet costs vs Snowflake",
-   "dont": "Monthly AWS, hosting, Unity licence, UA or salary costs from the \"P&L and forecast - Jan 2026\" sheet.",
-   "why": "The sheet shows AWS = 0 and Jan salaries of $17,000, but Snowflake has AWS at $1,485–$2,745 every month, Jan salaries of $9,895.88 and all SaaS at $786.",
-   "safer": "Use the vendor's own invoice or receipt."
-  },
-  {
-   "id": "NB-3",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 8,
-   "title": "Cash at Dec 31 and Jan 31",
-   "dont": "Cash on Dec 31, 2025 or Jan 31, 2026 from CASH_BALANCE, Leonard's email or the P&L sheet.",
-   "why": "CASH_BALANCE says $25,031 for Dec 31, but Leonard's email and the P&L sheet say about $52,686. For Jan 31 Snowflake says $8,096 and the sheet $1,653.84."
-  },
-  {
-   "id": "NB-4",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 7,
-   "title": "February 2026 payments: paid or only accrued",
-   "dont": "Whether a February 2026 payment was made (Sunset $11,700, legal $780, AWS and others), from FINANCE_LEDGER.",
-   "why": "The ledger books them as cash out, but MONTHLY_BURN says February was only accrued and never closed, and Sunset's own email says its payment is still due."
-  },
-  {
-   "id": "NB-5",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 7,
-   "title": "Helpshift effective date: February 29, 2025",
-   "dont": "Helpshift's effective cancellation date from its acknowledgement email, or asks to \"quote the vendor's exact date\".",
-   "why": "Helpshift's reply says \"effective February 29,2025\", a date that doesn't exist and is in the wrong year; Leonard had asked to stop at the end of the current billing cycle in Feb 2026.",
-   "safer": "Grade only that Helpshift agreed to cancel."
-  },
-  {
-   "id": "NB-6",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 7,
-   "title": "Slack messages after Feb 13 10:03 UTC",
-   "dont": "Slack messages from Feb 13 after 10:03 UTC.",
-   "why": "The Slack export stops at 10:03 UTC on Feb 13, but two threads (BoomBit in C09SWTHEMEW, the #prototype \"common rarity\" thread) and three file uploads point to later messages that don't exist."
-  },
-  {
-   "id": "NB-7",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 7,
-   "title": "Combo Fighter levels past 35",
-   "dont": "How far Combo Fighter players got, or level funnels, from the warehouse.",
-   "why": "The warehouse has hundreds of level 36–438 events from Dec 28 on, but the GDD and Robert (Feb 2) say players can't go past level 35."
-  },
-  {
-   "id": "NB-8",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 6,
-   "title": "Helpshift payments left: $150×10 or ×8",
-   "dont": "How many Helpshift payments are left, or \"Leonard's latest count\", from #winddown or #executives.",
-   "why": "On Feb 9 in #winddown Leonard says \"we owe Helpshift $150*10 = $1500\", but on Feb 10 in #executives he writes \"$150*8 months\".",
-   "safer": "Grade only that Helpshift agreed to cancel."
-  },
-  {
-   "id": "NB-9",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 5,
-   "title": "Combo Fighter on Google Play",
-   "dont": "Whether Combo Fighter is on Google Play, or its Android players.",
-   "why": "Robert says \"we aren't official on google\", but Snowflake has 206 Combo Fighter Android players and Play Store reviews."
-  },
-  {
-   "id": "NB-10",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 4,
-   "title": "CASH_BALANCE burn column comment",
-   "dont": "The CASH_BALANCE.monthly_net_burn column comment (October 2025 payroll and headcount, \"the UA row omits wires\").",
-   "why": "The comment says October 2025 payroll was $32,172 for 9 people and the UA row misses $46,201.50, but the data shows $39,292.02 for 13 people and the adjoe wires are already counted."
-  },
-  {
-   "id": "NB-11",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 4,
-   "title": "Combo Fighter GDD is out of date",
-   "dont": "Combo Fighter ads, monetization or \"parked\" status taken from the Combo Fighter GDD in Confluence.",
-   "why": "The GDD says the game \"remains parked\" and ads are \"outside MVP scope\", but Slack shows version 1.0.91 with in-app purchases (Feb 6) and interstitial ads turned on (Feb 12)."
-  },
-  {
-   "id": "NB-12",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Vendor names hidden behind tokens",
-   "dont": "A vendor or tool that a record names only as [PERSON_NAME_…] or [USERNAME_…], such as Bizxpress's subject line or the Helpshift row in the Task List.",
-   "why": "Records like \"cursor and [PERSON_NAME_20852]\" replace the vendor's name with a token while other records spell it out, so nobody can tell they mean the same vendor.",
-   "safer": "Use a record that spells out the name."
-  },
-  {
-   "id": "NB-13",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Exact GitHub branch names",
-   "dont": "An exact GitHub branch name.",
-   "why": "The branches list says marcus.bennett/…, but PRs and Slack say Marcus/….",
-   "safer": "If you need one, accept both forms."
-  },
-  {
-   "id": "NB-14",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 3,
-   "title": "ENG-2403/ENG-2404 checklists vs child tickets",
-   "dont": "The ENG-2403 and ENG-2404 checklists in Linear.",
-   "why": "They tick items whose tickets are still in PR or Validation, and leave Done items unticked.",
-   "safer": "Use the child tickets' own states."
-  },
-  {
-   "id": "NB-15",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Employee or contractor",
-   "dont": "Whether someone was an employee or a contractor, from PAYROLL_ROSTER.",
-   "why": "PAYROLL_ROSTER marks most people full_time, but Leonard says \"no US employees, only international contractors\" and the termination letters say \"independent contractor\"."
-  },
-  {
-   "id": "NB-16",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Domino Delights database: Aurora or DynamoDB",
-   "dont": "Which database Domino Delights runs on, from Confluence.",
-   "why": "One Confluence page says Aurora PostgreSQL is the primary datastore; another says Domino Delights runs on DynamoDB."
-  },
-  {
-   "id": "NB-17",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 3,
-   "title": "Domino Delights installs in Jan–Feb 2026",
-   "dont": "Domino Delights paid, Brazil or worldwide installs in Jan–Feb 2026, from the warehouse.",
-   "why": "BoomBit says the Brazil test went live, but Snowflake has only organic installs and zero Brazil installs ever."
-  },
-  {
-   "id": "NB-18",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Domino Delights September 2025 installs",
-   "dont": "Domino Delights installs in September 2025, or adjoe credits for that month.",
-   "why": "Slack says about 450 installs and adjoe turned on Sep 1, but Snowflake has zero Domino Delights installs that month."
-  },
-  {
-   "id": "NB-19",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Unity Ads spend is $0 in the warehouse",
-   "dont": "Unity Ads dollar amounts from AD_SPEND_DAILY.",
-   "why": "AD_SPEND_DAILY shows $0 on every Unity row, but Gmail has Unity Ads receipts and a $1,000 prepayment."
-  },
-  {
-   "id": "NB-20",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Board marketing figure: $150K or $170K",
-   "dont": "What marketing figure the Board was told.",
-   "why": "The board email body says about $150K, but the attached deck and the Slack drafts say $170K."
-  },
-  {
-   "id": "NB-21",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 2,
-   "title": "Review app versions vs Slack builds",
-   "dont": "Joining review or warehouse app versions to Slack build numbers.",
-   "why": "ZM3D reviews say 0.1.601/0.1.688 while Slack says 0.3.x, and Domino Delights reviews say 0.3.104 while Slack says 0.3.305."
-  },
-  {
-   "id": "NB-22",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Contractor letter 00016874 termination date",
-   "dont": "A termination date from contractor letter 00016874.",
-   "why": "It says January 31, 2025, but the sibling letters sent minutes later say January 31, 2026."
-  },
-  {
-   "id": "NB-23",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Singular invoice INVSINC22671 has two totals",
-   "dont": "A Singular \"as billed\" total from invoice INVSINC22671.",
-   "why": "The invoice exists twice with the same date: once for $25,000 and once for $6,250."
-  },
-  {
-   "id": "NB-24",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Linear has no comments or links",
-   "dont": "What a base Linear comment said, or missing ticket links.",
-   "why": "The Linear export has zero comments and zero links, but Slack and Gmail refer to comments on tickets."
-  },
-  {
-   "id": "NB-25",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Domino Delights store history in 2024 roadmap",
-   "dont": "Domino Delights' store history from the 2024 roadmap page in Confluence.",
-   "why": "The page says Domino Delights shipped as \"Puzzles vs Zombies\", but that was Zombie Match 3D."
-  },
-  {
-   "id": "NB-26",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Combo Fighter sales: none or two",
-   "dont": "Whether Combo Fighter sold anything.",
-   "why": "The QA runbook says no purchase was ever recorded, but Robert says \"2 people bought rotation pack\"."
-  },
-  {
-   "id": "NB-27",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 1,
-   "title": "Quest auto-deploy: on or off",
-   "dont": "Whether the quest auto-deploy is on, from the Quest System postmortem.",
-   "why": "The postmortem body says the 8-hour auto-deploy \"was left running\", but its page comment says auto-deploy \"stays off\" until fixes ship."
-  },
-  {
-   "id": "NB-28",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 1,
-   "title": "ZM3D Meta campaign end date",
-   "dont": "The end date of the ZM3D Meta campaign.",
-   "why": "Leonard turned it off on Nov 3 at 03:13 UTC, but Snowflake still has $246.18 of spend dated Nov 3."
-  },
-  {
-   "id": "NB-29",
-   "universe": "normal",
-   "level": "watch",
-   "fails": 1,
-   "title": "Shutdown decision date: Feb 9 or 10",
-   "dont": "The shutdown decision date as the start of a time window.",
-   "why": "On Feb 9 in #executives Leonard says \"we finalized the decision to shut down\", but on Feb 11 in #leapblock he says \"We didn't finalize this decision until yesterday\"."
-  },
-  {
-   "id": "NB-30",
-   "universe": "normal",
-   "level": "watch",
-   "fails": 1,
-   "title": "Endless Monster Mode: live or removed",
-   "dont": "Whether Endless Monster Mode (or Infinite Boss mode) is live, from the Live-Ops calendar.",
-   "why": "The Live-Ops calendar says it is live, but Leonard said game modes are being removed (ZOM-642, still in Validation)."
-  },
-  {
-   "id": "NB-31",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 0,
-   "title": "Slack DM member lists",
-   "dont": "Who had access, argued from Slack DM or group-DM member lists.",
-   "why": "Most 1:1 DMs list 3–5 members, and many group-DM names don't match their members."
-  },
-  {
-   "id": "NB-32",
-   "universe": "normal",
-   "level": "avoid",
-   "fails": 0,
-   "title": "Douglas's end date: October or December",
-   "dont": "Douglas's end date.",
-   "why": "The AWS Infrastructure Guide says he departed in Oct 2025, but the ledger pays him through Dec 31, 2025."
-  },
-  {
-   "id": "NB-33",
-   "universe": "normal",
-   "level": "watch",
-   "fails": 0,
-   "title": "December DAU drop from 70 to 24",
-   "dont": "Leonard's \"DAU dropped from 70 to 24\".",
-   "why": "Leonard says DAU dropped from 70 to 24, but DAILY_ACTIVE_USERS shows 68 and 64 for Dec 26 and 27."
-  }
- ]
+  "verified": "2026-10-30",
+  "issues": [
+    {
+      "id": "K-01",
+      "universe": "sonorra",
+      "title": "Naomi Louisiana counsel note",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Whether Naomi holds the 2025-03-10 Louisiana counsel note",
+      "why": "Naomi's mailbox holds the 2025-03-10 Louisiana counsel email + statute PDF, while S05, her Slack, MOB-104, and 2026-08-06 counsel mail say she was never on it.",
+      "safer": "Use the 2026 notes sent to Priya and Sana, or stay off whether Naomi saw the 2025-03-10 note unless settled by SQL."
+    },
+    {
+      "id": "K-02",
+      "universe": "sonorra",
+      "title": "Information-boundary leaks",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Persona ignorance claims where Slack or Gmail leaked the fact",
+      "why": "Anh's two does_not_know facts appear in Slack channels he belongs to; Yusuf's Slack holds 3 private DMs he is not listed in; leaks to Naomi, Priya, Marisol, Rafa, Delia, Colin remain.",
+      "safer": "Check actual channel membership and mailbox copies directly rather than relying on universe.yaml does_not_know."
+    },
+    {
+      "id": "K-03",
+      "universe": "sonorra",
+      "title": "Records citing later events or Linear keys",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Chronology or creation-order inferences on pre-dated citations",
+      "why": "452 Linear-key citations in files and 98 in services predate the cited Linear issue; early mentions exist for the Aug 20 load test, Aug 8 incident/postmortem, ENG-588..592, ENG-611, RFC-014 r3.",
+      "safer": "Do not grade when an event was first known based on cross-references in older docs."
+    },
+    {
+      "id": "K-05",
+      "universe": "sonorra",
+      "title": "File modified times on /mnt/files",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Grading file modified timestamps against document dates",
+      "why": "~157 files in /mnt/files have filesystem modified times earlier than the dates inside their text, and 12 rows sit exactly at 2026-08-24T16:41:00-05:00.",
+      "safer": "Grade document content dates and carrying email timestamps, not filesystem mtime."
+    },
+    {
+      "id": "K-07",
+      "universe": "sonorra",
+      "title": "Bellweather settlement & $412 correction",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Exact first-report date or commission rate for Bellweather",
+      "why": "$412 correction appears in Stripe in 2025/Apr 2026 before 'first reported'; July 8 paid T+2 vs T+5; 1.0% vs 1.2% commission; QBR/recon dates & edge-case counts conflict.",
+      "safer": "Scope any Bellweather ask strictly to specific named Stripe payout/charge IDs rather than cross-doc narrative timing."
+    },
+    {
+      "id": "K-08",
+      "universe": "sonorra",
+      "title": "Cactus Bloom -$4,200 make-good sign",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Whether Cactus Bloom make-good is a credit or -$4,200 payout",
+      "why": "CRM, FinTrack, and QuickBooks record it as a credit, while Stripe has a -$4,200 payout and the statement nets the organizer down.",
+      "safer": "Avoid grading the sign of the Cactus Bloom make-good across systems without clarifying the exact system of record."
+    },
+    {
+      "id": "K-09",
+      "universe": "sonorra",
+      "title": "Stripe payouts vs finance statements",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Reconciling payout registers, 120 dispute notes, or 7 stale subscriptions to Stripe",
+      "why": "11 statement payout IDs are missing from Stripe; 120/122 dispute notes have no Stripe dispute; 7 active subscriptions stopped invoicing in Jan 2026; payout register has 4 rows off Stripe.",
+      "safer": "Build Stripe tasks only on verified live Stripe IDs (`stripe.json`), not unverified statement totals."
+    },
+    {
+      "id": "K-10",
+      "universe": "sonorra",
+      "title": "Spend approval & $5,000 signature line",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Who holds the $5,000 approval line or countersigning rule",
+      "why": "Two conflicting answers exist on who holds the $5,000 spend approval line, and one Notion note reads as ruling out countersigning.",
+      "safer": "Settle the specific approval threshold explicitly via injection if your scenario depends on it."
+    },
+    {
+      "id": "K-11",
+      "universe": "sonorra",
+      "title": "Vendor PDFs (PagerDuty, Datadog, AWS)",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Vendor PDF seat counts, MSA numbering, or invoice dates",
+      "why": "PagerDuty order form & 2025 PDFs print 4 seats/$720/Sep 30 term; Datadog quote refs are stubs; AWS IEM scope and PagerDuty invoice numbers have gaps.",
+      "safer": "Verify every vendor PDF claim word-for-word against the exact PDF in Universe_Sonorra/Users/."
+    },
+    {
+      "id": "K-12",
+      "universe": "sonorra",
+      "title": "Cost-centre workbooks vs QuickBooks",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Matching cost-centre XLSX account names or preclose Micah $4,800 row to QuickBooks",
+      "why": "Cost-centre XLSX account names are not QuickBooks accounts; preclose keeps a ghost $4,800 Micah row; BILL-5208 posted on 07-26.",
+      "safer": "Do not ask the agent to treat cost-centre spreadsheet account labels as QuickBooks chart-of-accounts names."
+    },
+    {
+      "id": "K-13",
+      "universe": "sonorra",
+      "title": "Personal finance & account 9946",
+      "level": "watch",
+      "fails": 0,
+      "dont": "Assuming housing/insurance expenses or unpaid corporate cards in FinTrack",
+      "why": "Yusuf's FinTrack shows ~96% to savings, no housing/insurance, texted spend missing from FinTrack, account 9946 frozen, corporate cards never paid.",
+      "safer": "Build FinTrack asks only on actual rows in fintrack.json or injected SQL."
+    },
+    {
+      "id": "K-14",
+      "universe": "sonorra",
+      "title": "Discovery attribution 29.4% timeline",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "When discovery attribution reached 29.4%",
+      "why": "Docs from Sep 2025\u2013Jun 2026 state 'Currently 29.4%', while dated captures climb from 24.6% and reach 29.4% only in Aug 2026.",
+      "safer": "Do not grade historical attribution percentages across Sep 2025\u2013Jun 2026 docs."
+    },
+    {
+      "id": "K-16",
+      "universe": "sonorra",
+      "title": "Branch protection & SOC 2 evidence",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Whether sonorra-core branch protection is enabled or bypassed",
+      "why": "GitHub shows all 10 repos protected, while a screenshot, an email, and a CSV say sonorra-core is unprotected; Northgate registers lack a bypass column.",
+      "safer": "Cite the specific source (GitHub export vs Request 04 CSV) or avoid sonorra-core branch-protection claims."
+    },
+    {
+      "id": "K-17",
+      "universe": "sonorra",
+      "title": "GitHub histories & RFC-014 PR numbers",
+      "level": "watch",
+      "fails": 0,
+      "dont": "Cross-repo RFC-014 revisions or mobile release numbering",
+      "why": "RFC-014 revisions sit in wrong repos, two mobile release schemes coexist, and some commit histories are imported.",
+      "safer": "Verify exact repo/PR/SHAs in github_hg4.json before citing."
+    },
+    {
+      "id": "K-18",
+      "universe": "sonorra",
+      "title": "Linear duplicate keys & self-keyed titles",
+      "level": "watch",
+      "fails": 0,
+      "dont": "Counting Linear tickets across storyline passes or empty Cycle 39",
+      "why": "Storylines duplicate across passes, Cycle 39 is nearly empty, labels vs label_ids disagree in spots, 51 titles retain self-keys.",
+      "safer": "Anchor Linear asks by exact issue keys (`ENG-...`) rather than broad title/count sweeps."
+    },
+    {
+      "id": "K-19",
+      "universe": "sonorra",
+      "title": "Derived weeklies & standups vs SOT",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Treating weekly digests or old standups as current Linear/GCal state",
+      "why": "676 of 1,902 weekly entries diverge from GCal; old standups/handoffs print stale owners, titles, or deleted keys.",
+      "safer": "Grade Linear/GCal directly as system of record rather than un-regenerated weekly summaries."
+    },
+    {
+      "id": "K-20",
+      "universe": "sonorra",
+      "title": "CRM 'Logged by' & missing engagement owners",
+      "level": "watch",
+      "fails": 0,
+      "dont": "CRM engagement ownership",
+      "why": "44 CRM bodies end with 'Logged by...' and engagements lack an owner field.",
+      "safer": "Do not require inferring CRM engagement owners from missing fields."
+    },
+    {
+      "id": "K-21",
+      "universe": "sonorra",
+      "title": "Calendar fillers & attendee-copy diffs",
+      "level": "watch",
+      "fails": 0,
+      "dont": "Recurring calendar series or QBR/board attendees",
+      "why": "No all-day/rrule events, 294 attendee-copy differences, QBR/board events lack attendees, Monday shown as office day.",
+      "safer": "Verify attendee presence on the acting persona's actual calendar events."
+    },
+    {
+      "id": "K-22",
+      "universe": "sonorra",
+      "title": "12 unresolved Linear keys & WSDL mismatch",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Citing the 12 non-existent Linear keys or BST-341 WSDL operations",
+      "why": "12 cited Linear keys do not exist in linear.json; bypass finding has two keys; BST-341 names operations absent from WSDLs.",
+      "safer": "Confirm every cited Linear key exists in linear.json before including it in prompt/rubric."
+    },
+    {
+      "id": "K-24",
+      "universe": "sonorra",
+      "title": "universe.yaml departments & footprint counts",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Using universe.yaml department='engineering' or footprint totals",
+      "why": "All 15 personas in universe.yaml list department='engineering'; 18 phone mismatches and 8 Marguerites exist in contacts; footprints are off by 1\u201312.",
+      "safer": "Use canonical job titles from roster.json / contacts.json and exact record counts from service exports."
+    },
+    {
+      "id": "K-27",
+      "universe": "sonorra",
+      "title": "Micah Trent engagement & BILL-9314 timing",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Micah Trent SOW dates vs BILL-9314 or June SMS",
+      "why": "Measurements predate SOW; BILL-9314 precedes the engagement; SOW PDFs omit term; June SMS copy the August exchange.",
+      "safer": "Keep Micah Trent asks focused on specific invoice/code artifacts rather than engagement timeline reconciliation."
+    },
+    {
+      "id": "K-29",
+      "universe": "sonorra",
+      "title": "Packaging & current_user / leftover filenames",
+      "level": "watch",
+      "fails": 0,
+      "dont": "Expecting labels.json or universe overview docs in service exports",
+      "why": "gmail/labels.json is empty; DMs are stored as named channels; service filenames use legacy suffixes (notion_fixed, github_hg4).",
+      "safer": "Use Evals/UNIVERSE_MAP.md for canonical filenames."
+    },
+    {
+      "id": "V12-C1",
+      "universe": "sonorra",
+      "title": "Refund run 3,140 vs Stripe 62 duplicate refunds",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Expecting 3,140 refund rows in Stripe",
+      "why": "Incident docs state 3,140 refunds while Stripe intentionally holds 62 duplicate refunds (cannot mint 3,140 without a second ledger).",
+      "safer": "Treat 3,140 as the documented incident report figure and 62 as the Stripe export figure."
+    },
+    {
+      "id": "V12-C2",
+      "universe": "sonorra",
+      "title": "Dispute window 160 vs Stripe 2 disputes",
+      "level": "avoid",
+      "fails": 1,
+      "dont": "Expecting 160 dispute rows in Stripe",
+      "why": "Docs state 160 disputes in the window while Stripe intentionally holds 2 disputes.",
+      "safer": "Distinguish documented dispute-window counts from live Stripe dispute records."
+    }
+  ]
 }

@@ -319,7 +319,7 @@ function lockedProofHtml(p, opts = {}) {
   const todo = (p.locked && p.locked.todo) || [];
   return `<div class="proof locked">
     <div class="head"><div class="left">
-      <div class="brandline">Original Conference Eval Portal</div>
+      <div class="brandline">Geranium Mambo Eval Portal</div>
       <div class="verdict"><span class="vbadge ${esc(p.verdict)}">${esc(p.verdict)}</span>${p.score != null ? `<span>Score ${esc(p.score)}</span>` : ""}</div>
       <div class="sub">/${esc(p.stage)} · ${esc(stage)} review</div></div></div>
     <div class="lockband"><div class="lb-ic">🔒</div><div><div class="k">Locked · not for upload</div>
@@ -409,7 +409,7 @@ function proofHtml(p, opts = {}) {
   return `<div class="proof">
     <div class="head">
       <div class="left">
-        <div class="brandline">Original Conference Eval Portal</div>
+        <div class="brandline">Geranium Mambo Eval Portal</div>
         <div class="verdict"><span class="vbadge ${esc(p.verdict)}">${esc(p.verdict)}</span>${p.score != null ? `<span>Score ${esc(p.score)}</span>` : ""}</div>
         <div class="sub">/${esc(p.stage)} · ${esc(stage)} review · ${esc(p.execution_status)}${opts.validity || ""}</div>
         ${p.checked_during ? `<div class="sub">Checked inside the /${esc(p.checked_during)} run · tokens and cost below are for that whole run</div>` : ""}
@@ -775,7 +775,7 @@ async function passImage(p, codeSize) {
     ctx.fillText(`⚠ ALSO SEND ${p.warn_later.map(s => "/" + s.toUpperCase()).join(", ")} AGAIN BEFORE YOU SUBMIT`, pad, top + 44);
     ctx.fillStyle = "#000000"; ctx.font = `24px ${sans}`; laterLines.forEach((l, i) => ctx.fillText(l, pad, top + 80 + i * 32));
   }
-  ctx.fillText(`Pass image from the Original Conference Eval Portal · issued ${fmtUTC(p.issued_at || p.finished_at)}`, pad, H - 34);
+  ctx.fillText(`Pass image from the Geranium Mambo Eval Portal · issued ${fmtUTC(p.issued_at || p.finished_at)}`, pad, H - 34);
   return canvas;
 }
 

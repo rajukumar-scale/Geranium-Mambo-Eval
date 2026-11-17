@@ -1,20 +1,10 @@
-**Plan your task before you write the prompt.**
+**Plan your Geranium Mambo task before writing the prompt.**
 
-Nearly half of recent /hardness runs were too easy. Two traps still beat Opus 5.5:
+1. **Pick Task Setup first** (Persona, Family, Constraint Count: `Low` 10+ or `High` 20+, no upper limit).
+2. **Respect Persona ACLs:** `Gmail`, `GCal`, `FinTrack` (Yusuf-only base), `Messaging` (6 personas have 0 SMS), and `Reminders` (Yusuf-only base) are strictly per-persona; Slack private/DMs are members-only; `Contacts`, `Linear`, `Notion`, `GitHub`, `QuickBooks`, `CRM`, `Stripe`, and `/mnt/files` are shared.
+3. **Design for S18 (Carbon + Opus):** Make sure traps can fail at least 2 of 3 Carbon runs on weight-5 IF criteria (`gap >= 5` or `carbon_score < 90`, `carbon_score <= best_opus_score`) while remaining solvable by Opus.
+4. **Check `Known data issues`** in the sidebar before grading a base-data contradiction (`K-01..K-29`, `V12-C1..C2`).
 
-- **A "done" that isn't:** the PR merged, but another service shows a missing part.
-- **A correction elsewhere:** GitHub shows an approval; the same person later withdraws it in Slack.
+Ask me anytime: *"Check my task idea against the hardness and tool-call guides."*
 
-Keep the trap in the data, not the prompt.
-
-Make each trap show up in **two places** in the answer: ask for the decision and its reason ("which ones, and why"), or let the deciding record change two items. A trap that changes only one line makes the baseline's failure-signature check fail.
-
-Build **at least 3 different kinds** of traps, including **a rule that changes a number** (a date window, an exclusion, a timezone). Don't rely on one big count as the main difficulty. Normal tasks need this most.
-
-Plan tool calls: Normal needs 50–100, Long-Horizon 100+. Count items, records per item and writes.
-
-Check **Known data issues** in the sidebar before building on a record.
-
-When you have an idea or a draft, ask me: “Check my task idea against the hardness and tool-call guides.”
-
-[Read the hardness guide](/?guide=hardness) · [Read the tool-call guide](/?guide=toolcalls) · [Read the failure patterns guide](/?guide=patterns)
+[Read the stumping guide](/?guide=hardness) · [Read the horizon guide](/?guide=toolcalls) · [Read the rubric & all-fail guide](/?guide=patterns)

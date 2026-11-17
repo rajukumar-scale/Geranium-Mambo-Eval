@@ -11,6 +11,7 @@ on top, so the eval rules and tools can't be edited by a run. local mode (dev)
 swaps them into one hardlinked workspace instead.
 """
 
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -370,3 +371,127 @@ def docker_mounts(attempt_id):
     for src, dst, mode in mounts:
         args += ["--mount", f"type=bind,source={src},target={dst}" + (",readonly" if mode == "ro" else "")]
     return args
+
+
+# ---- Geranium Mambo Task Setup (3 dropdowns -> 00_Task_Assigned_Inputs.md) -------
+
+TASK_SETUP_FAMILIES = (
+    "Enterprise ops & connectors",
+    "Data analysis & extraction",
+    "Document authoring & editing",
+    "Software & interactive builds",
+)
+TASK_SETUP_CONSTRAINTS = {
+    "Low": "Low (10+ constraints & 10+ rubric criteria; no upper limit)",
+    "High": "High (20+ constraints & 20+ rubric criteria; no upper limit)",
+}
+_ROSTER_CACHE = None
+
+
+def task_setup_personas():
+    global _ROSTER_CACHE
+    path = (config.EVAL_BASE_DIR / "Evals/references/persona/roster.json").resolve()
+    mtime = path.stat().st_mtime if path.is_file() else None
+    if _ROSTER_CACHE and _ROSTER_CACHE[0] == (path, mtime):
+        return _ROSTER_CACHE[1]
+    if not path.is_file():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    out = [{
+        "name": p["name"],
+        "email": p["email"],
+        "title": p.get("canonical_job_title") or p.get("universe_yaml_title") or "",
+    } for p in data.get("personas", []) if p.get("email")]
+    _ROSTER_CACHE = ((path, mtime), out)
+    return out
+
+
+def render_task_setup(persona, family, constraint_count):
+    title = f" ({persona['title']})" if persona.get("title") else ""
+    cc_text = TASK_SETUP_CONSTRAINTS[constraint_count]
+    return (
+        "# Task Assigned Inputs (Geranium Mambo · Sonorra v17)\n"
+        f"- **Persona:** {persona['name']}{title}\n"
+        f"- **Persona Email:** {persona['email']}\n"
+        "- **Universe Data:** Universe_Sonorra (Sonorra v17, Clock: 2026-08-24T16:41:00-05:00 America/Chicago / 2026-08-24 21:41 UTC)\n"
+        f"- **Family:** {family}\n"
+        f"- **Constraint Count:** {cc_text}\n"
+    )
+
+
+def read_task_setup(attempt_id):
+    entry = next((i for i in saved_inputs(attempt_id) if i["key"] == "task-details" and i.get("state") == "saved" and i.get("files")), None)
+    if not entry:
+        return None
+    path = _input_path(task_inputs(attempt_id).resolve(), entry["files"][0])
+    if not path:
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    email_m = re.search(r"(?im)^\s*(?:-\s*)?\**Persona Email\**\s*:\s*\**\s*([^\s*]+@[^\s*]+)", text)
+    persona_m = re.search(r"(?im)^\s*(?:-\s*)?\**Persona\**\s*:\s*\**\s*([^\n]+)", text)
+    family_m = re.search(r"(?im)^\s*(?:-\s*)?\**Family\**\s*:\s*\**\s*([^\n]+)", text)
+    cc_m = re.search(r"(?im)^\s*(?:-\s*)?\**Constraint Count\**\s*:\s*\**\s*(Low|High)\b", text)
+    if not email_m and not family_m and not cc_m:
+        return None
+    return {
+        "persona_email": email_m.group(1).strip() if email_m else "",
+        "persona": persona_m.group(1).strip() if persona_m else "",
+        "family": family_m.group(1).strip() if family_m else "",
+        "constraint_count": cc_m.group(1).strip() if cc_m else "",
+    }
+
+
+def _store_task_setup_local(attempt_id, content_bytes):
+    import tempfile
+    root = ensure_attempt(attempt_id)
+    dst_inputs = (root / "task_inputs").resolve()
+    tools_dir = (config.EVAL_BASE_DIR / "Evals" / "tools").resolve()
+    spec = importlib.util.spec_from_file_location("hg_store_input_portal", tools_dir / "hg_store_input.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with tempfile.TemporaryDirectory(prefix="gm-setup-") as tmp:
+        tmp_path = Path(tmp).resolve()
+        tmp_inputs = tmp_path / "Evals" / "task_inputs"
+        tmp_inputs.mkdir(parents=True)
+        for p in dst_inputs.iterdir():
+            if p.is_file():
+                shutil.copy2(p, tmp_inputs / p.name)
+        mod.REPOSITORY = tmp_path
+        mod.save_input("task-details", content=content_bytes, origin="portal_task_setup")
+        for fname in ("00_Task_Assigned_Inputs.md", "inputs.json"):
+            src_f = tmp_inputs / fname
+            if src_f.is_file():
+                shutil.copy2(src_f, dst_inputs / fname)
+
+
+async def save_task_setup(attempt_id, persona_email, family, constraint_count):
+    personas = {p["email"].lower(): p for p in task_setup_personas()}
+    persona = personas.get((persona_email or "").strip().lower())
+    if not persona:
+        raise ValueError("Select a valid Sonorra persona.")
+    if family not in TASK_SETUP_FAMILIES:
+        raise ValueError("Select a valid Task Family.")
+    if constraint_count not in TASK_SETUP_CONSTRAINTS:
+        raise ValueError("Select Constraint Count: Low or High.")
+    text = render_task_setup(persona, family, constraint_count)
+    await asyncio.to_thread(thaw, attempt_id)
+    if config.RUNNER_MODE == "docker":
+        up = uploads_dir(attempt_id) / "_task_setup.md"
+        up.write_text(text, encoding="utf-8")
+        cmd = [
+            "docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}",
+            "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "-w", "/work", *docker_mounts(attempt_id),
+            "--entrypoint", "python3", config.RUNNER_IMAGE,
+            "Evals/tools/hg_store_input.py", "save", "task-details",
+            "--source", "Evals/task_inputs/_uploads/_task_setup.md",
+            "--origin", "portal_task_setup",
+        ]
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=120)
+        if proc.returncode != 0:
+            raise RuntimeError((err or out).decode(errors="replace")[-300:])
+    else:
+        await asyncio.to_thread(_store_task_setup_local, attempt_id, text.encode("utf-8"))
+    return read_task_setup(attempt_id)
+

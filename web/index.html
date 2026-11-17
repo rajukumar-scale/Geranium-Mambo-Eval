@@ -6,7 +6,7 @@
   <link rel="icon" href="/static/img/icon.svg" type="image/svg+xml">
   <link rel="icon" href="/static/img/icon-32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
-  <title>Original Conference Eval Portal</title>
+  <title>Geranium Mambo Eval Portal</title>
   <script>document.documentElement.dataset.theme = localStorage.getItem("evp_theme") === "dark" ? "dark" : "light";</script>
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
@@ -16,7 +16,7 @@
   <div id="login" class="center hidden">
     <button class="ghost theme-float" data-theme-toggle></button>
     <form class="card" id="login-form" autocomplete="on">
-      <h1>Original Conference Eval Portal</h1>
+      <h1>Geranium Mambo Eval Portal</h1>
       <p class="muted">Run the evals on your task before you submit.</p>
       <div id="login-error" class="error hidden"></div>
       <div class="field">
@@ -42,7 +42,7 @@
     <button class="ghost theme-float" data-theme-toggle></button>
     <div class="card">
       <h1>Access disabled</h1>
-      <p class="muted" id="disabled-text">An admin has disabled your access to the Original Conference Eval Portal.</p>
+      <p class="muted" id="disabled-text">An admin has disabled your access to the Geranium Mambo Eval Portal.</p>
       <p class="muted" style="font-size:14px">Your chats and pass screens are kept. If you think this is a mistake, contact your project team.</p>
       <button id="disabled-out" style="width:100%">Sign out</button>
     </div>
@@ -51,12 +51,12 @@
   <div id="app" class="app hidden">
     <div class="topbar">
       <button class="ghost" id="menu" title="Menu">☰</button>
-      <div class="title">Original Conference Eval Portal</div>
+      <div class="title">Geranium Mambo Eval Portal</div>
       <div class="view-switch hidden" id="view-switch" role="group" aria-label="Switch page">
         <button type="button" class="on" data-view="chat">Chat view</button><button type="button" class="" data-view="admin">Admin</button><button type="button" class="hidden" data-view="cost">Cost</button></div>
       <span class="chip" id="chip-attempt"></span>
       <span class="chip" id="chip-task"></span>
-      <button type="button" class="chip date-chip hidden" id="chip-date" title="The task's date: which universe every review reads"></button>
+      <button type="button" class="chip date-chip hidden" id="chip-setup" title="Task Setup: Persona, Family, Constraint Count"></button>
       <span class="chip hidden" id="chip-broadcast"></span>
       <div class="spacer"></div>
       <span class="muted" id="limits" style="font-size:13px"></span>

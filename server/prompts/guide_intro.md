@@ -1,11 +1,7 @@
-<!-- The guide pop-up (server/plan.py, guide_intro). Shown before the first /prompt until the contributor has opened all
-three guides and pressed "I've read all three". Markdown; the three guide buttons are added below it by the page. -->
-**Please read these 3 guides before you start. This is really important.**
+**Please read these 3 guides before you start.**
 
-Most tasks that fail review fail for reasons these guides cover: the task is too easy for Opus, it has too few tool calls, or its traps all fail the same way.
+Most Geranium Mambo tasks that fail review fail for reasons covered here: missing Persona ACL boundaries, weak traps that don't stump Carbon on weight-5 IF criteria, compounded rubric criteria, or building on a known base-data contradiction in Sonorra v17.
 
-Reading them first saves you rounds of /prompt and /hardness later.
+**One rule for your SQL:** `01_Injection.sql` is optional (there is no changelog JSON). If your task uses injected data, everything you add must be in `01_Injection.sql` and pass static Postgres schema checks (`live_postgres.json`).
 
-**One rule for your env:** everything you add goes in your SQL. Don't add or edit data by hand in the env explorer. Before your final runs, redeploy the env from the base universe (never a snapshot) and apply only your final SQL: an old draft you ran earlier leaves its rows behind, and QC fails the task for data your SQL doesn't create.
-
-Open each one below. You can come back to them any time with the **Guide** button at the top right.
+Open each guide below. You can reopen them anytime from **Guide** in the top bar.

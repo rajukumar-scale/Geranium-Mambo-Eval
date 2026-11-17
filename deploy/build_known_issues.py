@@ -1,409 +1,151 @@
 #!/usr/bin/env python3
-"""Build server/known_issues.json, the chat page's "Known data issues" list, from the base-data review files, and
-server/guidelines/known_data_issues.md, the same list (same ids) in plain language for the chat assistant, which every
-review workspace gets at guidelines/known_data_issues.md (the plan note and the early guard read it).
+"""Build server/known_issues.json and server/guidelines/known_data_issues.md from Sonorra_known_issues.md."""
 
-    python3 deploy/build_known_issues.py ~/Downloads/known_broken_data_2026-10-30
-
-The folder holds what the 2026-10-30 review of 6,396 portal reports produced (both sides of every issue checked in the
-universe exports):
-  cb_list_synthcut.md      SC-1..SC-73, one contributor line each: "**SC-n** (N FAILs): Don't build a graded answer on
-                           <what>: <side A>, but <side B>. *Safe alternative:* <...>"
-  clusters_synthcut.json   per issue: fail_reports, reports, verification (VERIFIED / PARTIAL ...)
-  known_base_issues_normal.md + clusters_normal.json   NB-1..NB-33 (cb_list_normal.md has no ids and merges NB-5 with
-                           NB-8, so the normal wording lives in NB_TEXT below, taken from that list and the write-ups)
-
-FAIL counts and levels always come from the cluster files; the short titles and plain-language fixes are written here.
-A new review: point this at its folder, add titles for new ids (the script stops and names any it lacks), run it,
-and commit the JSON and the Markdown. The date in the folder name becomes the sidebar header's date (or pass --verified).
-"""
-
-import argparse
 import json
-import re
-import sys
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "server" / "known_issues.json"
-MD_OUT = Path(__file__).resolve().parent.parent / "server" / "guidelines" / "known_data_issues.md"
-# Universe -> task date label, in the order listed; the same labels as server/workspace.py UNIVERSE_DATES (a test checks).
-UNIVERSE_LABELS = {"synthcut": "Oct 1, 2025 (synth-cut)", "normal": "Feb 14, 2026 (normal)"}
-MAX_TITLE_WORDS = 8
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "server" / "known_issues.json"
+MD_OUT = ROOT / "server" / "guidelines" / "known_data_issues.md"
+VERIFIED = "2026-10-30"
 
-# ---- synth-cut (Oct 1, 2025) ------------------------------------------------------------------------------------
-SC_TITLES = {
-    "SC-1": "Domino Delights September 2025 installs",
-    "SC-2": "CASH_BALANCE burn column comment",
-    "SC-3": "Runway: investor letter vs CASH_BALANCE",
-    "SC-4": "adjoe payments: ledger vs bank wires",
-    "SC-5": "Victor Barnes paid after he left",
-    "SC-6": "Node CEO emails from an HG address",
-    "SC-7": "People who left channels still listed",
-    "SC-8": "ZOM-475 glass crash: fixed or not",
-    "SC-9": "Play Ventures: rejected or no reply",
-    "SC-10": "LVP meeting date: Sep 7 vs Sep 9",
-    "SC-11": "Unity spend is $0 in Snowflake",
-    "SC-12": "Meta spend missing from Snowflake",
-    "SC-13": "ZM3D beta date in Trello list name",
-    "SC-14": "Beta cards' two 'complete' flags disagree",
-    "SC-15": "ZOM-521 checklist ticked, children still open",
-    "SC-16": "Linear tickets still open after work shipped",
-    "SC-17": "Ad-revenue payouts per network don't match",
-    "SC-18": "PR #477: open or closed",
-    "SC-19": "Telemetry app versions vs Slack builds",
-    "SC-20": "Node Slack channel creation date",
-    "SC-21": "Jan 2025 Node wire missing from ledger",
-    "SC-22": "time_in_status_minutes runs past the clock",
-    "SC-23": "AppLovin spend dates and countries",
-    "SC-24": "Tim Steudler works for Mattel, not HG",
-    "SC-25": "PAYROLL_ROSTER vs who actually works there",
-    "SC-26": "Slack links to ENG-2367/2368/2373 don't exist",
-    "SC-27": "#god-bugs and #god-gameart archive state",
-    "SC-28": "Product OKRs page numbers vs Snowflake",
-    "SC-29": "MMP report times before the install",
-    "SC-30": "Done parent tickets with open children",
-    "SC-31": "Live-ops weekend outage dates and events",
-    "SC-32": "'In Review' tickets with completion dates",
-    "SC-33": "Investor sheet lists Acterra twice",
-    "SC-34": "Investor sheet row 82: Superplay vs Supercell",
-    "SC-35": "P&L workbook month headers mislabeled",
-    "SC-36": "Victor Barnes still on invites and channels",
-    "SC-37": "Crash-by-level comment vs the rows",
-    "SC-38": "Season Pass ship date and analytics",
-    "SC-39": "Singular plan: quarterly or two installments",
-    "SC-40": "July board meeting date: 14 vs 16",
-    "SC-41": "ENG-2366 cited before it existed",
-    "SC-42": "Node kickoff date: Sept 22 vs 23",
-    "SC-43": "Simon's Aug-Sep 2024 pay",
-    "SC-44": "Tutorial step events listed but empty",
-    "SC-45": "Confluence backend pages vs the code",
-    "SC-46": "HEADCOUNT comment says 12, rows say 15",
-    "SC-47": "Weekly Quests status and incident timeline",
-    "SC-48": "'Pitch Sep 25' deck date",
-    "SC-49": "Founder count and Frederick's role",
-    "SC-50": "Bot comment authors: Organization vs Bot",
-    "SC-51": "Node Google Ads link: linked or pending",
-    "SC-52": "Backend PR #79 open but already merged",
-    "SC-53": "One player token used for two players",
-    "SC-54": "Frederick paid after his last paycheck",
-    "SC-55": "Mattel RFP deadline: November 31",
-    "SC-56": "Commit title case: GitHub vs #builds",
-    "SC-57": "#zm-collect-win archived but still active",
-    "SC-58": "ZM3D monster roster and boss rules",
-    "SC-59": "Country of early adjoe installs",
-    "SC-60": "Josh Dempsey identity mix-up",
-    "SC-61": "ENG-2255 owner: Brian or Samuel",
-    "SC-62": "Reward import: hourly or every 5 minutes",
-    "SC-63": "Griffin pro-rata range math",
-    "SC-64": "Node Media's two addresses",
-    "SC-65": "ZM average playtime: 18 vs 37 min",
-    "SC-66": "Closed analytics AWS account still active",
-    "SC-67": "Build #1621 post lists #1620",
-    "SC-68": "Boss Arena on prod before its code",
-    "SC-69": "April 2025 BigQuery cost: 123.47 vs 126",
-    "SC-70": "Slack timezones all Los Angeles",
-    "SC-71": "ZOM-471 priority: high vs Medium",
-    "SC-72": "Python 3.9 end-of-life date in the future",
-    "SC-73": "Monthly burn in pitch text",
-}
-
-# Where the contributor line is garbled, uses jargon or doesn't name the record: replacement dont / why / safer.
-SC_FIX = {
-    "SC-3": {"dont": "A runway figure from the investor letter or CASH_BALANCE."},
-    "SC-4": {"safer": "Only the 3-month total is safe (both about $46,201.50)."},
-    "SC-5": {"dont": "Sep 2025 payroll, headcount, burn or runway from FINANCE_LEDGER or PAYROLL_ROSTER."},
-    "SC-9": {"dont": "Play Ventures' status in the investor sheet or Slack."},
-    "SC-10": {"dont": "The LVP meeting date in the investor sheet."},
-    "SC-11": {"why": "Every unity_ads row has spend 0 and CPI 0, but Slack shows paid Unity campaigns ($5-6 bids, "
-                     "$300/day caps); Confluence admits the data feed misses Unity spend."},
-    "SC-14": {"dont": "Which Trello beta cards are 'complete' (cards 54/56/58/67).",
-              "why": "The Trello card's dueComplete is false, but its badges.dueComplete is true."},
-    "SC-19": {"dont": "Matching RAW_EVENTS app versions to a store build in Slack."},
-    "SC-22": {"dont": "Ticket durations from Linear's time_in_status_minutes."},
-    "SC-24": {"dont": "Tim Steudler's employer (he has an HG email and HG accounts)."},
-    "SC-29": {"dont": "MMP reporting latency from INSTALL_ATTRIBUTION.",
-              "why": "INSTALL_ATTRIBUTION has mmp_reported_at earlier than install_ts on 12,730 of 28,609 rows, so the "
-                     "MMP reports installs before they happen."},
-    "SC-31": {"safer": "Measure only from the degraded rows in LIVE_EVENT_PERFORMANCE."},
-    "SC-39": {"dont": "The Singular payment plan from the Aug 28 exec sync."},
-    "SC-46": {"dont": "Total people at Sep 2025 from the HEADCOUNT table comment."},
-    "SC-53": {"why": "#live-incidents uses the token for 'another player', but it is the same token as the earlier "
-                     "player, so the hidden names merged two people."},
-    "SC-54": {"dont": "Frederick's pay after May 2025 in the ledger."},
-    "SC-55": {"dont": "An exact deadline from the Mattel RFP."},
-    "SC-61": {"dont": "Who owns Linear ENG-2255."},
-    "SC-63": {"dont": "A Griffin pro-rata dollar figure from the Aug 28 sync."},
-    "SC-64": {"dont": "Node Media's address on its invoices."},
-    "SC-67": {"dont": "Which build contained PR #439, from the #builds post."},
-    "SC-70": {"dont": "A person's timezone from Slack."},
-    "SC-71": {"dont": "ZOM-471's priority from the Linear-bot post."},
-}
-
-# ---- normal (Feb 14, 2026) --------------------------------------------------------------------------------------
-NB_TEXT = {
-    "NB-1": {"title": "Slack channel access after Feb 11",
-             "dont": "Who can read a Slack channel after 2026-02-11 20:40 UTC, or injected posts by someone in a "
-                     "channel they left.",
-             "why": "Julia, Marcus, Owen, Oliver, Martin, Claire and Brian leave their channels on Feb 11 and Leonard "
-                    "makes them single-channel guests, but channels.json still lists them as members.",
-             "safer": "Use #prototype, their DMs, or anything before Feb 11."},
-    "NB-2": {"title": "P&L forecast sheet costs vs Snowflake",
-             "dont": "Monthly AWS, hosting, Unity licence, UA or salary costs from the \"P&L and forecast - Jan 2026\" "
-                     "sheet.",
-             "why": "The sheet shows AWS = 0 and Jan salaries of $17,000, but Snowflake has AWS at $1,485–$2,745 every "
-                    "month, Jan salaries of $9,895.88 and all SaaS at $786.",
-             "safer": "Use the vendor's own invoice or receipt."},
-    "NB-3": {"title": "Cash at Dec 31 and Jan 31",
-             "dont": "Cash on Dec 31, 2025 or Jan 31, 2026 from CASH_BALANCE, Leonard's email or the P&L sheet.",
-             "why": "CASH_BALANCE says $25,031 for Dec 31, but Leonard's email and the P&L sheet say about $52,686. "
-                    "For Jan 31 Snowflake says $8,096 and the sheet $1,653.84."},
-    "NB-4": {"title": "February 2026 payments: paid or only accrued",
-             "dont": "Whether a February 2026 payment was made (Sunset $11,700, legal $780, AWS and others), from "
-                     "FINANCE_LEDGER.",
-             "why": "The ledger books them as cash out, but MONTHLY_BURN says February was only accrued and never "
-                    "closed, and Sunset's own email says its payment is still due."},
-    "NB-5": {"title": "Helpshift effective date: February 29, 2025",
-             "dont": "Helpshift's effective cancellation date from its acknowledgement email, or asks to \"quote the "
-                     "vendor's exact date\".",
-             "why": "Helpshift's reply says \"effective February 29,2025\", a date that doesn't exist and is in the "
-                    "wrong year; Leonard had asked to stop at the end of the current billing cycle in Feb 2026.",
-             "safer": "Grade only that Helpshift agreed to cancel."},
-    "NB-6": {"title": "Slack messages after Feb 13 10:03 UTC",
-             "dont": "Slack messages from Feb 13 after 10:03 UTC.",
-             "why": "The Slack export stops at 10:03 UTC on Feb 13, but two threads (BoomBit in C09SWTHEMEW, the "
-                    "#prototype \"common rarity\" thread) and three file uploads point to later messages that don't "
-                    "exist."},
-    "NB-7": {"title": "Combo Fighter levels past 35",
-             "dont": "How far Combo Fighter players got, or level funnels, from the warehouse.",
-             "why": "The warehouse has hundreds of level 36–438 events from Dec 28 on, but the GDD and Robert (Feb 2) "
-                    "say players can't go past level 35."},
-    "NB-8": {"title": "Helpshift payments left: $150×10 or ×8",
-             "dont": "How many Helpshift payments are left, or \"Leonard's latest count\", from #winddown or "
-                     "#executives.",
-             "why": "On Feb 9 in #winddown Leonard says \"we owe Helpshift $150*10 = $1500\", but on Feb 10 in "
-                    "#executives he writes \"$150*8 months\".",
-             "safer": "Grade only that Helpshift agreed to cancel."},
-    "NB-9": {"title": "Combo Fighter on Google Play",
-             "dont": "Whether Combo Fighter is on Google Play, or its Android players.",
-             "why": "Robert says \"we aren't official on google\", but Snowflake has 206 Combo Fighter Android players "
-                    "and Play Store reviews."},
-    "NB-10": {"title": "CASH_BALANCE burn column comment",
-              "dont": "The CASH_BALANCE.monthly_net_burn column comment (October 2025 payroll and headcount, \"the UA "
-                      "row omits wires\").",
-              "why": "The comment says October 2025 payroll was $32,172 for 9 people and the UA row misses $46,201.50, "
-                     "but the data shows $39,292.02 for 13 people and the adjoe wires are already counted."},
-    "NB-11": {"title": "Combo Fighter GDD is out of date",
-              "dont": "Combo Fighter ads, monetization or \"parked\" status taken from the Combo Fighter GDD in "
-                      "Confluence.",
-              "why": "The GDD says the game \"remains parked\" and ads are \"outside MVP scope\", but Slack shows "
-                     "version 1.0.91 with in-app purchases (Feb 6) and interstitial ads turned on (Feb 12)."},
-    "NB-12": {"title": "Vendor names hidden behind tokens",
-              "dont": "A vendor or tool that a record names only as [PERSON_NAME_…] or [USERNAME_…], such as "
-                      "Bizxpress's subject line or the Helpshift row in the Task List.",
-              "why": "Records like \"cursor and [PERSON_NAME_20852]\" replace the vendor's name with a token while "
-                     "other records spell it out, so nobody can tell they mean the same vendor.",
-              "safer": "Use a record that spells out the name."},
-    "NB-13": {"title": "Exact GitHub branch names",
-              "dont": "An exact GitHub branch name.",
-              "why": "The branches list says marcus.bennett/…, but PRs and Slack say Marcus/….",
-              "safer": "If you need one, accept both forms."},
-    "NB-14": {"title": "ENG-2403/ENG-2404 checklists vs child tickets",
-              "dont": "The ENG-2403 and ENG-2404 checklists in Linear.",
-              "why": "They tick items whose tickets are still in PR or Validation, and leave Done items unticked.",
-              "safer": "Use the child tickets' own states."},
-    "NB-15": {"title": "Employee or contractor",
-              "dont": "Whether someone was an employee or a contractor, from PAYROLL_ROSTER.",
-              "why": "PAYROLL_ROSTER marks most people full_time, but Leonard says \"no US employees, only "
-                     "international contractors\" and the termination letters say \"independent contractor\"."},
-    "NB-16": {"title": "Domino Delights database: Aurora or DynamoDB",
-              "dont": "Which database Domino Delights runs on, from Confluence.",
-              "why": "One Confluence page says Aurora PostgreSQL is the primary datastore; another says Domino "
-                     "Delights runs on DynamoDB."},
-    "NB-17": {"title": "Domino Delights installs in Jan–Feb 2026",
-              "dont": "Domino Delights paid, Brazil or worldwide installs in Jan–Feb 2026, from the warehouse.",
-              "why": "BoomBit says the Brazil test went live, but Snowflake has only organic installs and zero Brazil "
-                     "installs ever."},
-    "NB-18": {"title": "Domino Delights September 2025 installs",
-              "dont": "Domino Delights installs in September 2025, or adjoe credits for that month.",
-              "why": "Slack says about 450 installs and adjoe turned on Sep 1, but Snowflake has zero Domino Delights "
-                     "installs that month."},
-    "NB-19": {"title": "Unity Ads spend is $0 in the warehouse",
-              "dont": "Unity Ads dollar amounts from AD_SPEND_DAILY.",
-              "why": "AD_SPEND_DAILY shows $0 on every Unity row, but Gmail has Unity Ads receipts and a $1,000 "
-                     "prepayment."},
-    "NB-20": {"title": "Board marketing figure: $150K or $170K",
-              "dont": "What marketing figure the Board was told.",
-              "why": "The board email body says about $150K, but the attached deck and the Slack drafts say $170K."},
-    "NB-21": {"title": "Review app versions vs Slack builds",
-              "dont": "Joining review or warehouse app versions to Slack build numbers.",
-              "why": "ZM3D reviews say 0.1.601/0.1.688 while Slack says 0.3.x, and Domino Delights reviews say "
-                     "0.3.104 while Slack says 0.3.305."},
-    "NB-22": {"title": "Contractor letter 00016874 termination date",
-              "dont": "A termination date from contractor letter 00016874.",
-              "why": "It says January 31, 2025, but the sibling letters sent minutes later say January 31, 2026."},
-    "NB-23": {"title": "Singular invoice INVSINC22671 has two totals",
-              "dont": "A Singular \"as billed\" total from invoice INVSINC22671.",
-              "why": "The invoice exists twice with the same date: once for $25,000 and once for $6,250."},
-    "NB-24": {"title": "Linear has no comments or links",
-              "dont": "What a base Linear comment said, or missing ticket links.",
-              "why": "The Linear export has zero comments and zero links, but Slack and Gmail refer to comments on "
-                     "tickets."},
-    "NB-25": {"title": "Domino Delights store history in 2024 roadmap",
-              "dont": "Domino Delights' store history from the 2024 roadmap page in Confluence.",
-              "why": "The page says Domino Delights shipped as \"Puzzles vs Zombies\", but that was Zombie Match 3D."},
-    "NB-26": {"title": "Combo Fighter sales: none or two",
-              "dont": "Whether Combo Fighter sold anything.",
-              "why": "The QA runbook says no purchase was ever recorded, but Robert says \"2 people bought rotation "
-                     "pack\"."},
-    "NB-27": {"title": "Quest auto-deploy: on or off",
-              "dont": "Whether the quest auto-deploy is on, from the Quest System postmortem.",
-              "why": "The postmortem body says the 8-hour auto-deploy \"was left running\", but its page comment says "
-                     "auto-deploy \"stays off\" until fixes ship."},
-    "NB-28": {"title": "ZM3D Meta campaign end date",
-              "dont": "The end date of the ZM3D Meta campaign.",
-              "why": "Leonard turned it off on Nov 3 at 03:13 UTC, but Snowflake still has $246.18 of spend dated "
-                     "Nov 3."},
-    "NB-29": {"title": "Shutdown decision date: Feb 9 or 10",
-              "dont": "The shutdown decision date as the start of a time window.",
-              "why": "On Feb 9 in #executives Leonard says \"we finalized the decision to shut down\", but on Feb 11 "
-                     "in #leapblock he says \"We didn't finalize this decision until yesterday\"."},
-    "NB-30": {"title": "Endless Monster Mode: live or removed",
-              "dont": "Whether Endless Monster Mode (or Infinite Boss mode) is live, from the Live-Ops calendar.",
-              "why": "The Live-Ops calendar says it is live, but Leonard said game modes are being removed (ZOM-642, "
-                     "still in Validation)."},
-    "NB-31": {"title": "Slack DM member lists",
-              "dont": "Who had access, argued from Slack DM or group-DM member lists.",
-              "why": "Most 1:1 DMs list 3–5 members, and many group-DM names don't match their members."},
-    "NB-32": {"title": "Douglas's end date: October or December",
-              "dont": "Douglas's end date.",
-              "why": "The AWS Infrastructure Guide says he departed in Oct 2025, but the ledger pays him through "
-                     "Dec 31, 2025."},
-    "NB-33": {"title": "December DAU drop from 70 to 24",
-              "dont": "Leonard's \"DAU dropped from 70 to 24\".",
-              "why": "Leonard says DAU dropped from 70 to 24, but DAILY_ACTIVE_USERS shows 68 and 64 for Dec 26 and "
-                     "27."},
-}
-
-SC_LINE = re.compile(r"^- \*\*(SC-\d+)\*\* \((\d+) FAILs?\): Don't build a graded answer on (.+)$", re.M)
-KEEP_LOWER = {"adjoe"}  # brand names that start lowercase
+# Curated Sonorra v17 base-data issues (K-01..K-29 + V12-C1..C2) from Base Universe/Sonorra_known_issues.md.
+SONORRA_ISSUES = [
+    ("K-01", "Naomi Louisiana counsel note", "avoid", 1,
+     "Whether Naomi holds the 2025-03-10 Louisiana counsel note",
+     "Naomi's mailbox holds the 2025-03-10 Louisiana counsel email + statute PDF, while S05, her Slack, MOB-104, and 2026-08-06 counsel mail say she was never on it.",
+     "Use the 2026 notes sent to Priya and Sana, or stay off whether Naomi saw the 2025-03-10 note unless settled by SQL."),
+    ("K-02", "Information-boundary leaks", "avoid", 1,
+     "Persona ignorance claims where Slack or Gmail leaked the fact",
+     "Anh's two does_not_know facts appear in Slack channels he belongs to; Yusuf's Slack holds 3 private DMs he is not listed in; leaks to Naomi, Priya, Marisol, Rafa, Delia, Colin remain.",
+     "Check actual channel membership and mailbox copies directly rather than relying on universe.yaml does_not_know."),
+    ("K-03", "Records citing later events or Linear keys", "avoid", 1,
+     "Chronology or creation-order inferences on pre-dated citations",
+     "452 Linear-key citations in files and 98 in services predate the cited Linear issue; early mentions exist for the Aug 20 load test, Aug 8 incident/postmortem, ENG-588..592, ENG-611, RFC-014 r3.",
+     "Do not grade when an event was first known based on cross-references in older docs."),
+    ("K-05", "File modified times on /mnt/files", "avoid", 1,
+     "Grading file modified timestamps against document dates",
+     "~157 files in /mnt/files have filesystem modified times earlier than the dates inside their text, and 12 rows sit exactly at 2026-08-24T16:41:00-05:00.",
+     "Grade document content dates and carrying email timestamps, not filesystem mtime."),
+    ("K-07", "Bellweather settlement & $412 correction", "avoid", 1,
+     "Exact first-report date or commission rate for Bellweather",
+     "$412 correction appears in Stripe in 2025/Apr 2026 before 'first reported'; July 8 paid T+2 vs T+5; 1.0% vs 1.2% commission; QBR/recon dates & edge-case counts conflict.",
+     "Scope any Bellweather ask strictly to specific named Stripe payout/charge IDs rather than cross-doc narrative timing."),
+    ("K-08", "Cactus Bloom -$4,200 make-good sign", "avoid", 1,
+     "Whether Cactus Bloom make-good is a credit or -$4,200 payout",
+     "CRM, FinTrack, and QuickBooks record it as a credit, while Stripe has a -$4,200 payout and the statement nets the organizer down.",
+     "Avoid grading the sign of the Cactus Bloom make-good across systems without clarifying the exact system of record."),
+    ("K-09", "Stripe payouts vs finance statements", "avoid", 1,
+     "Reconciling payout registers, 120 dispute notes, or 7 stale subscriptions to Stripe",
+     "11 statement payout IDs are missing from Stripe; 120/122 dispute notes have no Stripe dispute; 7 active subscriptions stopped invoicing in Jan 2026; payout register has 4 rows off Stripe.",
+     "Build Stripe tasks only on verified live Stripe IDs (`stripe.json`), not unverified statement totals."),
+    ("K-10", "Spend approval & $5,000 signature line", "avoid", 1,
+     "Who holds the $5,000 approval line or countersigning rule",
+     "Two conflicting answers exist on who holds the $5,000 spend approval line, and one Notion note reads as ruling out countersigning.",
+     "Settle the specific approval threshold explicitly via injection if your scenario depends on it."),
+    ("K-11", "Vendor PDFs (PagerDuty, Datadog, AWS)", "avoid", 1,
+     "Vendor PDF seat counts, MSA numbering, or invoice dates",
+     "PagerDuty order form & 2025 PDFs print 4 seats/$720/Sep 30 term; Datadog quote refs are stubs; AWS IEM scope and PagerDuty invoice numbers have gaps.",
+     "Verify every vendor PDF claim word-for-word against the exact PDF in Universe_Sonorra/Users/."),
+    ("K-12", "Cost-centre workbooks vs QuickBooks", "avoid", 1,
+     "Matching cost-centre XLSX account names or preclose Micah $4,800 row to QuickBooks",
+     "Cost-centre XLSX account names are not QuickBooks accounts; preclose keeps a ghost $4,800 Micah row; BILL-5208 posted on 07-26.",
+     "Do not ask the agent to treat cost-centre spreadsheet account labels as QuickBooks chart-of-accounts names."),
+    ("K-13", "Personal finance & account 9946", "watch", 0,
+     "Assuming housing/insurance expenses or unpaid corporate cards in FinTrack",
+     "Yusuf's FinTrack shows ~96% to savings, no housing/insurance, texted spend missing from FinTrack, account 9946 frozen, corporate cards never paid.",
+     "Build FinTrack asks only on actual rows in fintrack.json or injected SQL."),
+    ("K-14", "Discovery attribution 29.4% timeline", "avoid", 1,
+     "When discovery attribution reached 29.4%",
+     "Docs from Sep 2025–Jun 2026 state 'Currently 29.4%', while dated captures climb from 24.6% and reach 29.4% only in Aug 2026.",
+     "Do not grade historical attribution percentages across Sep 2025–Jun 2026 docs."),
+    ("K-16", "Branch protection & SOC 2 evidence", "avoid", 1,
+     "Whether sonorra-core branch protection is enabled or bypassed",
+     "GitHub shows all 10 repos protected, while a screenshot, an email, and a CSV say sonorra-core is unprotected; Northgate registers lack a bypass column.",
+     "Cite the specific source (GitHub export vs Request 04 CSV) or avoid sonorra-core branch-protection claims."),
+    ("K-17", "GitHub histories & RFC-014 PR numbers", "watch", 0,
+     "Cross-repo RFC-014 revisions or mobile release numbering",
+     "RFC-014 revisions sit in wrong repos, two mobile release schemes coexist, and some commit histories are imported.",
+     "Verify exact repo/PR/SHAs in github_hg4.json before citing."),
+    ("K-18", "Linear duplicate keys & self-keyed titles", "watch", 0,
+     "Counting Linear tickets across storyline passes or empty Cycle 39",
+     "Storylines duplicate across passes, Cycle 39 is nearly empty, labels vs label_ids disagree in spots, 51 titles retain self-keys.",
+     "Anchor Linear asks by exact issue keys (`ENG-...`) rather than broad title/count sweeps."),
+    ("K-19", "Derived weeklies & standups vs SOT", "avoid", 1,
+     "Treating weekly digests or old standups as current Linear/GCal state",
+     "676 of 1,902 weekly entries diverge from GCal; old standups/handoffs print stale owners, titles, or deleted keys.",
+     "Grade Linear/GCal directly as system of record rather than un-regenerated weekly summaries."),
+    ("K-20", "CRM 'Logged by' & missing engagement owners", "watch", 0,
+     "CRM engagement ownership",
+     "44 CRM bodies end with 'Logged by...' and engagements lack an owner field.",
+     "Do not require inferring CRM engagement owners from missing fields."),
+    ("K-21", "Calendar fillers & attendee-copy diffs", "watch", 0,
+     "Recurring calendar series or QBR/board attendees",
+     "No all-day/rrule events, 294 attendee-copy differences, QBR/board events lack attendees, Monday shown as office day.",
+     "Verify attendee presence on the acting persona's actual calendar events."),
+    ("K-22", "12 unresolved Linear keys & WSDL mismatch", "avoid", 1,
+     "Citing the 12 non-existent Linear keys or BST-341 WSDL operations",
+     "12 cited Linear keys do not exist in linear.json; bypass finding has two keys; BST-341 names operations absent from WSDLs.",
+     "Confirm every cited Linear key exists in linear.json before including it in prompt/rubric."),
+    ("K-24", "universe.yaml departments & footprint counts", "avoid", 1,
+     "Using universe.yaml department='engineering' or footprint totals",
+     "All 15 personas in universe.yaml list department='engineering'; 18 phone mismatches and 8 Marguerites exist in contacts; footprints are off by 1–12.",
+     "Use canonical job titles from roster.json / contacts.json and exact record counts from service exports."),
+    ("K-27", "Micah Trent engagement & BILL-9314 timing", "avoid", 1,
+     "Micah Trent SOW dates vs BILL-9314 or June SMS",
+     "Measurements predate SOW; BILL-9314 precedes the engagement; SOW PDFs omit term; June SMS copy the August exchange.",
+     "Keep Micah Trent asks focused on specific invoice/code artifacts rather than engagement timeline reconciliation."),
+    ("K-29", "Packaging & current_user / leftover filenames", "watch", 0,
+     "Expecting labels.json or universe overview docs in service exports",
+     "gmail/labels.json is empty; DMs are stored as named channels; service filenames use legacy suffixes (notion_fixed, github_hg4).",
+     "Use Evals/UNIVERSE_MAP.md for canonical filenames."),
+    ("V12-C1", "Refund run 3,140 vs Stripe 62 duplicate refunds", "avoid", 1,
+     "Expecting 3,140 refund rows in Stripe",
+     "Incident docs state 3,140 refunds while Stripe intentionally holds 62 duplicate refunds (cannot mint 3,140 without a second ledger).",
+     "Treat 3,140 as the documented incident report figure and 62 as the Stripe export figure."),
+    ("V12-C2", "Dispute window 160 vs Stripe 2 disputes", "avoid", 1,
+     "Expecting 160 dispute rows in Stripe",
+     "Docs state 160 disputes in the window while Stripe intentionally holds 2 disputes.",
+     "Distinguish documented dispute-window counts from live Stripe dispute records."),
+]
 
 
-def sentence(text):
-    """Capitalize a plain first word (not 'channels.json', 'time_in_status_minutes' or 'adjoe') and end with a full stop."""
-    text = text.strip()
-    first = text.split(" ", 1)[0]
-    if re.fullmatch(r"[a-z][a-z'/-]*", first) and first not in KEEP_LOWER:
-        text = text[0].upper() + text[1:]
-    return text if text.endswith((".", "?", "!")) else text + "."
-
-
-def watch_level(partial, reports):
-    """'watch' = only partly confirmed, or seen in a single report. Everything else is 'avoid', soft issues included:
-    the source says a soft issue (an in-world explanation exists) is still a trap, so don't grade on it."""
-    return "watch" if partial or reports <= 1 else "avoid"
-
-
-def synthcut(src):
-    clusters = {c["id"]: c for c in json.loads((src / "clusters_synthcut.json").read_text())
-                if re.fullmatch(r"SC-\d+", c.get("id") or "")}
-    out = []
-    for sid, fails, rest in SC_LINE.findall((src / "cb_list_synthcut.md").read_text()):
-        rest, _, safer = rest.partition(" *Safe alternative:* ")
-        dont, sep, why = rest.partition(": ")
-        if not sep:
-            sys.exit(f"{sid}: can't split '<what>: <why>' in the contributor line")
-        c = clusters.get(sid) or sys.exit(f"{sid} is in cb_list_synthcut.md but not in clusters_synthcut.json")
-        if int(fails) != c["fail_reports"]:
-            sys.exit(f"{sid}: the list says {fails} FAILs, the clusters file {c['fail_reports']}")
-        if sid not in SC_TITLES:
-            sys.exit(f"{sid} has no title: add one to SC_TITLES")
-        item = {"id": sid, "universe": "synthcut", "title": SC_TITLES[sid], "dont": sentence(dont), "why": sentence(why),
-                "safer": sentence(safer) if safer.strip() else None, "fails": c["fail_reports"],
-                "level": watch_level(c.get("verification") == "PARTIAL", c.get("reports", 0))}
-        item.update(SC_FIX.get(sid, {}))
-        out.append(item)
-    missing = sorted(set(clusters) - {i["id"] for i in out}, key=lambda s: int(s[3:]))
-    if missing:
-        sys.exit(f"in clusters_synthcut.json but not in cb_list_synthcut.md: {', '.join(missing)}")
-    return out
-
-
-def normal(src):
-    clusters = {c["nb_id"]: c for c in json.loads((src / "clusters_normal.json").read_text())["clusters"] if c.get("nb_id")}
-    headers = set(re.findall(r"^### (NB-\d+) ", (src / "known_base_issues_normal.md").read_text(), re.M))
-    if set(clusters) != headers or set(clusters) != set(NB_TEXT):
-        sys.exit(f"NB ids differ: clusters {sorted(set(clusters) ^ headers)} vs write-up, "
-                 f"{sorted(set(clusters) ^ set(NB_TEXT))} vs NB_TEXT")
-    out = []
-    for nid, c in clusters.items():
-        status = c.get("status") or ""  # e.g. "VERIFIED", "VERIFIED (soft)", "VERIFIED (soft, single)"
-        reports = 1 if "single" in status else c.get("reports", 0)
-        out.append({"id": nid, "universe": "normal", **NB_TEXT[nid], "fails": c["fail_reports"],
-                    "level": watch_level("partial" in status.lower(), reports)})
-    return out
-
-
-def check(issues):
-    ids = [i["id"] for i in issues]
-    assert len(ids) == len(set(ids)), "duplicate ids"
-    for i in issues:
-        for key in ("title", "dont", "why"):
-            assert i.get(key), f"{i['id']}: no {key}"
-        assert len(i["title"].split()) <= MAX_TITLE_WORDS, f"{i['id']}: title over {MAX_TITLE_WORDS} words: {i['title']}"
-
-
-def markdown(data):
-    """The list as plain-language Markdown for the chat assistant, grouped by task date, in the JSON's order."""
-    lines = ["# Known data issues", "",
-             f"Base-data records in the HarmonyGames universes that contradict each other, checked on both sides in the "
-             f"universe exports (checked {data['verified']}). A task graded on one of these usually fails Cross-Service "
-             "Coherence: the agent can't tell which side is right, so no answer clearly wins. They are the same ids as "
-             "the chat page's \"Known data issues\" sidebar, so the contributor can look them up there.", "",
-             "- **avoid**: confirmed. Don't build a graded answer, an OE or a rubric row on it, and never use it as the trap.",
-             "- **watch**: only partly confirmed, or seen in a single report. Check both sides before relying on it.", "",
-             "Built by deploy/build_known_issues.py together with server/known_issues.json; edit the script, not this file."]
-    for universe, label in UNIVERSE_LABELS.items():
-        issues = [i for i in data["issues"] if i["universe"] == universe]
-        lines += ["", f"## Task date {label}: {len(issues)} issues", ""]
-        for i in issues:
-            fails = f"caused {i['fails']} FAIL{'' if i['fails'] == 1 else 's'}" if i["fails"] else "caused no FAILs yet"
-            lines.append(f"### {i['id']} · {i['title']} ({i['level']}, {fails})")
-            lines.append(f"- Don't grade: {i['dont']}")
-            lines.append(f"- Why: {i['why']}")
-            if i.get("safer"):
-                lines.append(f"- Safer: {i['safer']}")
-            lines.append("")
-    return "\n".join(lines).rstrip("\n") + "\n"
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("src", type=Path, help="folder with cb_list_*.md, clusters_*.json, known_base_issues_*.md")
-    parser.add_argument("--verified", help="date the list was checked (default: the date in the folder name)")
-    parser.add_argument("--out", type=Path, default=OUT)
-    parser.add_argument("--md-out", type=Path, default=MD_OUT)
-    args = parser.parse_args()
-    verified = args.verified or (re.search(r"\d{4}-\d{2}-\d{2}", args.src.name) or [None])[0]
-    if not verified:
-        sys.exit("No date in the folder name: pass --verified YYYY-MM-DD")
+def main() -> int:
     issues = []
-    for group in (synthcut(args.src), normal(args.src)):  # most FAILs first within each universe
-        issues += sorted(group, key=lambda i: (-i["fails"], int(i["id"].split("-")[1])))
-    issues = [{k: v for k, v in i.items() if v is not None} for i in issues]
-    order = ("id", "universe", "level", "fails", "title", "dont", "why", "safer")
-    issues = [{k: i[k] for k in order if k in i} for i in issues]
-    check(issues)
-    data = {"verified": verified,
-            "about": "Base-data contradictions found in portal reports and checked on both sides in the universe exports. "
-                     "Built by deploy/build_known_issues.py; edit there, not here.",
-            "issues": issues}
-    args.out.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
-    args.md_out.write_text(markdown(data))
-    counts = {u: sum(i["universe"] == u for i in issues) for u in ("synthcut", "normal")}
-    watch = sum(i["level"] == "watch" for i in issues)
-    print(f"wrote {args.out} and {args.md_out}: {counts['synthcut']} synth-cut + {counts['normal']} normal issues "
-          f"({watch} watch)")
+    for iid, title, level, fails, dont, why, safer in SONORRA_ISSUES:
+        issues.append({
+            "id": iid,
+            "universe": "sonorra",
+            "title": title,
+            "level": level,
+            "fails": fails,
+            "dont": dont,
+            "why": why,
+            "safer": safer,
+        })
+    OUT.write_text(json.dumps({"verified": VERIFIED, "issues": issues}, indent=2) + "\n", encoding="utf-8")
+
+    lines = [
+        "# Known Data Issues (Sonorra v17)",
+        "",
+        f"Built by deploy/build_known_issues.py from Sonorra_known_issues.md (verified {VERIFIED}).",
+        "Base-data records that contradict each other. Do not grade tasks on these contradictions unless",
+        "explicitly scoped to a named system of record or settled via `01_Injection.sql`.",
+        "",
+        "## Sonorra v17 (2026-08-24 16:41 CT)",
+        "",
+    ]
+    for item in issues:
+        tag = " [watch]" if item["level"] == "watch" else ""
+        lines.append(f"### {item['id']} — {item['title']}{tag}")
+        lines.append(f"- **Don't grade:** {item['dont']}")
+        lines.append(f"- **Why:** {item['why']}")
+        lines.append(f"- **Safer route:** {item['safer']}")
+        lines.append("")
+    MD_OUT.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote {len(issues)} Sonorra known issues to {OUT.name} and {MD_OUT.name}.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

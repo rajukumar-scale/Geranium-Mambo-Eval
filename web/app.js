@@ -322,6 +322,7 @@ function addMessage(m) {
 function renderMessages() {
   const box = $("#messages");
   box.innerHTML = state.messages.map(m => messageHtml(m)).join("");
+  renderSetupCard();
   box.scrollTop = box.scrollHeight;
 }
 
@@ -433,8 +434,7 @@ function notifyRunEnd(run) {
     title = `Your ${name} review stopped`;
     body = "It didn't finish. Open the chat for details; your saved inputs are kept.";
   } else if (report) {
-    // OE needs a PASS (server config.passing); other reviews also pass on NON-FAIL
-    const v = report.meta.verdict, passed = (report.meta.stage === "oe" ? v === "PASS" : ["PASS", "NON-FAIL"].includes(v))
+    const v = report.meta.verdict, passed = ["PASS", "NON-FAIL"].includes(v)
       && report.meta.exec_status === "COMPLETE";
     title = `Your ${name} report is ready`;
     body = `${shownVerdict(report.meta.stage, v) || "No verdict"}${report.meta.score != null ? " · score " + report.meta.score : ""}${passed ? " · your pass card is ready" : ""}`;
@@ -490,25 +490,121 @@ async function refreshSide() {
   try { state.me = await api("/api/me"); renderSide(); } catch (e) { /* ignore */ }
 }
 
-// The task date (the eval reads one of two universes, picked per task): a chip in the top bar, asked with two buttons.
-function renderDate() {
-  const u = state.me.universe || {}, chip = $("#chip-date");
-  loadKnown();  // the known data issues follow the task date
-  chip.classList.toggle("hidden", !u.asks);
-  if (!u.asks) return;
-  chip.classList.toggle("flag", !u.date);
-  chip.textContent = u.date ? `📅 ${u.choices[u.date]}` : "📅 Pick the task date";
+// Task Setup (3 dropdowns: Persona, Task Family, Constraint Count) — replaces the base date picker.
+function taskSetupFormHtml(cur, idPrefix = "ts") {
+  const opts = state.me.task_setup_options || { personas: [], families: [], constraint_counts: [] };
+  const pOpts = opts.personas.map(p => `<option value="${esc(p.email)}"${cur && cur.persona_email === p.email ? " selected" : ""}>${esc(p.name)}${p.title ? ` (${esc(p.title)})` : ""} — ${esc(p.email)}</option>`).join("");
+  const fOpts = opts.families.map(f => `<option value="${esc(f)}"${cur && cur.family === f ? " selected" : ""}>${esc(f)}</option>`).join("");
+  const cOpts = opts.constraint_counts.map(c => `<option value="${esc(c.id)}"${cur && cur.constraint_count === c.id ? " selected" : ""}>${esc(c.label)}</option>`).join("");
+  return `<div class="setup-grid">
+      <div class="setup-field"><label for="${idPrefix}-persona">Persona</label>
+        <select id="${idPrefix}-persona"><option value="">Select persona…</option>${pOpts}</select></div>
+      <div class="setup-field"><label for="${idPrefix}-family">Task Family</label>
+        <select id="${idPrefix}-family"><option value="">Select family…</option>${fOpts}</select></div>
+      <div class="setup-field"><label for="${idPrefix}-cc">Constraint Count</label>
+        <select id="${idPrefix}-cc"><option value="">Select constraint count…</option>${cOpts}</select></div>
+    </div>`;
 }
 
-// Known data issues (pilot, KNOWN_ISSUES_PILOT): base data that contradicts itself, for this task's universe.
-// Both universes' lists, grouped, until the date is picked. Fetched again only when the chat or the date changes.
+async function submitTaskSetup(persona_email, family, constraint_count) {
+  const res = await api("/api/task-setup", { json: { persona_email, family, constraint_count } });
+  state.me.task_setup = res.task_setup;
+  state.me.inputs = res.inputs;
+  renderSide();
+  renderSetupCard();
+  return res.task_setup;
+}
+
+function renderTaskSetup() {
+  const s = state.me.task_setup, chip = $("#chip-setup");
+  loadKnown();
+  if (!chip) return;
+  chip.classList.remove("hidden");
+  chip.classList.toggle("flag", !s);
+  if (s) {
+    const shortFam = (s.family || "").split("&")[0].trim();
+    const who = (s.persona || s.persona_email || "").split("(")[0].trim();
+    chip.textContent = `⚙ ${who} · ${shortFam} · ${s.constraint_count}`;
+    chip.title = `Persona: ${s.persona_email} | Family: ${s.family} | Constraint Count: ${s.constraint_count} (click to edit)`;
+  } else {
+    chip.textContent = "⚙ Task Setup (required)";
+    chip.title = "Pick Persona, Task Family, and Constraint Count";
+  }
+}
+
+function renderSetupCard() {
+  const box = $("#messages");
+  if (!box || !state.me) return;
+  const old = $("#setup-card");
+  if (old) old.remove();
+  const s = state.me.task_setup;
+  const card = document.createElement("div");
+  card.id = "setup-card";
+  card.className = "setup-card";
+  if (s) {
+    card.innerHTML = `<div class="setup-summary">
+        <span>✅ <b>Task Setup:</b> ${esc(s.persona || s.persona_email)} · ${esc(s.family)} · <b>${esc(s.constraint_count)}</b> (${s.constraint_count === "Low" ? "10+" : "20+"} constraints & criteria, no upper limit)</span>
+        <span class="muted">· Sonorra v17 (2026-08-24 16:41 CT)</span>
+        <button type="button" class="small" data-edit-setup>Edit</button>
+      </div>`;
+  } else {
+    card.innerHTML = `<div class="setup-head"><span>⚙ Task Setup (Geranium Mambo · Sonorra v17)</span>
+        <span class="muted" style="font-weight:400;font-size:12px">Pick your Persona, Task Family, and Constraint Count before running /prompt</span></div>
+      ${taskSetupFormHtml(null, "welcome-ts")}
+      <div class="setup-actions"><button type="button" class="primary" id="welcome-ts-save">Save Task Setup</button>
+        <span class="muted" style="font-size:12px">Saves to 00_Task_Assigned_Inputs.md</span></div>`;
+  }
+  const first = box.querySelector(".msg.system");
+  if (first) first.after(card); else box.prepend(card);
+  const saveBtn = card.querySelector("#welcome-ts-save");
+  if (saveBtn) saveBtn.onclick = async () => {
+    const persona_email = $("#welcome-ts-persona").value;
+    const family = $("#welcome-ts-family").value;
+    const constraint_count = $("#welcome-ts-cc").value;
+    if (!persona_email || !family || !constraint_count) return uiAlert("Select all 3 fields", "Pick a Persona, Task Family, and Constraint Count.");
+    saveBtn.disabled = true; saveBtn.textContent = "Saving…";
+    try { await submitTaskSetup(persona_email, family, constraint_count); }
+    catch (err) { saveBtn.disabled = false; saveBtn.textContent = "Save Task Setup"; uiAlert("Couldn't save Task Setup", err.message); }
+  };
+  const editBtn = card.querySelector("[data-edit-setup]");
+  if (editBtn) editBtn.onclick = () => openTaskSetupModal();
+}
+
+function openTaskSetupModal(why = "") {
+  return new Promise(resolve => {
+    const w = openModal("Task Setup (Geranium Mambo)", `${why ? `<p style="margin-top:0">${esc(why)}</p>` : ""}
+      <p style="margin-top:0" class="muted">Universe: <b>Sonorra v17</b> (fixed clock 2026-08-24 16:41 CT). Low = 10+ constraints &amp; criteria, High = 20+ (no upper limit).</p>
+      ${taskSetupFormHtml(state.me.task_setup, "modal-ts")}`,
+      `<button type="button" class="primary" id="modal-ts-save">Save</button>`);
+    let done = false;
+    const finish = v => { if (!done) { done = true; resolve(v); } };
+    new MutationObserver((_, obs) => { if (!w.isConnected) { obs.disconnect(); finish(null); } }).observe(document.body, { childList: true });
+    w.querySelector("#modal-ts-save").onclick = async () => {
+      const btn = w.querySelector("#modal-ts-save");
+      const persona_email = w.querySelector("#modal-ts-persona").value;
+      const family = w.querySelector("#modal-ts-family").value;
+      const constraint_count = w.querySelector("#modal-ts-cc").value;
+      if (!persona_email || !family || !constraint_count) return uiAlert("Select all 3 fields", "Pick a Persona, Task Family, and Constraint Count.");
+      btn.disabled = true; btn.textContent = "Saving…";
+      try {
+        const saved = await submitTaskSetup(persona_email, family, constraint_count);
+        w.remove();
+        finish(saved);
+      } catch (err) {
+        btn.disabled = false; btn.textContent = "Save";
+        uiAlert("Couldn't save Task Setup", err.message);
+      }
+    };
+  });
+}
+
 async function loadKnown() {
-  const key = state.me.attempt_id + "|" + ((state.me.universe || {}).date || "");
+  const key = state.me.attempt_id + "|sonorra";
   if (state.knownKey === key) return;
   state.knownKey = key;
   let res = null;
-  try { res = await api("/api/known-issues"); } catch (e) { /* stays hidden until the chat or date changes */ }
-  if (state.knownKey !== key) return;  // another chat or date came in meanwhile
+  try { res = await api("/api/known-issues"); } catch (e) { /* ignore */ }
+  if (state.knownKey !== key) return;
   state.known = res;
   renderKnown();
 }
@@ -518,15 +614,11 @@ function renderKnown() {
   if (!k || !k.enabled) return;
   const day = iso => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const count = k.groups.reduce((n, g) => n + g.issues.length, 0);
-  // The header names the task's date (the universe the chip picked); the list's own check date goes in the intro.
-  const taskDate = k.universe ? day(k.groups[0].date) : "both dates";
-  $("#known-title").innerHTML = `Known data issues <span class="nowrap">(${esc(taskDate)})<span class="sec-count">${count}</span></span>`;
+  $("#known-title").innerHTML = `Known data issues <span class="nowrap">(Sonorra v17)<span class="sec-count">${count}</span></span>`;
   $("#known-checked").textContent = `Checked ${day(k.verified)}`;
   const row = i => `<div class="list-item known-item${i.level === "watch" ? " watch" : ""}" data-known="${esc(i.id)}" title="${esc(i.title)}">
       <span class="grow">⚠ ${esc(i.id)} · ${esc(i.title)}</span>${i.level === "watch" ? `<span class="known-tag">watch</span>` : ""}</div>`;
-  const hint = !k.universe && (state.me.universe || {}).asks ? `<p class="known-hint">Pick the task date (top bar) to see only your date's list.</p>` : "";
-  $("#known").innerHTML = hint + k.groups.map(g =>
-    (k.groups.length > 1 ? `<div class="known-group">${esc(g.label)}</div>` : "") + g.issues.map(row).join("")).join("");
+  $("#known").innerHTML = k.groups.map(g => g.issues.map(row).join("")).join("");
 }
 function openKnown(id) {
   const i = (state.known ? state.known.groups : []).flatMap(g => g.issues).find(x => x.id === id);
@@ -538,36 +630,7 @@ function openKnown(id) {
       ${i.safer ? `<div class="rc-row"><div class="k">Safer</div><div>${esc(i.safer)}</div></div>` : ""}
       ${i.level === "watch" ? `<p class="known-watch"><span class="known-tag">watch</span> Not always failed — check both sides before relying on it.</p>` : ""}</div>` });
 }
-function pickDate(why = "") {
-  const u = state.me.universe || {};
-  return new Promise(resolve => {
-    const w = openModal("Which date is this task on?", `${why ? `<p style="margin-top:0">${why}</p>` : ""}
-      <p${why ? "" : ' style="margin-top:0"'}>Each task is on one of two dates, and every review reads that date's data. Pick the one your task was
-        assigned. You can change it later, but reviews done before the change were on the old date.</p>
-      <div class="date-pick">${Object.entries(u.choices || {}).map(([k, label]) =>
-        `<button type="button" class="${u.date === k ? "primary" : ""}" data-date="${esc(k)}">${esc(label)}</button>`).join("")}</div>
-      <p class="muted" style="margin-bottom:0">There is no default: the review won't start until it's picked.</p>`);
-    let done = false;
-    const finish = v => { if (!done) { done = true; resolve(v); } };
-    new MutationObserver((_, obs) => { if (!w.isConnected) { obs.disconnect(); finish(null); } }).observe(document.body, { childList: true });
-    w.addEventListener("click", async e => {
-      const b = e.target.closest("[data-date]");
-      if (!b) return;
-      w.querySelectorAll("[data-date]").forEach(x => { x.disabled = true; });
-      try {
-        const res = await api("/api/universe", { json: { date: b.dataset.date } });
-        state.me.universe = res.universe;
-        renderDate();
-        w.remove();
-        finish(res.universe.date);
-      } catch (err) {
-        w.querySelectorAll("[data-date]").forEach(x => { x.disabled = false; });
-        uiAlert("Couldn't save the date", err.message);
-      }
-    });
-  });
-}
-$("#chip-date").onclick = () => { if (state.run) return uiAlert("A run is in progress", "Change the date after it finishes."); pickDate(); };
+$("#chip-setup").onclick = () => { if (state.run) return uiAlert("A run is in progress", "Change Task Setup after it finishes."); openTaskSetupModal(); };
 
 // Pass cards already in the chat were drawn with the outdated state of that moment; redraw any whose state changed
 // (an input saved since makes an earlier pass outdated; a newer input can make it current again).
@@ -661,7 +724,7 @@ document.addEventListener("click", async e => {
 
 function renderSide() {
   const me = state.me;
-  renderDate();
+  renderTaskSetup();
   renderSpend(me.spend);
   renderBlocked();
   renderPaused();
@@ -762,9 +825,20 @@ async function switchTo(attemptId) {
   }
 }
 
-const INPUT_LABELS = { universe: "Task date", "task-details": "Task details", prompt: "Prompt", injection: "Injection SQL", "error-async": "Error / async config",
-  oe: "Oracle Events", rubric: "Rubric", "dynamic-context": "Dynamic context", "human-time": "Human time",
-  opus: "Opus run (trajectory)", haiku: "Haiku run (trajectory)" };
+const INPUT_LABELS = {
+  "task-details": "Task Setup",
+  injection: "Injection SQL",
+  prompt: "Prompt",
+  "runs-base": "Base Agent Runs",
+  rubric: "Rubric",
+  "grading-base": "Base Grading Result",
+  "stumping-check": "Stumping Check",
+  "runs-solv": "Solvability Re-runs",
+  "grading-solv": "Solvability Gradings",
+  "all-fail": "All-Fail Rubrics",
+  "all-fail-justify": "All-Fail Justifications",
+  "reference-notes": "Reference Notes",
+};
 
 async function openInput(key) {
   let data;
@@ -877,7 +951,7 @@ const GUIDE_COMMANDS = [
 // The Guide panel: "Steps" (how the portal works, the default) plus reading tabs for the guideline files the assistant
 // also reads (GET /api/guides/<name>). The last tab is remembered. openGuide(tab, heading) opens a tab scrolled to a
 // heading slug (common.js guideSlug); links to /?guide=<tab>#<slug> anywhere in the chat open it the same way.
-const GUIDE_TABS = [["steps", "Steps"], ["hardness", "Hardness"], ["toolcalls", "Tool calls"], ["patterns", "Failure patterns"], ["known", "Known data issues"]];
+const GUIDE_TABS = [["steps", "Steps"], ["hardness", "Stumping"], ["toolcalls", "Horizon"], ["patterns", "Rubric & All-Fail"], ["known", "Known data issues"]];
 const guideDocs = {};  // name -> markdown, fetched once per page load
 
 function guideStepsHtml() {
@@ -899,14 +973,14 @@ function guideStepsHtml() {
       whole task for you in one go (a full prompt, rubric, OE set or all the SQL); build it together piece by piece instead.
       Type <b class="mono">/admin</b> and a message to reach a person.</p>
     <h4>4 · What to screenshot</h4>
-    <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run; for <b>/oe</b> only a <b>PASS</b> counts), a <b>pass screen</b> pops up with a verification
+    <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run; note that <b>S1 Action Decision Ambiguity</b> at Score 3 is a <b>FAIL</b>), a <b>pass screen</b> pops up with a verification
       code. Screenshot that card and upload it in your Outlier task: one for each passing review. Keep the whole card in the shot and
       don't zoom far out. You can also click <b>⬇ Download image</b>: that image is checked with Outlier's reader before you get it.</p>
-    <p>For the injection, prompt and oracle events, <b>Copy what passed</b> copies the exact text that review graded, so what you
+    <p>For the injection, prompt, rubric and reference notes, <b>Copy what passed</b> copies the exact text that review graded, so what you
       paste into your Outlier task matches the pass.</p>
     <p>⚠ Before the pass screen opens, you'll be asked to confirm you've put the <b>latest version you fixed</b> into your Outlier task.
       The pass is only for the exact version you sent, so don't forget to update it. If your Outlier task doesn't match, we will know and the task will be flagged.</p>
-    <div class="guide-sample proof"><div class="head"><div class="left"><div class="brandline">Original Conference Eval Portal</div>
+    <div class="guide-sample proof"><div class="head"><div class="left"><div class="brandline">Geranium Mambo Eval Portal</div>
       <div class="verdict"><span class="vbadge PASS">PASS</span><span>Score 5</span></div><div class="sub">/prompt · Prompt review · COMPLETE</div></div>
       </div>
       <div class="fpband"><div class="k">🔏 Verification code · the Prompt fingerprint, as your Outlier task shows it</div>
@@ -1155,7 +1229,14 @@ async function send() {
     if (choice === true) { text = `/${cmd}${rest ? " " + rest : ""}`; input.value = text; }
   }
   const review = text.match(new RegExp(`^\\/${cmdPat}\\b`, "i"));
-  if (review && !(await confirmReview(canonicalCmd(review[1].toLowerCase()), text))) return;
+  if (review) {
+    const cmd = canonicalCmd(review[1].toLowerCase());
+    if (cmd !== "injection" && !state.me.task_setup) {
+      const saved = await openTaskSetupModal("Select your Persona, Task Family, and Constraint Count before starting this review.");
+      if (!saved) return;
+    }
+    if (!(await confirmReview(cmd, text))) return;
+  }
   if (review && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
   $("#send").disabled = true;
   try {

@@ -108,7 +108,7 @@ def maybe_kickoff(session, chat):
 
 
 # ---- the guide pop-up ----
-INTRO_GUIDES = (("hardness", "Hardness"), ("toolcalls", "Tool calls"), ("patterns", "Failure patterns"))
+INTRO_GUIDES = (("hardness", "Stumping"), ("toolcalls", "Horizon"), ("patterns", "Rubric & All-Fail"))
 _INTRO_KEYS = {k for k, _ in INTRO_GUIDES}
 
 

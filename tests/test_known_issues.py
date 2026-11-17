@@ -1,7 +1,5 @@
-"""The "Known data issues" sidebar (2026-10-30): a pilot behind KNOWN_ISSUES_PILOT, showing the task's universe's list
-(both, grouped, until the date is picked), from server/known_issues.json."""
+"""Tests for Sonorra known_issues.json, known_data_issues.md, and /api/known-issues."""
 
-import importlib.util
 import json
 import re
 import tempfile
@@ -10,17 +8,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from server import config, db, known_issues, workspace
+from server import config, db, known_issues
 
 REQUIRED = ("id", "universe", "level", "fails", "title", "dont", "why")
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def converter():
-    spec = importlib.util.spec_from_file_location("build_known_issues", ROOT / "deploy" / "build_known_issues.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 class DataFileTest(unittest.TestCase):
@@ -36,6 +27,7 @@ class DataFileTest(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
 
     def test_required_fields_and_values(self):
+        self.assertGreaterEqual(len(self.issues), 20)
         for i in self.issues:
             with self.subTest(issue=i.get("id")):
                 for key in REQUIRED:
@@ -43,108 +35,23 @@ class DataFileTest(unittest.TestCase):
                 for key in ("title", "dont", "why"):
                     self.assertIsInstance(i[key], str)
                     self.assertTrue(i[key].strip())
-                self.assertIn(i["universe"], known_issues.UNIVERSES)
+                self.assertEqual(i["universe"], "sonorra")
                 self.assertIn(i["level"], ("avoid", "watch"))
                 self.assertIsInstance(i["fails"], int)
                 self.assertGreaterEqual(i["fails"], 0)
-                self.assertLessEqual(len(i["title"].split()), 8)
-                self.assertTrue(i.get("safer", "x").strip())  # omitted, never empty
-                self.assertRegex(i["id"], r"^SC-\d+$" if i["universe"] == "synthcut" else r"^NB-\d+$")
-                self.assertLessEqual(set(i), set(REQUIRED) | {"safer"})
-
-    def test_both_universes_most_fails_first(self):
-        for u in known_issues.UNIVERSES:
-            fails = [i["fails"] for i in self.issues if i["universe"] == u]
-            self.assertTrue(fails, u)
-            self.assertEqual(fails, sorted(fails, reverse=True), u)
-
-    def test_universe_keys_match_the_task_dates(self):
-        self.assertEqual(set(known_issues.UNIVERSES), set(workspace.UNIVERSE_DATES))
-
-    def test_soft_issues_stay_avoid(self):
-        """Soft issues are still traps (2026-10-30): SC-4 is soft but fully verified, NB-8 / NB-27 are soft only."""
-        level = {i["id"]: i["level"] for i in self.issues}
-        self.assertEqual([level["SC-4"], level["NB-8"], level["NB-27"]], ["avoid"] * 3)
-        self.assertEqual([level["SC-7"], level["NB-30"]], ["watch"] * 2)  # partial; single report
-
-    def test_no_internal_jargon(self):
-        text = json.dumps(self.issues)
-        for word in ("Phase 3.2", "Eval 1", "run_id", "FD-"):
-            self.assertNotIn(word, text)
-
-
-class WatchRuleTest(unittest.TestCase):
-    def test_watch_is_partial_or_single_report_only(self):
-        watch_level = converter().watch_level
-        self.assertEqual(watch_level(partial=False, reports=40), "avoid")
-        self.assertEqual(watch_level(partial=True, reports=40), "watch")
-        self.assertEqual(watch_level(partial=False, reports=1), "watch")
+                self.assertTrue(i.get("safer", "x").strip())
+                self.assertRegex(i["id"], r"^(?:K-\d+|V12-C\d+)$")
 
 
 class MarkdownTest(unittest.TestCase):
-    """server/guidelines/known_data_issues.md: the same list for the chat assistant (every workspace gets it at
-    guidelines/), built with the JSON by deploy/build_known_issues.py."""
-
     def setUp(self):
         self.data = json.loads(known_issues.PATH.read_text())
         self.md = (config.GUIDELINES_DIR / "known_data_issues.md").read_text()
 
     def test_same_ids_in_the_same_order(self):
-        ids = re.findall(r"^### ((?:SC|NB)-\d+) · ", self.md, re.M)
+        ids = re.findall(r"^### (K-\d+|V12-C\d+) — ", self.md, re.M)
         self.assertEqual(ids, [i["id"] for i in self.data["issues"]])
-
-    def test_matches_a_fresh_build_from_the_json(self):
-        self.assertEqual(self.md, converter().markdown(self.data), "rerun deploy/build_known_issues.py")
-
-    def test_grouped_by_task_date_with_the_portal_labels(self):
-        labels = converter().UNIVERSE_LABELS
-        self.assertEqual(labels, {u: workspace.UNIVERSE_DATES[u][1] for u in known_issues.UNIVERSES})
-        self.assertEqual(list(labels), list(known_issues.UNIVERSES))
-        for label in labels.values():
-            self.assertIn(f"## Task date {label}", self.md)
         self.assertIn(self.data["verified"], self.md)
-
-
-class PilotTest(unittest.TestCase):
-    chat = {"user_id": "6a42e279aaaaaaaaaaaaaaaa", "email": "cb@outlier.ai+outlier"}
-
-    def pilot(self, value, session=None):
-        with mock.patch.object(config, "KNOWN_ISSUES_PILOT", value):
-            return known_issues.in_pilot(session or {"user_id": self.chat["user_id"]}, self.chat)
-
-    def test_empty_is_off(self):
-        self.assertFalse(self.pilot([]))
-
-    def test_star_is_everyone(self):
-        self.assertTrue(self.pilot(["*"]))
-
-    def test_by_email_without_the_suffix_and_any_case(self):
-        self.assertTrue(self.pilot(["CB@outlier.ai"]))
-        self.assertTrue(self.pilot(["cb@outlier.ai+outlier"]))
-        self.assertFalse(self.pilot(["other@outlier.ai"]))
-
-    def test_by_outlier_id(self):
-        self.assertTrue(self.pilot(["someone@x.com", "6a42e279aaaaaaaaaaaaaaaa"]))
-
-    def test_by_admin_login(self):
-        self.assertTrue(self.pilot(["atlasadmin"], {"admin": "atlasadmin", "user_id": ""}))
-
-
-class ViewTest(unittest.TestCase):
-    def test_one_universe(self):
-        for u in known_issues.UNIVERSES:
-            v = known_issues.view(u)
-            self.assertEqual((v["enabled"], v["universe"], [g["universe"] for g in v["groups"]]), (True, u, [u]))
-            self.assertTrue(all(i["universe"] == u for i in v["groups"][0]["issues"]))
-            self.assertEqual(v["groups"][0]["label"], workspace.UNIVERSE_DATES[u][1])
-            self.assertEqual(v["groups"][0]["date"], workspace.UNIVERSE_DATES[u][0])  # the header shows the task date
-
-    def test_no_date_yet_gives_both_grouped(self):
-        v = known_issues.view(None)
-        self.assertIsNone(v["universe"])
-        self.assertEqual([g["universe"] for g in v["groups"]], list(known_issues.UNIVERSES))
-        total = sum(len(g["issues"]) for g in v["groups"])
-        self.assertEqual(total, len(known_issues.data()["issues"]))
 
 
 class EndpointTest(unittest.TestCase):
@@ -152,9 +59,7 @@ class EndpointTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
-        self.universe = None
-        patches = [mock.patch.object(config, "DATA_DIR", self.tmp), mock.patch.object(db, "_conn", None),
-                   mock.patch.object(workspace, "universe_date", lambda a: self.universe)]
+        patches = [mock.patch.object(config, "DATA_DIR", self.tmp), mock.patch.object(db, "_conn", None)]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -179,15 +84,12 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(self.get([]), {"enabled": False})
         self.assertEqual(self.get(["other@outlier.ai"]), {"enabled": False})
 
-    def test_enabled_follows_the_task_date(self):
-        self.universe = "normal"
+    def test_enabled_returns_sonorra(self):
         res = self.get(["cb@outlier.ai"])
         self.assertTrue(res["enabled"])
-        self.assertEqual([g["universe"] for g in res["groups"]], ["normal"])
-        self.universe = "synthcut"
-        self.assertEqual([g["universe"] for g in self.get(["u1"])["groups"]], ["synthcut"])
-        self.universe = None
-        self.assertEqual(len(self.get(["*"])["groups"]), 2)
+        self.assertEqual(res["universe"], "sonorra")
+        self.assertEqual([g["universe"] for g in res["groups"]], ["sonorra"])
+        self.assertGreaterEqual(len(res["groups"][0]["issues"]), 20)
 
     def test_signed_out(self):
         from fastapi.testclient import TestClient

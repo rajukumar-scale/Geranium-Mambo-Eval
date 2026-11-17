@@ -94,17 +94,18 @@ def favicon():
     return FileResponse(WEB / "img" / "icon-32.png", media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
 HELP = """**Commands**
-- `/injection` review your injection SQL
-- `/prompt` review your task prompt (your assignment and task date are filled in from the platform; you don't need to paste them)
-- `/hardness` check how hard the task is for Opus (needs one unhinted run: attach its trajectory JSON)
-- `/oe` review your Oracle Events
-- `/rubric` review your rubric
+- `/injection` optional: statically review `01_Injection.sql` against Sonorra Postgres schema (`live_postgres.json`), chronology, and coherence (skip if your task uses no SQL)
+- `/prompt` review your task prompt against Task Setup, `S1`–`S14`, Persona ACL, attachments, and similarity
+- `/rubric` review `05_Rubric.json` (`title` + `weight` only) against `S17`, `S21`, `F2`/`F3`, and `R1`–`R7`
+- `/stumping` evaluate `S18` stumping across 3 Carbon + 3 Opus base runs (`Case PENDING / C / A / B`) + solvability re-runs
+- `/all-fail-validation` (aliases `/all-fail`, `/af`) validate `S22` all-failing criteria and Case B solvability re-runs
+- `/reference-notes` (alias `/refnotes`) review Reference Notes (`S19`, `S20`, `N1`–`N2`)
 - `/admin <message>` get a human admin's help
 - `/help` show this list
 
-Paste inputs straight into the chat, or attach files with 📎. You can send inputs on their own first; they're saved for this attempt and reused by every command. Messages without a command are answered as follow-ups, for example "why did criterion 4 fail?". Ask for help with any piece of your task (SQL for an injected message, a rubric row, wording for one part, feedback, brainstorming); it just won't write the whole task for you in one go.
+Select **Task Setup** (Persona, Task Family, Constraint Count) first using the Task Setup card above or the top-bar chip. Paste other inputs into chat or attach files with 📎. Messages without a command are answered as follow-ups.
 
-Open **Guide** (top right) any time for the steps and for which screen to screenshot as proof."""
+Open **Guide** (top right) any time for steps, stumping rules, and pass-card instructions."""
 
 
 @app.on_event("startup")
@@ -352,9 +353,16 @@ def chat_state(attempt_id):
         "active_run": run_view(db.active_run(attempt_id)),
         "reports": workspace.list_reports(attempt_id),
         "inputs": workspace.saved_inputs(attempt_id),
-        # The installed eval asks each task's date first; the chat page asks it with two buttons instead.
-        "universe": {"asks": workspace.dated_release(), "date": workspace.universe_date(attempt_id),
-                     "choices": {k: label for k, (_, label) in workspace.UNIVERSE_DATES.items()}},
+        # Single fixed-clock Sonorra universe (never ask for a date); 3-dropdown Task Setup instead.
+        "universe": {"asks": False, "date": None, "choices": {}},
+        "task_setup": workspace.read_task_setup(attempt_id),
+        "task_setup_options": {
+            "personas": workspace.task_setup_personas(),
+            "families": list(workspace.TASK_SETUP_FAMILIES),
+            "constraint_counts": [
+                {"id": k, "label": v} for k, v in workspace.TASK_SETUP_CONSTRAINTS.items()
+            ],
+        },
         "stages": [{"id": s, "file": f, "label": config.STAGE_LABELS[s], "optional": s in config.OPTIONAL_STAGES}
                    for s, f, *_ in config.STAGES],
         "aliases": dict(config.COMMAND_ALIASES),
@@ -665,6 +673,35 @@ def _guide_intro(session):
     except Exception:  # noqa: BLE001
         log.exception("guide pop-up state failed for %s", session["attempt_id"])
         return None
+
+
+class TaskSetupBody(BaseModel):
+    persona_email: str
+    family: str
+    constraint_count: str
+
+
+@app.post("/api/task-setup")
+async def set_task_setup(body: TaskSetupBody, request: Request):
+    """Save the 3-dropdown Task Setup (Persona, Family, Constraint Count) into 00_Task_Assigned_Inputs.md."""
+    session = current_user(request)
+    attempt_id = session["attempt_id"]
+    chat_writable(session, db.get_chat(attempt_id))
+    if db.active_run(attempt_id):
+        raise HTTPException(409, "Wait for the running review to finish, then save Task Setup.")
+    try:
+        saved = await workspace.save_task_setup(attempt_id, body.persona_email, body.family, body.constraint_count)
+    except ValueError as err:
+        raise HTTPException(400, str(err)) from err
+    except Exception as err:  # noqa: BLE001
+        log.warning("saving task setup for %s failed: %s", attempt_id, err)
+        raise HTTPException(500, "Couldn't save Task Setup. Please try again or use /admin.") from err
+    log.info("task setup for %s saved: %s", attempt_id, saved)
+    return for_viewer(session, {
+        "ok": True,
+        "task_setup": saved,
+        "inputs": workspace.saved_inputs(attempt_id),
+    })
 
 
 class UniverseBody(BaseModel):

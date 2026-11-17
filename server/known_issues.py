@@ -1,16 +1,12 @@
-"""The chat page's "Known data issues" list: base-data records that contradict each other, so a task graded on them
-usually fails Cross-Service Coherence. A pilot for now (KNOWN_ISSUES_PILOT).
-
-known_issues.json is built by deploy/build_known_issues.py from the base-data review (2026-10-30: 6,396 portal reports,
-both sides of every issue checked in the universe exports). Edit the script, not the JSON."""
+"""The chat page's "Known data issues" list for Sonorra v17."""
 
 import json
 from pathlib import Path
 
-from . import broadcasts, config, workspace
+from . import broadcasts, config
 
 PATH = Path(__file__).with_name("known_issues.json")
-UNIVERSES = ("synthcut", "normal")  # the keys of workspace.UNIVERSE_DATES, in the order shown when no date is picked
+UNIVERSES = ("sonorra",)
 _data = None
 
 
@@ -22,8 +18,6 @@ def data():
 
 
 def in_pilot(session, chat):
-    """KNOWN_ISSUES_PILOT lists emails or Outlier IDs ("*" = everyone, empty = off). Matched against the signed-in
-    person: their Outlier ID, the attempt's email (with or without the +outlier suffix), or the admin login."""
     pilot = {x.lower() for x in config.KNOWN_ISSUES_PILOT}
     if not pilot:
         return False
@@ -34,11 +28,12 @@ def in_pilot(session, chat):
     return bool(pilot & {str(x).lower() for x in who if x})
 
 
-def view(universe):
-    """The list for one universe ("synthcut" / "normal"), or both, grouped, when the task date isn't picked yet."""
+def view(universe=None):
     d = data()
-    picked = [universe] if universe in UNIVERSES else list(UNIVERSES)
-    groups = [{"universe": u, "label": workspace.UNIVERSE_DATES[u][1], "date": workspace.UNIVERSE_DATES[u][0],
-               "issues": [i for i in d["issues"] if i["universe"] == u]} for u in picked]
-    return {"enabled": True, "verified": d["verified"], "universe": universe if universe in UNIVERSES else None,
-            "groups": groups}
+    groups = [{
+        "universe": "sonorra",
+        "label": "Sonorra v17 (Aug 24, 2026 16:41 CT)",
+        "date": "2026-08-24",
+        "issues": [i for i in d["issues"] if i.get("universe") == "sonorra"],
+    }]
+    return {"enabled": True, "verified": d["verified"], "universe": "sonorra", "groups": groups}
