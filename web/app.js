@@ -299,7 +299,7 @@ async function catchUp() {
 const PAGE_OPENED = Date.now() / 1000;
 function addMessage(m) {
   if (!m || state.messages.some(x => x.id === m.id)) return;
-  if (m.role === "report" && m.meta && m.meta.stage === "hardness" && (m.meta.injection_missing || m.meta.injection_stale)
+  if (m.role === "report" && m.meta && ["stumping", "hardness"].includes(m.meta.stage) && (m.meta.injection_missing || m.meta.injection_stale)
       && !state.me.admin && (m.created_at || 0) > PAGE_OPENED)  // new, not old history
     setTimeout(() => showInjectGuideAfterHardness(m.meta.injection_missing ? "missing" : "stale"), 400);
   if (m.role === "system" && m.meta && m.meta.env_check > 0 && !state.me.admin) {  // env data check found records
@@ -1235,6 +1235,11 @@ async function send() {
       const saved = await openTaskSetupModal("Select your Persona, Task Family, and Constraint Count before starting this review.");
       if (!saved) return;
     }
+    if (cmd === "stumping" && !state.me.admin
+        && (state.me.inputs || []).some(i => i.key === "injection" && i.state === "saved")
+        && !(await showInjectGuide({ lead: `<p><b>Before /stumping:</b> it checks the Carbon and Opus runs you upload, so those runs must have been made
+            with your injection SQL loaded.</p>`, check: "My Carbon and Opus runs were made in a sandbox where I ran my injection SQL first",
+          ok: "Continue to /stumping", cancel: "Cancel" }))) return;
     if (!(await confirmReview(cmd, text))) return;
   }
   if (review && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});

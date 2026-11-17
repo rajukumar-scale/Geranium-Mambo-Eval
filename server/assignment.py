@@ -32,7 +32,12 @@ from . import auth, config, db, hub, staleness, workspace
 
 log = logging.getLogger("portal.assignment")
 
-UNIVERSE_BY_ID = {"long_horizon_tech_35k_scoped": "sonorra", "long_horizon_tech_35k": "sonorra"}
+UNIVERSE_BY_ID = {
+    "hg4-synth-sep30cut": "synthcut",
+    "hg4-2026-08-31": "normal",
+    "long_horizon_tech_35k_scoped": "sonorra",
+    "long_horizon_tech_35k": "sonorra",
+}
 SOURCE_NAME = "platform_assignment.md"
 CACHE_SECONDS = 3600
 _cache = {}  # task_id -> (time, row or None)

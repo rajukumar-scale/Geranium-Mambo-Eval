@@ -24,7 +24,7 @@ TROUBLE = re.compile(
     r"inject\w*[^.\n]{0,40}(?:not (?:loading|applied|showing|seeded)|isn'?t (?:loading|being applied|showing)|fail\w* to load|keeps failing)",
     re.I)
 # Our own portal's errors (the review service, not their sandbox): the sandbox guide doesn't help there.
-PORTAL = re.compile(r"no space left|errno|run didn'?t finish|eval portal|/(?:prompt|rubric|oe|hardness|injection)\b[^.\n]{0,40}(?:fail|error)", re.I)
+PORTAL = re.compile(r"no space left|errno|run didn'?t finish|eval portal|/(?:prompt|rubric|stumping|all-fail-validation|all-fail|af|reference-notes|refnotes|oe|hardness|injection)\b[^.\n]{0,40}(?:fail|error)", re.I)
 
 
 def is_sandbox_trouble(text):

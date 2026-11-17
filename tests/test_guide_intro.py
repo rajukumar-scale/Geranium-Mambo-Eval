@@ -44,7 +44,7 @@ class GuideIntroTest(EndpointTest):
         self.read("hardness")
         res = self.client().post("/api/guides/ack")
         self.assertEqual(res.status_code, 409)
-        self.assertIn("Tool calls, Failure patterns", res.json()["detail"])
+        self.assertIn("Horizon, Rubric & All-Fail", res.json()["detail"])
         self.read("toolcalls")
         self.read("patterns")
         self.assertEqual(self.client().post("/api/guides/ack").status_code, 200)

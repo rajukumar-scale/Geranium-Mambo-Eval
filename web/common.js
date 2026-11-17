@@ -962,7 +962,14 @@ function messageHtml(m, opts = {}) {
       ${meta.score != null ? `<span class="muted">score ${esc(meta.score)}</span>` : ""}
       ${meta.exec_status && meta.exec_status !== "COMPLETE" ? `<span class="muted">· ${esc(meta.exec_status)}</span>` : ""}</div>
       ${ts}<button data-report="${m.id}">View</button><button data-download="${m.id}">Download</button></div>
-      ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}</div></div>`;
+      ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}
+      ${!opts.admin && !meta.injection_missing && !meta.injection_stale
+        ? (hardnessToolCallFail(m) ? toolCallHint() : "") + (hardnessTooEasy(meta) ? tooEasyHint() : "")
+          + (hardnessPatternRisk(m) ? patternRiskHint() : "") : ""}
+      ${["stumping", "hardness"].includes(meta.stage) && meta.injection_missing ? `<div class="stale-line">💉 Your runs were made without your injection.
+        <button class="small" data-injectguide="missing">How to inject</button></div>`
+      : ["stumping", "hardness"].includes(meta.stage) && meta.injection_stale ? `<div class="stale-line">💉 Your runs were made on an older version of your SQL.
+        <button class="small" data-injectguide="stale">How to re-inject</button></div>` : ""}</div></div>`;
   }
   if (m.role === "proof" && meta.locked) {
     return `<div class="msg system"><div class="bubble proofcard lockedcard"><div class="rcard"><div class="grow">🔒 <b>/${esc(meta.stage)} ${esc(meta.verdict)}</b>

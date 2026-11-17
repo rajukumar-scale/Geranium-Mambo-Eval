@@ -27,7 +27,7 @@ log = logging.getLogger("portal.status")
 COMPONENTS = [
     ("portal", "Eval Portal", "The website and sign-in"),
     ("machines", "Review machines", "Starting a review's machine and uploading its files"),
-    ("reviews", "Reviews", "/injection, /prompt, /hardness, /oe and /rubric runs"),
+    ("reviews", "Reviews", "/injection, /prompt, /rubric, /stumping, /all-fail-validation and /reference-notes runs"),
     ("assistant", "Eval assistant", "The model connection behind reviews and chat replies"),
 ]
 NAMES = {k: n for k, n, _ in COMPONENTS}

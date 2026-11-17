@@ -48,9 +48,9 @@ class InjectionMissingReportTest(unittest.TestCase):
                      "Verdict: PASS. Opus missed the injected PR on ZOM-458."):
             self.assertFalse(runner.INJECTION_MISSING.search(text), text)
 
-    def test_the_page_warns_before_hardness_and_after_such_a_report(self):
+    def test_the_page_warns_before_stumping_and_after_such_a_report(self):
         app = (WEB / "app.js").read_text()
-        self.assertIn('review[1].toLowerCase() === "hardness"', app)
+        self.assertIn('cmd === "stumping"', app)
         self.assertIn('i.key === "injection" && i.state === "saved"', app)
         self.assertIn("m.meta.injection_missing", app)
         common = (WEB / "common.js").read_text()

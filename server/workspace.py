@@ -221,17 +221,32 @@ def saved_inputs(attempt_id):
     return out
 
 
-# Long Horizon uses a single fixed-clock Sonorra universe (2026-08-24T16:41:00-05:00): never ask for a date.
-UNIVERSE_DATES = {}
+# The task date (since the 2026-10-20 eval): each task is on one of two universes, picked by its saved date.
+# Single-universe bundles (like Sonorra, which ships sonorra_universe.py instead of hg_universe.py) have dated_release() == False.
+UNIVERSE_DATES = {"normal": ("2026-02-14", "Feb 14, 2026 (normal)"), "synthcut": ("2025-10-01", "Oct 1, 2025 (synth-cut)")}
 
 
 def dated_release(base=None):
-    """Single fixed-clock universe: never ask for a task date."""
-    return False
+    """Does the installed eval ask for a task date (two universes)?"""
+    return ((base or config.EVAL_BASE_DIR) / "Evals" / "tools" / "hg_universe.py").is_file()
 
 
 def universe_date(attempt_id):
-    return None
+    """The task date this attempt saved ("normal" / "synthcut"), or None. Checked like the eval does: the saved
+    file must exist and match its recorded hash, or the eval asks again."""
+    entry = next((i for i in saved_inputs(attempt_id) if i["key"] == "universe"), None)
+    if not entry or entry["state"] != "saved" or len(entry["files"]) != 1:
+        return None
+    root = task_inputs(attempt_id).resolve()
+    path = _input_path(root, entry["files"][0])
+    try:
+        raw = path.read_bytes() if path else b""
+    except OSError:
+        return None
+    if not raw or hashlib.sha256(raw).hexdigest() != entry["files"][0].get("sha256"):
+        return None
+    date = raw.decode("utf-8", "replace").strip()
+    return next((key for key, (d, _) in UNIVERSE_DATES.items() if d == date), None)
 
 
 def _input_path(root, f):

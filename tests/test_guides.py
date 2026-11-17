@@ -89,9 +89,9 @@ class GuideEndpointTest(unittest.TestCase):
 class KickoffLinksTest(unittest.TestCase):
     def test_the_card_links_the_guides(self):
         card = plan.card_text()
-        self.assertIn("[Read the hardness guide](/?guide=hardness)", card)
-        self.assertIn("[Read the tool-call guide](/?guide=toolcalls)", card)
-        self.assertIn("[Read the failure patterns guide](/?guide=patterns)", card)
+        self.assertIn("[Read the stumping guide](/?guide=hardness)", card)
+        self.assertIn("[Read the horizon guide](/?guide=toolcalls)", card)
+        self.assertIn("[Read the rubric & all-fail guide](/?guide=patterns)", card)
         for name in re.findall(r"\]\(/\?guide=(\w+)", card):
             self.assertIn(name, portal.GUIDES)
 

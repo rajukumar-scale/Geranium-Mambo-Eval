@@ -1362,8 +1362,15 @@ def admin_logout():
 
 
 # Which review step a saved input belongs to: saving one after its review means they're back working on that step.
-INPUT_STEP = {"injection": "injection", "task-details": "prompt", "prompt": "prompt", "dynamic-context": "prompt",
-              "human-time": "prompt", "error-async": "prompt", "opus": "hardness", "haiku": "hardness", "oe": "oe", "rubric": "rubric"}
+INPUT_STEP = {
+    "injection": "injection", "task-details": "prompt", "prompt": "prompt",
+    "dynamic-context": "prompt", "human-time": "prompt", "error-async": "prompt",
+    "opus": "hardness", "haiku": "hardness", "oe": "oe", "rubric": "rubric",
+    "runs-base": "stumping", "grading-base": "stumping", "stumping-check": "stumping",
+    "runs-solv": "all-fail-validation", "grading-solv": "all-fail-validation",
+    "all-fail": "all-fail-validation", "all-fail-justify": "all-fail-validation",
+    "reference-notes": "reference-notes",
+}
 
 
 def _input_edits(attempt):

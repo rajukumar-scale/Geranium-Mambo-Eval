@@ -1,4 +1,4 @@
-**Please read these 3 guides before you start.**
+**Please read these 3 guides before you start. This is really important.**
 
 Most Geranium Mambo tasks that fail review fail for reasons covered here: missing Persona ACL boundaries, weak traps that don't stump Carbon on weight-5 IF criteria, compounded rubric criteria, or building on a known base-data contradiction in Sonorra v17.
 
