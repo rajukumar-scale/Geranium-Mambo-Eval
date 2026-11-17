@@ -35,7 +35,7 @@ trap 'st state=failed finished_at="$(date +%s)" error="$(grep -v "^STEP" "$LOG" 
 echo "STEP update started for: $FILES"
 
 UNIS=""
-for f in $FILES; do case "$f" in *HarmonyGames_*) UNIS="$UNIS $f";; esac; done
+for f in $FILES; do case "$f" in Universe_*) UNIS="$UNIS $f";; esac; done
 NEWSNAP=""
 RUNNER=$(grep -E '^REVIEW_RUNNER=' "$APP/.env" 2>/dev/null | cut -d= -f2 | awk '{print $1}' || true)
 if [ -n "$UNIS" ] && [ "$RUNNER" = modal ]; then
@@ -53,12 +53,12 @@ if [ -n "$NEWSNAP" ]; then
   mv /srv/eval-data/runner_snapshot.tmp /srv/eval-data/runner_snapshot
   echo "STEP new reviews now start from $NEWSNAP"
   # Keep this image and the previous job-made one (rollback); remove older ones. The original
-  # hg-runner image is never removed.
+  # gm-runner image is never removed.
   sudo -u evalportal -H /usr/local/bin/boat-cli snapshots --no-update --json | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
 items = data if isinstance(data, list) else next((v for v in data.values() if isinstance(v, list)), [])
-names = sorted(s["name"] for s in items if (s.get("name") or "").startswith("hg-runner-2"))
+names = sorted(s["name"] for s in items if (s.get("name") or "").startswith("gm-runner-2"))
 print("\n".join(names[:-2]))' | while read -r old; do
     if [ -n "$old" ]; then  # an if, not &&: an empty line must not fail the job under set -e
       sudo -u evalportal -H /usr/local/bin/boat-cli snapshot rm --no-update "$old" >/dev/null && echo "removed old image $old" || echo "could not remove $old"
@@ -67,5 +67,5 @@ print("\n".join(names[:-2]))' | while read -r old; do
 fi
 
 st state=done finished_at="$(date +%s)" release="$(basename "$(readlink -f /srv/eval-base)")" \
-   snapshot="$(cat /srv/eval-data/runner_snapshot 2>/dev/null || echo hg-runner)"
+   snapshot="$(cat /srv/eval-data/runner_snapshot 2>/dev/null || echo gm-runner)"
 echo "STEP done"

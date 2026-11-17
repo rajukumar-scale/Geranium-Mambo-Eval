@@ -19,8 +19,10 @@ class PassLockTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
-        self.saved = {"universe": "u", "task-details": "td", "prompt": "p1", "injection": "sql1", "oe": "oe1",
-                      "rubric": "r1"}
+        self.saved = {"task-details": "td", "prompt": "p1", "injection": "sql1", "rubric": "r1",
+                      "runs-base": "rb1", "grading-base": "gb1", "stumping-check": "sc1",
+                      "runs-solv": "rs1", "grading-solv": "gs1", "all-fail": "af1",
+                      "all-fail-justify": "afj1", "reference-notes": "rn1"}
         patches = [mock.patch.object(config, "DATA_DIR", self.tmp), mock.patch.object(db, "_conn", None),
                    mock.patch.object(staleness, "snapshot", lambda a: dict(self.saved)),
                    mock.patch.object(portal.blocks, "disabled", lambda *a: None),
@@ -67,12 +69,12 @@ class PassLockTest(unittest.TestCase):
         return res.json()
 
     def test_first_pass_through_the_stages_is_never_locked(self):
-        for stage in ("injection", "prompt", "hardness", "oe", "rubric"):
+        for stage in ("injection", "prompt", "rubric", "stumping", "all-fail-validation", "reference-notes"):
             self.passed(stage)
             me = self.me()
             self.assertFalse(me["pass_gate"]["locked"], stage)
             self.assertTrue(all(p["code"] and p["fingerprint"] for p in me["proofs"]))
-        self.assertEqual([s["status"] for s in me["pass_gate"]["stages"]], ["current"] * 5)
+        self.assertEqual([s["status"] for s in me["pass_gate"]["stages"]], ["current"] * 6)
 
     def test_a_stage_not_passed_yet_never_locks(self):
         self.passed("injection")
@@ -87,51 +89,70 @@ class PassLockTest(unittest.TestCase):
 
     def test_ebad_sequence_unlocks_in_order_and_warns_about_later_stages(self):
         """Everything passed on sql1, the SQL changed, then the stages are sent again in order."""
-        for stage in ("injection", "prompt", "hardness", "oe", "rubric"):
+        for stage in ("injection", "prompt", "rubric", "stumping", "all-fail-validation", "reference-notes"):
             self.passed(stage)
         self.saved["injection"] = "sql2"
         cards = self.newest()
         self.assertEqual(cards["injection"]["locked"], {"self": True, "todo": ["injection"]})
-        self.assertEqual(cards["rubric"]["locked"]["todo"], ["injection", "prompt", "hardness", "oe", "rubric"])
+        self.assertEqual(cards["reference-notes"]["locked"]["todo"],
+                         ["injection", "prompt", "rubric", "stumping", "all-fail-validation", "reference-notes"])
         self.assertTrue(all(c["code"] is None for c in cards.values()))
-        for stage in ("injection", "prompt", "hardness"):
+        for stage in ("injection", "prompt", "rubric"):
             self.passed(stage)
         me = self.me()
-        self.assertEqual(me["pass_gate"]["todo"], ["oe", "rubric"])
+        self.assertEqual(me["pass_gate"]["todo"], ["stumping", "all-fail-validation", "reference-notes"])
         cards = self.newest(me)
-        for stage in ("injection", "prompt", "hardness"):  # usable again, with the warning
+        for stage in ("injection", "prompt", "rubric"):  # usable again, with the warning
             self.assertFalse(cards[stage]["locked"], stage)
             self.assertTrue(cards[stage]["code"] and cards[stage]["fingerprint"], stage)
-            self.assertEqual(cards[stage]["warn_later"], ["oe", "rubric"], stage)
-        self.assertTrue(cards["oe"]["locked"]["self"] and cards["rubric"]["locked"]["self"])
-        self.assertIsNone(cards["rubric"]["code"])
+            self.assertEqual(cards[stage]["warn_later"], ["stumping", "all-fail-validation", "reference-notes"], stage)
+        self.assertTrue(cards["stumping"]["locked"]["self"] and cards["reference-notes"]["locked"]["self"])
+        self.assertIsNone(cards["reference-notes"]["code"])
         with mock.patch.object(portal, "admin_role", lambda email: None):
             msgs = self.client().get("/api/messages").json()
         history = {m["meta"]["ref"]: m["meta"] for m in msgs if m["role"] == "proof"}
-        self.assertIsNone(history[cards["rubric"]["ref"]]["code"])  # the old rubric card is locked in the chat too
-        self.assertTrue(history[cards["hardness"]["ref"]]["code"])
-        self.passed("oe")
+        self.assertIsNone(history[cards["reference-notes"]["ref"]]["code"])  # the old refnotes card is locked in chat too
+        self.assertTrue(history[cards["rubric"]["ref"]]["code"])
+        self.passed("stumping")
+        self.passed("all-fail-validation")
         cards = self.newest()
-        self.assertEqual((cards["oe"]["warn_later"], bool(cards["rubric"]["locked"])), (["rubric"], True))
-        self.passed("rubric")
+        self.assertEqual((cards["all-fail-validation"]["warn_later"], bool(cards["reference-notes"]["locked"])),
+                         (["reference-notes"], True))
+        self.passed("reference-notes")
         me = self.me()
         self.assertEqual(me["pass_gate"]["todo"], [])
         self.assertTrue(all(c["code"] and not c["locked"] and not c["warn_later"] for c in self.newest(me).values()))
 
     def test_a_prompt_change_still_gives_the_new_prompt_card(self):
-        """The prompt card is needed for the Opus run behind /hardness: it must never wait on later stages."""
-        for stage in ("injection", "prompt", "hardness", "oe", "rubric"):
+        """The prompt card is needed to move on: it must never wait on later stages."""
+        for stage in ("injection", "prompt", "rubric", "stumping"):
             self.passed(stage)
         self.saved["prompt"] = "p2"
         cards = self.newest()
         self.assertFalse(cards["injection"]["locked"])  # earlier than the change: still usable
-        self.assertEqual(cards["injection"]["warn_later"], ["prompt", "hardness", "oe", "rubric"])
+        self.assertEqual(cards["injection"]["warn_later"], ["prompt", "rubric", "stumping"])
         self.passed("prompt")
         cards = self.newest()
         self.assertFalse(cards["prompt"]["locked"])
         self.assertTrue(cards["prompt"]["code"])
-        self.assertEqual(cards["prompt"]["warn_later"], ["hardness", "oe", "rubric"])
-        self.assertTrue(cards["hardness"]["locked"]["self"])
+        self.assertEqual(cards["prompt"]["warn_later"], ["rubric", "stumping"])
+        self.assertTrue(cards["rubric"]["locked"]["self"])
+
+    def test_clearing_injection_does_not_lock_later_stages(self):
+        """Optional /injection: clearing SQL after passing /injection must not lock /prompt or later cards."""
+        import hashlib, json as _json
+        for stage in ("injection", "prompt", "rubric"):
+            self.passed(stage)
+        # Clear injection SQL -> prompt and rubric still see injection input changed, so only prompt/rubric re-run,
+        # never /injection itself!
+        self.saved["injection"] = hashlib.sha256(_json.dumps(["cleared", []]).encode()).hexdigest()[:16]
+        me = self.me()
+        self.assertNotIn("injection", me["pass_gate"]["todo"])
+        self.passed("prompt")
+        self.passed("rubric")
+        me = self.me()
+        self.assertEqual(me["pass_gate"]["todo"], [])
+        self.assertFalse(me["pass_gate"]["locked"])
 
     def test_admins_still_see_the_codes(self):
         self.passed("injection")
@@ -163,17 +184,17 @@ class PassLockTest(unittest.TestCase):
 
     def test_live_pass_event_is_locked_like_the_history(self):
         self.passed("injection")
-        self.passed("oe")
+        self.passed("rubric")
         self.saved["injection"] = "sql2"
-        old_oe = [p for p in self.me()["proofs"] if p["stage"] == "oe"][-1]
+        old_rubric = [p for p in self.me()["proofs"] if p["stage"] == "rubric"][-1]
         event = staleness.view_event("a1", {"event": "proof", "attempt_id": "a1",
-                                            "data": {**old_oe, "code": "EVP-X", "fingerprint": "fp", "locked": None}})
+                                            "data": {**old_rubric, "code": "EVP-X", "fingerprint": "fp", "locked": None}})
         self.assertIsNone(event["data"]["code"])
         self.assertTrue(event["data"]["locked"]["self"])
         fresh = self.passed("injection")
         event = staleness.view_event("a1", {"event": "proof", "attempt_id": "a1", "data": fresh})
         self.assertTrue(event["data"]["code"])  # a fresh injection card is usable, with the warning
-        self.assertEqual(event["data"]["warn_later"], ["oe"])
+        self.assertEqual(event["data"]["warn_later"], ["rubric"])
         other = {"event": "message", "attempt_id": "a1", "data": {"role": "assistant", "content": "hi"}}
         self.assertIs(staleness.view_event("a1", other), other)
 

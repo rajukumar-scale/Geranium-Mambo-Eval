@@ -17,11 +17,12 @@ from . import db
 # fraction of the run at which each step starts. Replaced by the recorded step times once enough
 # runs have them.
 DEFAULTS = {
-    "injection": {"minutes": 12.7, "marks": {"inputs": 0.026, "gate": 0.768}},
-    "prompt": {"minutes": 32.7, "marks": {"inputs": 0.009, "gate": 0.018, "recheck": 0.479, "final": 0.941}},
-    "hardness": {"minutes": 6.4, "marks": {"inputs": 0.048, "final": 0.633}},
-    "oe": {"minutes": 22.1, "marks": {"inputs": 0.019, "recheck": 0.603, "final": 0.634}},
-    "rubric": {"minutes": 22.1, "marks": {"inputs": 0.013, "recheck": 0.162, "fixcheck": 0.558, "final": 0.886}},
+    "injection": {"minutes": 6.0, "marks": {"inputs": 0.04, "gate": 0.70}},
+    "prompt": {"minutes": 25.0, "marks": {"inputs": 0.01, "gate": 0.02, "recheck": 0.48, "final": 0.94}},
+    "rubric": {"minutes": 20.0, "marks": {"inputs": 0.01, "recheck": 0.16, "fixcheck": 0.56, "final": 0.89}},
+    "stumping": {"minutes": 22.0, "marks": {"inputs": 0.02, "recheck": 0.55, "final": 0.90}},
+    "all-fail-validation": {"minutes": 12.0, "marks": {"inputs": 0.03, "recheck": 0.50, "final": 0.88}},
+    "reference-notes": {"minutes": 15.0, "marks": {"inputs": 0.02, "recheck": 0.52, "final": 0.90}},
 }
 MIN_RUNS = 5  # recorded runs needed before they replace the defaults
 STEPS = {"inputs", "gate", "recheck", "fixcheck", "final"}  # milestones also hold fixcheck_r2.. (see fixcheck_round)

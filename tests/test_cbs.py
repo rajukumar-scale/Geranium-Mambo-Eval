@@ -41,15 +41,16 @@ class RowsTest(unittest.TestCase):
         chats = [{"attempt_id": "n-t1-bb", "task_id": "t1", "user_id": TRUSTED, "email": "b@gmail.com", "created_at": T0 + H,
                   "archived_from": None}]
         runs = [review("n-t1-bb", TRUSTED, "injection", "FAIL", T0 + H), review("n-t1-bb", TRUSTED, "injection", "PASS", T0 + 2 * H),
-                review("n-t1-bb", TRUSTED, "prompt", "NON-FAIL", T0 + 3 * H), review("n-t1-bb", TRUSTED, "oe", "PASS", T0 + 4 * H),
-                review("n-t1-bb", TRUSTED, "rubric", "PASS", T0 + 10 * H),
-                review("n-t1-bb", "z" * 24, "rubric", "PASS", T0 + 11 * H),  # someone else's run doesn't count
-                {**review("n-t1-bb", TRUSTED, "rubric", "PASS", T0 + 12 * H), "by_admin": 1}]  # nor an admin's
+                review("n-t1-bb", TRUSTED, "prompt", "NON-FAIL", T0 + 3 * H), review("n-t1-bb", TRUSTED, "rubric", "PASS", T0 + 4 * H),
+                review("n-t1-bb", TRUSTED, "stumping", "PASS", T0 + 5 * H),
+                review("n-t1-bb", TRUSTED, "reference-notes", "PASS", T0 + 10 * H),
+                review("n-t1-bb", "z" * 24, "reference-notes", "PASS", T0 + 11 * H),  # someone else's run doesn't count
+                {**review("n-t1-bb", TRUSTED, "reference-notes", "PASS", T0 + 12 * H), "by_admin": 1}]  # nor an admin's
         [r] = cbs.build_rows(facts, chats, runs, now=T0 + 40 * H)
         self.assertEqual((r["group"], r["outcome"], r["email"]), ("trusted", "submitted", "b@gmail.com"))
-        self.assertEqual(r["reviews"], 5)
-        self.assertEqual(r["cost"], 50.0)
-        self.assertEqual(r["tries"], {"injection": 2, "prompt": 1, "oe": 1, "rubric": 1})
+        self.assertEqual(r["reviews"], 6)
+        self.assertEqual(r["cost"], 60.0)
+        self.assertEqual(r["tries"], {"injection": 2, "prompt": 1, "rubric": 1, "stumping": 1, "reference-notes": 1})
         self.assertAlmostEqual(r["hours"], (10 * H + 600 - H) / H, places=2)  # first portal activity -> all 4 passed
 
     def test_groups_live_claims_and_old_tasks(self):

@@ -22,36 +22,59 @@ If the eval changes those lists, change these too.
 import hashlib
 import json
 
-from . import db, workspace
+from . import config, db, workspace
 
-PROMPT_KEYS = {"task-details", "universe", "prompt", "injection", "error-async", "dynamic-context"}
-OE_KEYS = {"task-details", "universe", "prompt", "oe", "injection", "error-async"}
-RUBRIC_KEYS = {"task-details", "universe", "prompt", "oe", "golden", "injection", "error-async", "dynamic-context",
-               "rubric"}
-INJECTION_KEYS = {"injection", "universe"}
-HARDNESS_KEYS = {"universe", "prompt", "injection"}
-NOT_RUBRIC = {"baseline", "baseline-verifier", "all-fail"}
+INJECTION_KEYS = {"injection"}
+PROMPT_KEYS = {"task-details", "prompt", "injection"}
+RUBRIC_KEYS = {"task-details", "prompt", "injection", "rubric"}
+STUMPING_KEYS = {"task-details", "prompt", "injection", "rubric", "runs-base", "grading-base", "stumping-check"}
+ALL_FAIL_KEYS = {"task-details", "prompt", "injection", "rubric", "grading-base", "runs-solv", "grading-solv",
+                 "all-fail", "all-fail-justify"}
+NOTES_KEYS = {"task-details", "prompt", "injection", "rubric", "grading-base", "all-fail", "all-fail-justify",
+              "reference-notes"}
+NOT_RUBRIC = {"runs-base", "grading-base", "stumping-check", "runs-solv", "grading-solv", "all-fail",
+              "all-fail-justify", "reference-notes"}
 
 # How the inputs are named to contributors (the chat page's INPUT_LABELS say the same).
-LABELS = {"task-details": "task details", "universe": "task date", "prompt": "prompt", "injection": "injection SQL",
-          "error-async": "error/async config", "dynamic-context": "dynamic context", "oe": "Oracle Events",
-          "golden": "golden answer", "rubric": "rubric"}
-ORDER = ("injection", "prompt", "hardness", "oe", "rubric")  # the order to send the commands again
+LABELS = {
+    "task-details": "task setup",
+    "injection": "injection SQL",
+    "prompt": "prompt",
+    "rubric": "rubric",
+    "runs-base": "base runs",
+    "grading-base": "grading result",
+    "stumping-check": "stumping check",
+    "runs-solv": "solvability re-runs",
+    "grading-solv": "solvability grading",
+    "all-fail": "all-fail rubrics",
+    "all-fail-justify": "all-fail justifications",
+    "reference-notes": "reference notes",
+}
+ORDER = config.REVIEW_COMMANDS  # the order to send the commands again
+
+_EMPTY_SQL_SHA = hashlib.sha256(b"").hexdigest()
+_NO_INJECTION_DIGESTS = {
+    hashlib.sha256(json.dumps(["cleared", []]).encode()).hexdigest()[:16],
+    hashlib.sha256(json.dumps(["saved", []]).encode()).hexdigest()[:16],
+    hashlib.sha256(json.dumps(["saved", [_EMPTY_SQL_SHA]]).encode()).hexdigest()[:16],
+}
 
 
 def depends(stage, key):
     """Does a review of this stage read the saved input with this key?"""
     bare = key.removeprefix("source:")
+    if stage == "injection":
+        return bare in INJECTION_KEYS
     if stage == "prompt":
         return bare in PROMPT_KEYS or key.startswith("reference:")
-    if stage == "oe":
-        return bare in OE_KEYS or key.startswith("reference:")
     if stage == "rubric":
-        return bare not in NOT_RUBRIC and (key in RUBRIC_KEYS or key.startswith(("reference:", "source:", "extra:")))
-    if stage == "injection":
-        return key in INJECTION_KEYS
-    if stage == "hardness":
-        return key in HARDNESS_KEYS or key.startswith("reference:")
+        return bare not in NOT_RUBRIC and (bare in RUBRIC_KEYS or key.startswith(("reference:", "source:", "extra:")))
+    if stage == "stumping":
+        return bare in STUMPING_KEYS or key.startswith("reference:")
+    if stage == "all-fail-validation":
+        return bare in ALL_FAIL_KEYS or key.startswith("reference:")
+    if stage == "reference-notes":
+        return bare in NOTES_KEYS or key.startswith("reference:")
     return False
 
 
@@ -94,6 +117,10 @@ def check(payload, now=None):
         return None
     if now is None:
         now = snapshot(payload["attempt_id"])
+    # Optional /injection: if SQL was cleared or emptied after an earlier /injection pass, /injection is no longer
+    # required and must not lock downstream cards.
+    if stage == "injection" and (now.get("injection") is None or now.get("injection") in _NO_INJECTION_DIGESTS):
+        return None
     keys = {k for k in set(then) | set(now) if depends(stage, k)}
     changed = sorted(k for k in keys if then.get(k) != now.get(k))
     if not changed:
@@ -129,6 +156,8 @@ def gate(attempt_id, now=None):
     stages, todo, earlier = [], [], []
     for stage in list(ORDER) + sorted(s for s in newest if s not in ORDER):
         p = newest.get(stage)
+        if stage == "injection" and (now.get("injection") is None or now.get("injection") in _NO_INJECTION_DIGESTS):
+            p = None
         result = check(p, now) if p else None
         status = "none" if not p else "outdated" if result else "current"
         stages.append({"stage": stage, "status": status, "verdict": (p or {}).get("verdict"),
@@ -250,7 +279,7 @@ def notice(attempt_id):
             "\n\nSend these again, in this order: " + ", ".join(f"`/{s}`" for s in order) + ". Each pass card "
             "unlocks as you go: a card after an outdated stage stays 🔒 locked until that stage passes again. "
             "**Re-run every one of them before you submit.** Submitting a task with an outdated pass (an older "
-            "OE or rubric screenshot, for example) gets it sent back and penalized, and the team is notified.")
+            "prompt or rubric screenshot, for example) gets it sent back and penalized, and the team is notified.")
 
 
 def prompt_note(attempt_id):

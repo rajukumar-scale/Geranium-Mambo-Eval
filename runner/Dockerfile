@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DISABLE_AUTOUPDATER=1
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 python3-docx poppler-utils ripgrep unzip ca-certificates curl tzdata \
+ && apt-get install -y --no-install-recommends python3 python3-docx python3-openpyxl poppler-utils ripgrep unzip ca-certificates curl tzdata \
  && rm -rf /var/lib/apt/lists/*
 
 # Install the native Claude Code binary system-wide so any --user uid can run it.

@@ -1,6 +1,6 @@
 # Eval portal: rules for working on the live server
 
-## The live database (`/srv/eval-data/portal.db` on bx_qnsgbtzk)
+## The live database (`/srv/eval-data/portal.db` on bx_7r4qxme3)
 
 The portal and the meter service (`eval-portal-meter`, ~5 model-call inserts a second while reviews run) both write
 to it all the time. A slow or half-finished ad-hoc write holds the lock, other writes time out, and runs crash on

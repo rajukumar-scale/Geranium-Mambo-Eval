@@ -1,7 +1,16 @@
 // User chat page.
 
 const state = { me: null, messages: [], lastId: 0, run: null, attachments: [], es: null, timer: null, spend: null, spendTimer: null };
-const REPORT_FILE = { injection: "0_injection.md", prompt: "1_prompt.md", oe: "2_oe.md", rubric: "3_rubric.md", hardness: "1a_hardness.md" };
+const REPORT_FILE = {
+  injection: "0_injection.md",
+  prompt: "1_prompt.md",
+  rubric: "2_rubric.md",
+  stumping: "3_stumping.md",
+  "all-fail-validation": "4_all_fail.md",
+  "reference-notes": "5_refnotes.md",
+};
+const CMD_ALIASES = { refnotes: "reference-notes", "all-fail": "all-fail-validation", allfail: "all-fail-validation", af: "all-fail-validation" };
+const canonicalCmd = c => CMD_ALIASES[c] || c;
 
 async function boot() {
   // Asked alongside /api/me rather than after it: one round trip less over boat's slow link before the chat shows.
@@ -586,11 +595,13 @@ function renderPassGate(gate) {
   const any = gate && gate.stages.some(s => s.status !== "none");
   if (!any) { box.innerHTML = ""; box.className = ""; return; }
   const done = gate.stages.filter(s => s.status === "current").length;
+  const opt = new Set((state.me && state.me.stages || []).filter(s => s.optional).map(s => s.id));
+  const total = gate.stages.filter(s => !opt.has(s.stage) || s.status !== "none").length || gate.stages.length;
   const stale = gate.todo.length > 0;
   box.className = "pass-gate" + (stale ? " is-locked" : "");
   box.innerHTML = `<div class="pg-head">${stale
       ? `⚠ <b>Send ${gate.todo.map(s => `<span class="mono">/${esc(s)}</span>`).join(", ")} again</b><span class="muted"> · outdated: re-run before you submit</span>`
-      : `✅ <b>${done} of 5 current</b><span class="muted"> · passes ready to use</span>`}</div>
+      : `✅ <b>${done} of ${total} current</b><span class="muted"> · passes ready to use</span>`}</div>
     <div class="pg-dots">${gate.stages.map(s => `<span class="pg-dot ${s.status}${s.locked ? " locked" : ""}" title="/${esc(s.stage)}: ${esc(s.status === "none" ? "not passed yet" : s.locked && s.status === "current" ? "current, locked until the earlier stage passes" : s.status)}">${s.locked ? "🔒 " : ""}${esc((STAGE_NAMES[s.stage] || s.stage).split(" ")[0])}</span>`).join("")}</div>
     ${stale ? `<button class="small primary" data-gateinfo>What do I do?</button>` : ""}`;
   const id = state.me.attempt_id;
@@ -659,7 +670,14 @@ function renderSide() {
     : me.paused_review ? `Your /${me.paused_review.command} review is paused. Press Continue review, or type "continue".`
     : me.pending_review ? `Your /${me.pending_review} review is waiting for your answer. Reply here to continue it.`
     : "Paste inputs, ask a question, or type a command like /prompt";
-  const labels = { injection: "Injection", prompt: "Prompt", oe: "Oracle Events", rubric: "Rubric", hardness: "Hardness" };
+  const labels = {
+    injection: "Injection",
+    prompt: "Prompt",
+    rubric: "Rubric",
+    stumping: "Stumping",
+    "all-fail-validation": "All-Fail Validation",
+    "reference-notes": "Reference Notes",
+  };
   $("#reports").innerHTML = me.reports.length ? me.reports.map(r =>
     `<div class="list-item" data-rep="${esc(r.file)}"><span class="grow">${esc(labels[r.stage] || r.stage)}</span>${pill(shownVerdict(r.stage, r.verdict))}</div>`).join("") : "None yet";
   $("#proofs").innerHTML = me.proofs.length ? me.proofs.map((p, i) =>
@@ -844,13 +862,16 @@ $("#spendbar").onclick = () => {
 
 // ---- guide ----
 const GUIDE_COMMANDS = [
-  ["/injection", "Checks your injection SQL: IDs, structure and chronology against the universe.", "Your injection SQL"],
-  ["/prompt", "Checks your task prompt: unique answer, feasibility, persona access, clarity.",
-    "The exact task prompt (your assignment and task date are filled in from the platform)"],
-  ["/hardness", "Checks how hard the task is for Opus, from one unhinted run.",
-    "One unhinted run's trajectory JSON (Opus preferred, Haiku as a fallback) and the exact prompt"],
-  ["/oe", "Checks your Oracle Events path.", "Your Oracle Events"],
-  ["/rubric", "Checks your rubric: criteria, weights and facts.", "Your rubric (JSON)"],
+  ["/injection", "Optional: checks your injection SQL for IDs, schema, dates and coherence against Sonorra.", "Your injection SQL (skip if your task has no SQL)"],
+  ["/prompt", "Checks your task prompt: clarity, unique ground truth, feasibility, persona access, constraint count & mix.",
+    "Task Setup (Persona, Family, Constraint Count) and your prompt (plus attachments / SQL if used)"],
+  ["/rubric", "Checks your rubric criteria and weights against the prompt, universe facts and QC rules.", "Your rubric JSON (title and weight tier)"],
+  ["/stumping", "Checks Carbon + Opus scores, gap, weight-5 IF misses, tier, Opus usability and Case A/B/C.",
+    "6 base runs (3 Carbon + 3 Opus), Grading results and Stumping Check"],
+  ["/all-fail-validation", "Checks Opus-only solvability re-runs (Case B) and justifications for any all-failing rubrics.",
+    "Opus re-runs + solvability grading (Case B) and all-fail justifications"],
+  ["/reference-notes", "Checks Part 1 (compliant run) and Part 2 (traps) against the prompt, rubric and universe.",
+    "Your Reference Notes (also works via /refnotes)"],
 ];
 
 // The Guide panel: "Steps" (how the portal works, the default) plus reading tabs for the guideline files the assistant
@@ -914,7 +935,7 @@ function openGuide(tab, heading = "") {
       const use = e.target.closest("[data-use]");
       if (!use) return;
       const box = $("#input");
-      box.value = use.dataset.use + " " + box.value.replace(/^\/\w+\s*/, "");
+      box.value = use.dataset.use + " " + box.value.replace(/^\/[\w-]+\s*/, "");
       w.remove();
       box.focus();
     });
@@ -1012,7 +1033,7 @@ $("#side").addEventListener("click", async e => {
   const sw = e.target.closest("[data-switch]");
   if (sw) return switchTo(sw.dataset.switch);
   const cmd = e.target.closest("[data-cmd]");
-  if (cmd) { const box = $("#input"); box.value = cmd.dataset.cmd + (cmd.dataset.cmd.endsWith(" ") ? "" : " ") + box.value.replace(/^\/\w+\s*/, ""); box.focus(); return; }
+  if (cmd) { const box = $("#input"); box.value = cmd.dataset.cmd + (cmd.dataset.cmd.endsWith(" ") ? "" : " ") + box.value.replace(/^\/[\w-]+\s*/, ""); box.focus(); return; }
   const rep = e.target.closest("[data-rep]");
   if (rep) {
     const text = await api(`/api/reports/${rep.dataset.rep}`);
@@ -1040,8 +1061,11 @@ const SLASH = [
 ];
 const slash = { items: [], index: 0 };
 function slashMatches() {
-  const m = input.value.match(/^\/([a-z]*)$/i);  // only while typing the command word itself
-  return m ? SLASH.filter(([cmd]) => cmd.slice(1).startsWith(m[1].toLowerCase())) : [];
+  const m = input.value.match(/^\/([a-z-]*)$/i);  // only while typing the command word itself (supports hyphens)
+  if (!m) return [];
+  const q = m[1].toLowerCase();
+  const resolved = CMD_ALIASES[q] || q;
+  return SLASH.filter(([cmd]) => cmd.slice(1).startsWith(q) || (resolved !== q && cmd.slice(1).startsWith(resolved)));
 }
 function renderSlash() {
   slash.items = slashMatches();
@@ -1118,9 +1142,10 @@ async function send() {
     return uiAlert("A run is in progress", "Wait for it to finish, or cancel it, before sending more. /admin and /help still work.");
   }
   // "Normal /prompt": the command isn't at the start, so it would go as a question. Ask which they meant.
-  const inner = !/^\//.test(text) && text.length <= 400 && text.match(/(?:^|\s)\/(injection|prompt|hardness|oe|rubric)\b/i);
+  const cmdPat = "(injection|prompt|rubric|stumping|all-fail-validation|all-fail|allfail|af|reference-notes|refnotes)";
+  const inner = !/^\//.test(text) && text.length <= 400 && text.match(new RegExp(`(?:^|\\s)\\/${cmdPat}\\b`, "i"));
   if (inner) {
-    const cmd = inner[1].toLowerCase();
+    const cmd = canonicalCmd(inner[1].toLowerCase());
     const rest = (text.slice(0, inner.index) + text.slice(inner.index + inner[0].length)).replace(/\s+/g, " ").trim();
     const choice = await uiDialog({ title: `Run the /${cmd} review?`, html: `<p style="margin-top:0">Your message mentions
         <b class="mono">/${cmd}</b>, but a review only starts when the message <b>begins</b> with the command.</p>
@@ -1129,15 +1154,8 @@ async function send() {
     if (!choice) return;
     if (choice === true) { text = `/${cmd}${rest ? " " + rest : ""}`; input.value = text; }
   }
-  const review = text.match(/^\/(injection|prompt|hardness|oe|rubric)\b/i);
-  const u = state.me.universe || {};
-  if (review && u.asks && !u.date && !(await pickDate("Before the first review, pick your task's date."))) return;
-  if (review && review[1].toLowerCase() === "hardness" && !state.me.admin
-      && (state.me.inputs || []).some(i => i.key === "injection" && i.state === "saved")
-      && !(await showInjectGuide({ lead: `<p><b>Before /hardness:</b> it scores the Opus run you upload, so that run must have been made
-          with your injection loaded.</p>`, check: "My Opus run was made in a sandbox where I ran my injection SQL first",
-        ok: "Continue to /hardness", cancel: "Cancel" }))) return;
-  if (review && !(await confirmReview(review[1].toLowerCase(), text))) return;
+  const review = text.match(new RegExp(`^\\/${cmdPat}\\b`, "i"));
+  if (review && !(await confirmReview(canonicalCmd(review[1].toLowerCase()), text))) return;
   if (review && "Notification" in window && Notification.permission === "default") Notification.requestPermission().catch(() => {});
   $("#send").disabled = true;
   try {
@@ -1177,7 +1195,7 @@ function identicalRerun(same) {
 function confirmReview(command, text) {
   const [, what, needs] = GUIDE_COMMANDS.find(c => c[0] === "/" + command) || [];
   const saved = (state.me.inputs || []).map(i => INPUT_LABELS[i.key] || i.key);
-  const extra = text.replace(/^\/\w+\s*/, "").trim() || state.attachments.length;
+  const extra = text.replace(/^\/[\w-]+\s*/, "").trim() || state.attachments.length;
   const minutes = (state.me.review_minutes || {})[command];
   const notifyLine = !("Notification" in window) ? ""
     : Notification.permission === "granted" ? "🔔 You'll get a browser notification when it's done, as long as this page is open in a tab."

@@ -44,6 +44,7 @@ class DmWebhookTest(unittest.TestCase):
                 posted.append((url, kw.get("json")))
                 return mock.Mock(status_code=status, text="", json=lambda: {"ok": True})
         with mock.patch.object(config, "SLACK_BOT_TOKEN", token), mock.patch.object(config, "SLACK_DM_WEBHOOK_URL", hook), \
+                mock.patch.object(config, "LINTER_ALERT_SLACK_USER", "U_TEST"), \
                 mock.patch.object(linter_alerts.httpx, "AsyncClient", Client):
             return asyncio.run(linter_alerts.dm("hi")), posted, linter_alerts.dm_configured()
 

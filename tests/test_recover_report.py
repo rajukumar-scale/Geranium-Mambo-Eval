@@ -42,7 +42,7 @@ class RecoverReportTest(unittest.TestCase):
         os.utime(self.inp, (self.t0 - 100, self.t0 - 100))  # saved before the review started
         (root / "task_inputs" / "inputs.json").write_text(json.dumps({"inputs": {"rubric": {
             "state": "saved", "files": [{"path": "Evals/task_inputs/04_Rubric.json"}]}}}))
-        self.report = root / "task_inputs" / "reports" / "3_rubric.md"
+        self.report = root / "task_inputs" / "reports" / config.REPORT_FILES["rubric"]
 
     def write_report(self, text, at):
         self.report.write_text(text)
@@ -81,9 +81,10 @@ class RecoverReportTest(unittest.TestCase):
         self.assertEqual([m["role"] for m in db.q("select role from messages")], ["report"])
 
     def test_the_reattach_uses_the_snapshot_from_the_start(self):
-        runner.save_before("a1", "r1", {"3_rubric.md": 123.0})
+        rf = config.REPORT_FILES["rubric"]
+        runner.save_before("a1", "r1", {rf: 123.0})
         self.write_report("The rubric passes.", self.t0 + 600)  # copied back before the restart
-        self.assertEqual(runner.load_before("a1", "r1"), {"3_rubric.md": 123.0})  # so the new report counts as new
+        self.assertEqual(runner.load_before("a1", "r1"), {rf: 123.0})  # so the new report counts as new
         self.assertEqual(runner.load_before("a1", "r-old"), workspace.report_snapshot("a1"))  # older runs: as before
 
 

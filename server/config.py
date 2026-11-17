@@ -41,28 +41,23 @@ def _list(name, default=""):
 
 
 DATA_DIR = Path(_get("PORTAL_DATA_DIR", ROOT / "data")).resolve()
-# Folder holding Evals/, claude/, .claude/ (from install.py) and the universes: since 2026-10-20 two of them,
-# Universe_Normal/ (Feb 14, 2026) and Universe_SynthCut/ (Oct 1, 2025), each with the three HarmonyGames_* exports;
-# before that the three HarmonyGames_* folders directly (UNIVERSE_DIRS, still used for an older release).
+# Folder holding Evals/, claude/, .claude/ (from install.py) and Universe_Sonorra/.
 # Not resolved on purpose: on the VM this is a symlink to the current bundle version,
 # so updating the eval swaps it for new runs without touching runs in progress.
-EVAL_BASE_DIR = Path(os.path.abspath(_get("EVAL_BASE_DIR", ROOT.parent / "New_Evals")))
-# Contributor guidelines the chat assistant reads (hardness, tool-call minimum). Portal-owned, not part of the eval
+EVAL_BASE_DIR = Path(os.path.abspath(_get("EVAL_BASE_DIR", ROOT.parent / "New-Evals-Bundle")))
+# Contributor guidelines the chat assistant reads. Portal-owned, not part of the eval
 # release: every review workspace gets them at work/guidelines (boat bundle, docker mount, local workspace).
 GUIDELINES_DIR = ROOT / "server" / "guidelines"
 # Portal-owned text for the "plan your task" kickoff (server/plan.py): the card, the hidden note behind its button and
 # the early guard appended to the assistant's rules. Read by the portal itself; not copied into review workspaces.
 PROMPTS_DIR = ROOT / "server" / "prompts"
-UNIVERSE_DIRS = _list("UNIVERSE_DIRS", "HarmonyGames_GitHub,HarmonyGames_Gmail,HarmonyGames_Other_Services")
-DATED_UNIVERSES = ("Universe_Normal", "Universe_SynthCut")
+UNIVERSE_DIRS = _list("UNIVERSE_DIRS", "Universe_Sonorra")
+DATED_UNIVERSES = ()
 
 
 def universe_dirs(base=None):
-    """The universe folders of the installed release (mounted at /work/<name>): the two dated universes when it
-    has them, else the old three folders."""
-    base = Path(base or EVAL_BASE_DIR)
-    dated = [name for name in DATED_UNIVERSES if (base / name).is_dir()]
-    return dated or UNIVERSE_DIRS
+    """The universe folders of the installed release (mounted at /work/<name>)."""
+    return UNIVERSE_DIRS
 
 # docker = one container per run (VM). local = runs on this machine in a single
 # hardlinked workspace (development only, no isolation).
@@ -96,35 +91,20 @@ REDASH_API_KEY = _get("REDASH_API_KEY", "")
 REDASH_LOGIN_QUERY_ID = _int("REDASH_LOGIN_QUERY_ID", 387117)
 # The platform task record (persona, business function, competency, skill, task type, difficulty mode, universe) for
 # server/assignment.py, which fills a chat's assignment and task date from it (2026-11-03). 0 turns that off.
-REDASH_TASK_QUERY_ID = _int("REDASH_TASK_QUERY_ID", 399176)
-ASSIGNMENT_AUTOFILL = _int("ASSIGNMENT_AUTOFILL", 1)
-# Budget of the LiteLLM key, for the admin page: a saved query on the LiteLLM tables (0 = no budget panel).
-BUDGET_QUERY_ID = _int("BUDGET_QUERY_ID", 388350)
-BUDGET_DAILY_QUERY_ID = _int("BUDGET_DAILY_QUERY_ID", 389171)  # the key's spend per UTC day, for the bar chart (0 = none)
-# The same for the backup key the meter falls back to (LITELLM_FALLBACK_API_KEY): 388350 with the alias swapped (0 = none).
-BACKUP_BUDGET_QUERY_ID = _int("BACKUP_BUDGET_QUERY_ID", 397844)
-# The admin Cost page: one saved Redash query with every fact since 2026-08-01 (per day, per task x contributor x day,
-# each submission), refreshed in the background; the page cuts any date range from it. v4 (2026-10-28) replaces the
-# per-range queries 390879 / 390881 / 390882, with the same rules (Atlas Commercial spend on every key, LiteLLM + SMIG).
-# v5 (2026-11-09) = 401890: the same rows as v4 plus the pipeline layer of each (column lvl), per-day x layer rows (dl)
-# and each node's layer (node); 395415 (v4) stays as it was, for a rollback.
-# v6 (2026-11-10) = 402024: v5 + kind tr, everything spent on each task by anyone (runs tied by the task id they carry).
-COST_FACTS_QUERY_ID = _int("COST_FACTS_QUERY_ID", 402024)
-# SMIG's billed cost per portal run (runId tag, sent since 2026-10-26 20:00 UTC); untagged runs keep the list-price estimate (0 = estimates only).
-COST_PORTAL_SMIG_QUERY_ID = _int("COST_PORTAL_SMIG_QUERY_ID", 394171)
-# Each Atlas Commercial task's platform state (ever submitted at L-1/L0, cancelled, claimed, paused, last activity), for the
-# Cost page's lost spend: tasks never submitted and quiet for 3 days (0 = the page leaves lost spend out).
-COST_TASK_STATES_QUERY_ID = _int("COST_TASK_STATES_QUERY_ID", 396595)
-# The admin CB tracker (/admin/cbs): Atlas Commercial L-1 nodes, submits, incomplete attempts and each person's worker
-# source and mcp_ac_trusted days, refreshed every 30 minutes (0 = the page is off).
-CB_FACTS_QUERY_ID = _int("CB_FACTS_QUERY_ID", 397453)
-BUDGET_KEY_ALIAS = _get("BUDGET_KEY_ALIAS", "pub-atlas-commercial-sandbox")
-# Platform submissions for tasks passed at /rubric, for the admin "Where they are now" panel (0 = don't hide anyone).
-SUBMISSIONS_QUERY_ID = _int("SUBMISSIONS_QUERY_ID", 388752)
-# Who holds each task on the platform, for the "done, not submitted" debugger (0 = portal data only).
-CLAIMS_QUERY_ID = _int("CLAIMS_QUERY_ID", 388856)
+REDASH_TASK_QUERY_ID = _int("REDASH_TASK_QUERY_ID", 0)
+ASSIGNMENT_AUTOFILL = _int("ASSIGNMENT_AUTOFILL", 0)
+BUDGET_QUERY_ID = _int("BUDGET_QUERY_ID", 0)
+BUDGET_DAILY_QUERY_ID = _int("BUDGET_DAILY_QUERY_ID", 0)
+BACKUP_BUDGET_QUERY_ID = _int("BACKUP_BUDGET_QUERY_ID", 0)
+COST_FACTS_QUERY_ID = _int("COST_FACTS_QUERY_ID", 0)
+COST_PORTAL_SMIG_QUERY_ID = _int("COST_PORTAL_SMIG_QUERY_ID", 0)
+COST_TASK_STATES_QUERY_ID = _int("COST_TASK_STATES_QUERY_ID", 0)
+CB_FACTS_QUERY_ID = _int("CB_FACTS_QUERY_ID", 0)
+BUDGET_KEY_ALIAS = _get("BUDGET_KEY_ALIAS", "")
+SUBMISSIONS_QUERY_ID = _int("SUBMISSIONS_QUERY_ID", 0)
+CLAIMS_QUERY_ID = _int("CLAIMS_QUERY_ID", 0)
 # Empty list = any project.
-ALLOWED_PROJECT_IDS = _list("ALLOWED_PROJECT_IDS", "6a5595596cf3031de47f0ea2")
+ALLOWED_PROJECT_IDS = _list("ALLOWED_PROJECT_IDS", "6ae1792488162884415d5ee6")
 
 SESSION_SECRET = _get("SESSION_SECRET", "")
 PROOF_SECRET = _get("PROOF_SECRET", "")
@@ -143,17 +123,13 @@ SLACK_CHANNEL = _get("SLACK_CHANNEL", "")
 # A Slack workflow webhook whose workflow DMs Evan (2026-11-06: there is no bot token). The DM route for the
 # linter-stuck and outdated-pass-submit alerts when SLACK_BOT_TOKEN is unset; posts {"text": ...} like SLACK_WEBHOOK_URL.
 SLACK_DM_WEBHOOK_URL = _get("SLACK_DM_WEBHOOK_URL", "")
-# Slack DM to Evan when a CB is stuck on a fingerprint linter (server/linter_alerts.py): SLACK_BOT_TOKEN or SLACK_DM_WEBHOOK_URL.
-LINTER_ALERT_QUERY_ID = _int("LINTER_ALERT_QUERY_ID", 395304)  # 0 = off
-LINTER_ALERT_SLACK_USER = _get("LINTER_ALERT_SLACK_USER", "U0BD6FV1PJ4")
+LINTER_ALERT_QUERY_ID = _int("LINTER_ALERT_QUERY_ID", 0)  # 0 = off
+LINTER_ALERT_SLACK_USER = _get("LINTER_ALERT_SLACK_USER", "")
 LINTER_ALERT_EVERY_MIN = _int("LINTER_ALERT_EVERY_MIN", 15)
 LINTER_ALERT_REPEAT_HOURS = _int("LINTER_ALERT_REPEAT_HOURS", 3)  # same CB/task/stage again only after this
-# DM Evan when a task is submitted while one of its portal passes is outdated (server/submit_watch.py). 0 = off.
-SUBMIT_WATCH = _int("SUBMIT_WATCH", 1)
-# Submitted prompt/SQL/OE/rubric per task, for the submit-match check (server/submit_match.py); 0 = off.
-SUBMIT_MATCH_QUERY_ID = _int("SUBMIT_MATCH_QUERY_ID", 402603)
-LINTER_ALERT_DASHBOARD_URL = _get("LINTER_ALERT_DASHBOARD_URL",
-                                  "https://redash.scale.com/dashboards/12117-mcp-ac-fingerprint-linter-monitor")
+SUBMIT_WATCH = _int("SUBMIT_WATCH", 0)
+SUBMIT_MATCH_QUERY_ID = _int("SUBMIT_MATCH_QUERY_ID", 0)
+LINTER_ALERT_DASHBOARD_URL = _get("LINTER_ALERT_DASHBOARD_URL", "")
 PUBLIC_BASE_URL = _get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
 
 # Set to 1 behind Caddy/nginx so login rate limits use the real client IP.
@@ -176,16 +152,13 @@ MAX_CONCURRENT_RUNS = _int("MAX_CONCURRENT_RUNS", 4 if RUNNER_MODE == "docker" e
 REVIEW_RUNNER = _get("REVIEW_RUNNER", "")
 BOAT_BIN = _get("BOAT_BIN", "boat")
 # The portal's own boat box (server/selfguard.py keeps its auto-stop off). BOAT_ID is set in boat shells only.
-SERVER_BOX_ID = _get("SERVER_BOX_ID", "") or os.environ.get("BOAT_ID", "") or "bx_qnsgbtzk"
-BOAT_SNAPSHOT = _get("BOAT_SNAPSHOT", "hg-runner")
+SERVER_BOX_ID = _get("SERVER_BOX_ID", "") or os.environ.get("BOAT_ID", "") or "bx_7r4qxme3"
+BOAT_SNAPSHOT = _get("BOAT_SNAPSHOT", "gm-runner")
 BOAT_BOX_TYPE = _get("BOAT_BOX_TYPE", "default")
 MAX_BOAT_RUNS = _int("MAX_BOAT_RUNS", 20)
-# Server first, boat as overflow (2026-10-30): boat bills machine hours, and this server is paid for around the clock
-# and mostly idle. With REVIEW_RUNNER=boat and RUNNER_MODE=docker, these commands run in a container here while a
-# server slot is free and at least SERVER_REVIEW_MIN_FREE_GB of memory is available; otherwise on a boat box as before,
-# so they never queue. Their own slots: follow-ups (MAX_CONCURRENT_RUNS) never wait for them. 0 slots = off.
-SERVER_REVIEW_SLOTS = _int("SERVER_REVIEW_SLOTS", 5)
-SERVER_REVIEW_COMMANDS = _list("SERVER_REVIEW_COMMANDS", "injection,hardness,oe")
+# 0 slots = all reviews run on boat boxes (safe on an 8 GB server box).
+SERVER_REVIEW_SLOTS = _int("SERVER_REVIEW_SLOTS", 0)
+SERVER_REVIEW_COMMANDS = _list("SERVER_REVIEW_COMMANDS", "injection")
 SERVER_REVIEW_MIN_FREE_GB = float(_get("SERVER_REVIEW_MIN_FREE_GB", 5))
 # Public URL of the metering proxy, as reached from review boxes (e.g. https://<id>-8001.on.boat.dev).
 PROXY_PUBLIC_URL = _get("PROXY_PUBLIC_URL", "").rstrip("/")
@@ -194,7 +167,7 @@ MODAL_PROXY_URL = _get("MODAL_PROXY_URL", "https://modal-proxy.internal.scale.co
 MODAL_AWS_PROFILE = _get("MODAL_AWS_PROFILE", "")
 MODAL_BASE_IMAGE = _get("MODAL_BASE_IMAGE", "ubuntu:24.04")
 MODAL_TEMPLATE_IMAGE = _get("MODAL_TEMPLATE_IMAGE", "")
-MODAL_PROJECT_ID = _get("MODAL_PROJECT_ID", "6a5595596cf3031de47f0ea2")
+MODAL_PROJECT_ID = _get("MODAL_PROJECT_ID", "6ae1792488162884415d5ee6")
 MODAL_CPU = float(_get("MODAL_CPU", "4"))
 MODAL_MEMORY_MB = _int("MODAL_MEMORY_MB", 8192)
 # Usage caps are off by default (0 = unlimited); set them only if spend needs a ceiling.
@@ -223,12 +196,8 @@ BOX_WARM_BUSY_MIN = float(_get("BOX_WARM_BUSY_MIN", "20"))
 # Slack alert when the boat wallet drops under this many dollars or boat can't start machines (boat_wallet.py; 0 = off).
 BOAT_WALLET_ALERT_USD = float(_get("BOAT_WALLET_ALERT_USD", "20"))
 # Where the eval zips live (the admin page's "Eval files" panel updates from these links).
-EVAL_ZIP_URL = _get("EVAL_ZIP_URL", "https://static.remotasks.com/uploads/6a5595596cf3031de47f0ea2").rstrip("/")
-# The zips, by name; a universe zip "<Normal|SynthCut>_HarmonyGames_X.zip" unpacks to Universe_<...>/<same name>.
-# Normal's GitHub is three parts that unpack into one folder (update any part = all three).
-EVAL_FILES = ("Evals", "claude", *(f"Normal_HarmonyGames_GitHub_part{i}of3" for i in (1, 2, 3)),
-              "Normal_HarmonyGames_Gmail", "Normal_HarmonyGames_Other_Services",
-              "SynthCut_HarmonyGames_GitHub", "SynthCut_HarmonyGames_Gmail", "SynthCut_HarmonyGames_Other_Services")
+EVAL_ZIP_URL = _get("EVAL_ZIP_URL", "https://static.remotasks.com/uploads/6ae1792488162884415d5ee6").rstrip("/")
+EVAL_FILES = ("Evals", "claude", "Universe_Sonorra")
 # Owner-only load test (/api/admin/loadtest): stand-in reviews on real boxes, canned model replies, no model spend.
 LOADTEST_ALLOWED = _int("LOADTEST_ALLOWED", 0)
 MAX_UPLOAD_MB = _int("MAX_UPLOAD_MB", 150)  # trajectory JSONs for /hardness can be large
@@ -251,34 +220,46 @@ PLAN_PILOT = _list("PLAN_PILOT", "")
 # Who gets the /prompt fix helper (server/fix_helper.py): the fix-help offer from the 2nd /prompt FAIL on, its hidden
 # rules note on their answer, and the "start your Opus run" step after a pass. Same format and matching as PLAN_PILOT.
 FIX_HELPER_PILOT = _list("FIX_HELPER_PILOT", "")
-# Tool-call note after /hardness (server/toolcall_note.py, 2026-11-02): emails or Outlier IDs, "*" = everyone (the
-# default), empty = off.
-TOOLCALL_NOTE_PILOT = _list("TOOLCALL_NOTE_PILOT", "*")
-# Env data check after /hardness (server/env_check.py, 2026-11-06): same format, "*" = everyone, empty = off.
-ENV_CHECK_PILOT = _list("ENV_CHECK_PILOT", "*")
+# Tool-call note & env data check (HarmonyGames /hardness only; off by default for Long Horizon).
+TOOLCALL_NOTE_PILOT = _list("TOOLCALL_NOTE_PILOT", "")
+ENV_CHECK_PILOT = _list("ENV_CHECK_PILOT", "")
 
 DEFAULT_MODEL = _get("DEFAULT_MODEL", "claude-opus-5-5")
-# Thinking effort for every run. The bundled skills pin xhigh; the portal rewrites that in its own copy.
+# Thinking effort for every run. The bundled skills pin effort; the portal rewrites that in its own copy.
 EVAL_EFFORT = _get("EVAL_EFFORT", "high")
 SMALL_MODEL = _get("SMALL_MODEL", "claude-haiku-5-5")
 
-# Commands a user may run, in the eval's own order.
-REVIEW_COMMANDS = ("injection", "prompt", "hardness", "oe", "rubric")
-REPORT_FILES = {
-    "injection": "0_injection.md",
-    "prompt": "1_prompt.md",
-    "hardness": "1a_hardness.md",
-    "oe": "2_oe.md",
-    "rubric": "3_rubric.md",
+# Central stage registry: (id, report_file, label, timeout_min, optional).
+STAGES = (
+    ("injection", "0_injection.md", "Injection", 20, True),
+    ("prompt", "1_prompt.md", "Prompt", 150, False),
+    ("rubric", "2_rubric.md", "Rubric", 150, False),
+    ("stumping", "3_stumping.md", "Stumping", 180, False),
+    ("all-fail-validation", "4_all_fail.md", "All-Fail Validation", 120, True),
+    ("reference-notes", "5_refnotes.md", "Reference Notes", 120, False),
+)
+REVIEW_COMMANDS = tuple(s[0] for s in STAGES)
+REPORT_FILES = {s[0]: s[1] for s in STAGES}
+STAGE_LABELS = {s[0]: s[2] for s in STAGES}
+STAGE_TIMEOUT_MIN = {s[0]: s[3] for s in STAGES}
+OPTIONAL_STAGES = frozenset(s[0] for s in STAGES if s[4])
+FINAL_STAGE = "reference-notes"
+COMMAND_ALIASES = {
+    "refnotes": "reference-notes",
+    "all-fail": "all-fail-validation",
+    "allfail": "all-fail-validation",
+    "af": "all-fail-validation",
 }
 PASSING_VERDICTS = ("PASS", "NON-FAIL")
 
 
+def canonical_command(cmd):
+    return COMMAND_ALIASES.get(cmd, cmd)
+
+
 def passing(stage, verdict):
-    """Whether a review's verdict counts as a pass for its stage. The oracle events need a PASS: the taxonomy's
-    OE verdict has no NON-FAIL choice and its "Golden eval verdict must pass" linter wants PASS (rubric and
-    hardness accept NON-FAIL), so an OE NON-FAIL counts as a fail here and gets no pass card (Evan, 2026-10-27)."""
-    return verdict == "PASS" if stage == "oe" else verdict in PASSING_VERDICTS
+    """Whether a review's verdict counts as a pass for its stage (PASS or NON-FAIL)."""
+    return verdict in PASSING_VERDICTS
 
 
 def check():

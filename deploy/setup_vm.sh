@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time VM setup for the HarmonyGames Eval Portal (Ubuntu 22.04 / 24.04). Run as root:
+# One-time VM setup for the Geranium Mambo Eval Portal (Ubuntu 22.04 / 24.04). Run as root:
 #   sudo DOMAIN=eval.example.com bash deploy/setup_vm.sh   (or DOMAIN=auto for <ip>.sslip.io)
 # Re-running is safe: it skips finished steps. Afterwards put the keys in /opt/eval-portal/.env
 # (LITELLM_API_KEY, REDASH_API_KEY, SLACK_WEBHOOK_URL) and `systemctl restart eval-portal-meter eval-portal`.
@@ -9,7 +9,7 @@ APP_DIR=/opt/eval-portal
 APP_USER=evalportal
 DATA_DIR=/srv/eval-data
 BASE_LINK=/srv/eval-base
-ZIP_URL=${ZIP_URL:-https://static.remotasks.com/uploads/6a5595596cf3031de47f0ea2}
+ZIP_URL=${ZIP_URL:-https://static.remotasks.com/uploads/6ae1792488162884415d5ee6}
 DOMAIN=${DOMAIN:-}
 # PUBLIC_URL: the platform already serves HTTPS for you (e.g. boat.dev: https://<id>-8000.on.boat.dev).
 # The portal then listens on 127.0.0.1:8000 and Caddy is skipped.

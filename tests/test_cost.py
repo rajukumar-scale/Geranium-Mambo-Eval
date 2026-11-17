@@ -265,6 +265,9 @@ class ServeTest(unittest.IsolatedAsyncioTestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         for p in (mock.patch.object(cost, "CACHE_FILE", self.tmp / "cost_facts.json"),
+                  mock.patch.object(cost.config, "COST_FACTS_QUERY_ID", 402024),
+                  mock.patch.object(cost.config, "COST_PORTAL_SMIG_QUERY_ID", 394171),
+                  mock.patch.object(cost.config, "COST_TASK_STATES_QUERY_ID", 396595),
                   mock.patch.object(cost, "_portal", lambda s, b, e, *_: NO_PORTAL),
                   mock.patch.dict(cost._facts, {"at": 0.0, "rows": None, "billed": [], "task": None, "error": None, "failed_at": 0.0})):
             p.start()

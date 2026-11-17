@@ -355,6 +355,10 @@ def chat_state(attempt_id):
         # The installed eval asks each task's date first; the chat page asks it with two buttons instead.
         "universe": {"asks": workspace.dated_release(), "date": workspace.universe_date(attempt_id),
                      "choices": {k: label for k, (_, label) in workspace.UNIVERSE_DATES.items()}},
+        "stages": [{"id": s, "file": f, "label": config.STAGE_LABELS[s], "optional": s in config.OPTIONAL_STAGES}
+                   for s, f, *_ in config.STAGES],
+        "aliases": dict(config.COMMAND_ALIASES),
+        "final_stage": config.FINAL_STAGE,
         "limits": {
             "reviews_left": (max(0, config.DAILY_REVIEW_LIMIT - db.runs_today(attempt_id, "review"))
                              if config.DAILY_REVIEW_LIMIT else None),
@@ -1004,7 +1008,7 @@ async def send(body: SendBody, request: Request):
         if "\n" in first:
             first, _, tail = first.partition("\n")
             rest = tail + (" " + rest if rest else "")
-        command = first[1:].lower()
+        command = config.canonical_command(first[1:].lower())
 
     if command == "help":
         user_msg = db.add_message(attempt_id, "user", text)
@@ -1042,7 +1046,8 @@ async def send(body: SendBody, request: Request):
 
     chat_writable(session, chat)
     if command is not None and command not in config.REVIEW_COMMANDS:
-        raise HTTPException(400, f"Unknown command /{command}. Available: /injection, /prompt, /hardness, /oe, /rubric, /admin, /help.")
+        avail = ", ".join(f"/{c}" for c in config.REVIEW_COMMANDS) + ", /admin, /help"
+        raise HTTPException(400, f"Unknown command /{command}. Available: {avail}.")
 
     kind = "review" if command else "followup"
     pending = db.get_run(chat["pending_review_run"]) if chat.get("pending_review_run") and not command else None
@@ -1106,7 +1111,7 @@ async def send(body: SendBody, request: Request):
         # review input, and the review's grade-don't-author rules then refused the help.
         prompt = (f"(Portal note: your /{pending['command']} review is paused, waiting for something from them. If this "
                   "message supplies what the review asked for, save it and continue the review. If it is a question or a "
-                  "request for help instead, for example to revise their SQL, write or fix a rubric row or an OE step, or "
+                  "request for help instead, for example to revise their SQL, write or fix a rubric row or a reference note, or "
                   "reword a sentence, do that under the portal's helping rules (writing and revising pieces of their work "
                   f"is allowed), then say in one line what the review still needs.)\n\n{prompt}")
     if files:
@@ -1370,12 +1375,12 @@ def attempt_states(chats):
         if r["attempt_id"] in wanted:
             runs.setdefault(r["attempt_id"], []).append(r)
     busy = {r["attempt_id"] for r in db.q("select distinct attempt_id from runs where status in ('queued','running')")}
-    passing_runs, rubric_at = set(), {}
+    passing_runs, final_at = set(), {}
     for p in db.q("select p.attempt_id, p.run_id, p.payload, p.created_at from proofs p join runs r on r.id = p.run_id where coalesce(r.actor_admin, 0)=0"):
         stage = json.loads(p["payload"]).get("stage")
         passing_runs.add((p["run_id"], stage))
-        if stage == "rubric":
-            rubric_at[p["attempt_id"]] = max(rubric_at.get(p["attempt_id"], 0), p["created_at"])
+        if stage == config.FINAL_STAGE:
+            final_at[p["attempt_id"]] = max(final_at.get(p["attempt_id"], 0), p["created_at"])
     now, fresh = time.time(), submissions.fresh()
     out = {}
     for chat in chats:
@@ -1396,8 +1401,8 @@ def attempt_states(chats):
             archived = "with someone else"
         elif submissions.holds_claim(task, user):
             pass
-        elif (submitted and submitted >= last_work) or (latest and latest[1:] == ("rubric", "passed")
-                                                        and submissions.submitted_after(task, user, rubric_at.get(attempt))):
+        elif (submitted and submitted >= last_work) or (latest and latest[1:] == (config.FINAL_STAGE, "passed")
+                                                        and submissions.submitted_after(task, user, final_at.get(attempt))):
             archived = "submitted"
         elif submissions.taken_by_other(task, user, chat["last_activity"]):
             archived = "with someone else"
@@ -1475,10 +1480,10 @@ def step_funnel(states=None):
 
 @app.get("/api/admin/rubric-done")
 async def admin_rubric_done(request: Request, refresh: int = 0):
-    """The "done, not submitted" debugger: what happened since each of those people passed /rubric."""
+    """The "done, not submitted" debugger: what happened since each of those people passed the final stage."""
     current_admin(request)
-    rubric = next((r for r in step_funnel()["rows"] if r["step"] == "rubric"), {})
-    return await donedebug.diagnose(rubric.get("passed_attempts", []), force=bool(refresh))
+    done_row = next((r for r in step_funnel()["rows"] if r["step"] == config.FINAL_STAGE), {})
+    return await donedebug.diagnose(done_row.get("passed_attempts", []), force=bool(refresh))
 
 
 ADMIN_CHATS_TTL = 5  # seconds one build of the /admin chat list is shared by every admin tab
@@ -2285,7 +2290,7 @@ async def evalfiles(request: Request):
     for name, rem in zip(config.EVAL_FILES, remote):
         have = installed.get(name)
         changed = bool(have and rem.get("etag") and have.get("etag") and rem["etag"] != have["etag"])
-        files.append({"name": name, "zip": f"{name}.zip", "universe": "HarmonyGames_" in name,
+        files.append({"name": name, "zip": f"{name}.zip", "universe": name == "Universe_Sonorra",
                       "remote": rem, "installed": have, "changed": changed})
     return {"release": base.name, "snapshot": boatrun.active_snapshot(), "files": files,
             "job": await _update_job(), "can_update": me["role"] == "owner"}

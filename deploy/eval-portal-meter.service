@@ -1,5 +1,5 @@
 [Unit]
-Description=HarmonyGames Eval Portal metering proxy (model calls of running reviews)
+Description=Geranium Mambo Eval Portal metering proxy (model calls of running reviews)
 After=network-online.target
 Wants=network-online.target
 

@@ -58,8 +58,8 @@ async def diagnose(attempts, force=False):
     for chat in chats:
         a = chat["attempt_id"]
         passed_at = db.one("select max(p.created_at) at from proofs p join runs r on r.id = p.run_id "
-                           "where p.attempt_id=? and coalesce(r.actor_admin, 0)=0 and json_extract(p.payload, '$.stage')='rubric'",
-                           (a,))["at"] or 0
+                           "where p.attempt_id=? and coalesce(r.actor_admin, 0)=0 and json_extract(p.payload, '$.stage')=?",
+                           (a, config.FINAL_STAGE))["at"] or 0
         msgs = db.q("select role, content, created_at from messages where attempt_id=? and created_at>? and role in ('user','admin') "
                     "order by id", (a, passed_at + 2))
         mine = [m for m in msgs if m["role"] == "user"]

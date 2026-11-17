@@ -5,8 +5,8 @@
 # every running review, so a person decides that.
 # Needs BOAT_API_KEY (scoped to the box) and SLACK_WEBHOOK_URL; BOX and PORTAL have defaults.
 set -uo pipefail
-BOX=${BOX:-bx_qnsgbtzk}
-PORTAL=${PORTAL:-https://box-node-475a4ba67b3cb4c4-8000.on.boat.dev}
+BOX=${BOX:-bx_7r4qxme3}
+PORTAL=${PORTAL:-https://box-node-df450a5ccdfeb2c5-8000.on.boat.dev}
 
 slack() {
   [ -n "${SLACK_WEBHOOK_URL:-}" ] || { echo "no Slack webhook: $1"; return; }

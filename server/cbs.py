@@ -54,8 +54,8 @@ RETRY_SEC = 120
 LOOKUP_TIMEOUT = 180
 RECENT_DAYS = 14  # the "bars from recent data" reference
 GRACE = 2
-STEPS = ("injection", "prompt", "hardness", "oe", "rubric")
-REQUIRED = ("injection", "prompt", "oe", "rubric")
+STEPS = config.REVIEW_COMMANDS
+REQUIRED = ("prompt", "rubric", "stumping", "reference-notes")
 PASSING = ("PASS", "NON-FAIL")
 GROUPS = ("QMA", "trusted", "non-trusted")
 # p50 / p75 / p90 of QMA + trusted submitted tasks, 2026-10-13 to 10-29 (the P1.1 analysis)

@@ -30,6 +30,7 @@ class SubmitMatchTest(unittest.TestCase):
         self.sent, self.published = [], []
         self.at = time.time() - 1800
         for p in [mock.patch.object(config, "DATA_DIR", Path(tmp.name)), mock.patch.object(db, "_conn", None),
+                  mock.patch.object(config, "SUBMIT_MATCH_QUERY_ID", 402603),
                   mock.patch.object(submissions, "fresh", lambda *a: True),
                   mock.patch.object(submissions, "submitted_at", lambda t, u: self.at if (t, u) == (TASK, "u1") else None),
                   mock.patch.object(fingerprint, "for_attempt", lambda a, s: fingerprint.of_input(s, self.saved[s])),

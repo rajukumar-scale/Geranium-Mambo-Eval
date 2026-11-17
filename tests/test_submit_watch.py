@@ -14,8 +14,11 @@ class SubmitWatchTest(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.saved = {"prompt": "p1", "injection": "sql1", "oe": "oe1", "rubric": "r1"}
+        self.saved = {"prompt": "p1", "injection": "sql1", "rubric": "r1", "stumping-check": "s1",
+                      "runs-base": "rb1", "grading-base": "gb1"}
         for p in [mock.patch.object(config, "DATA_DIR", Path(tmp.name)), mock.patch.object(db, "_conn", None),
+                  mock.patch.object(config, "SUBMIT_WATCH", 1),
+                  mock.patch.object(config, "LINTER_ALERT_SLACK_USER", "U_TEST"),
                   mock.patch.object(staleness, "snapshot", lambda a: dict(self.saved)),
                   mock.patch.object(submissions, "fresh", lambda *a: True)]:
             p.start()
@@ -59,7 +62,7 @@ class SubmitWatchTest(unittest.TestCase):
 
     def test_submit_with_outdated_passes_dms_once(self):
         self.check()  # baseline
-        for stage in ("injection", "prompt", "oe", "rubric"):
+        for stage in ("injection", "prompt", "rubric", "stumping"):
             self.passed(stage)
         self.saved["injection"] = "sql2"
         self.passed("injection")
@@ -68,7 +71,7 @@ class SubmitWatchTest(unittest.TestCase):
         self.submit()
         hits = self.check()
         self.assertEqual(len(hits), 1)
-        self.assertEqual(sorted(hits[0]["outdated"]), ["oe", "rubric"])
+        self.assertEqual(sorted(hits[0]["outdated"]), ["rubric", "stumping"])
         self.assertEqual(len(self.dms), 1)
         self.assertIn("ebad@x.com", self.dms[0])
         self.assertIn("/rubric: injection SQL changed after it passed", self.dms[0])
@@ -77,7 +80,7 @@ class SubmitWatchTest(unittest.TestCase):
 
     def test_clean_submit_sends_nothing(self):
         self.check()
-        for stage in ("injection", "prompt", "oe", "rubric"):
+        for stage in ("injection", "prompt", "rubric", "stumping"):
             self.passed(stage)
         time.sleep(0.01)
         self.submit()

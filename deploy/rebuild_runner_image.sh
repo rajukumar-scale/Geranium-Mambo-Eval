@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Rebuild the review box image with fresh copies of the chosen universes (runs as root on the server).
+# Rebuild the review box image with a fresh copy of Universe_Sonorra (runs as root on the server).
 # Boat commands run as `evalportal`, whose key owns the boxes and images it creates.
-#   bash deploy/rebuild_runner_image.sh Normal_HarmonyGames_Gmail [SynthCut_HarmonyGames_GitHub ...]
+#   bash deploy/rebuild_runner_image.sh Universe_Sonorra
 #   bash deploy/rebuild_runner_image.sh --tools-only    # no universe re-download: refresh the tools layer only
-# (any Normal_HarmonyGames_GitHub_partNof3 re-downloads all three parts: the folder is rebuilt whole)
-# Starts a build box from the current image, re-downloads only those universes there, saves the box as
-# a new image (hg-runner-<stamp>), checks a review box starts from it, and prints the image name last.
+# Starts a build box from the current image, re-downloads Universe_Sonorra there, saves the box as
+# a new image (gm-runner-<stamp>), checks a review box starts from it, and prints the image name last.
 set -euo pipefail
 [ $# -gt 0 ] || { echo "usage: $0 <universe>... | --tools-only" >&2; exit 2; }
 [ "$1" = --tools-only ] && shift
@@ -14,8 +13,8 @@ KEEP=$DATA/update/keep_boxes        # boxes the startup sweep must not delete wh
 B="sudo -u evalportal -H /usr/local/bin/boat-cli"
 ACTIVE=$(cat "$DATA/runner_snapshot" 2>/dev/null || true)
 ACTIVE=${ACTIVE:-$(grep -E '^BOAT_SNAPSHOT=' /opt/eval-portal/.env 2>/dev/null | cut -d= -f2 | awk '{print $1}' || true)}
-ACTIVE=${ACTIVE:-hg-runner}
-NEWSNAP="hg-runner-$(date -u +%Y%m%d-%H%M%S)"  # boat image names: lowercase letters, digits, dashes
+ACTIVE=${ACTIVE:-gm-runner}
+NEWSNAP="gm-runner-$(date -u +%Y%m%d-%H%M%S)"  # boat image names: lowercase letters, digits, dashes
 touch "$KEEP"
 
 new_box() {  # prints the id of a ready box cloned from image $1
@@ -46,12 +45,8 @@ BOX=$(new_box "$ACTIVE"); BOXES="$BOX"; echo "$BOX" >> "$KEEP"
 echo "build box $BOX"
 $B scp --no-update /opt/eval-portal/deploy/build_runner_template.sh "$BOX:/tmp/build_runner_template.sh" >/dev/null
 $B scp --no-update /opt/eval-portal/deploy/setup_similarity.sh "$BOX:/tmp/setup_similarity.sh" >/dev/null
-box_path() {  # where a universe zip's folder lives on the box
-  case "$1" in
-    Normal_*) echo "/work/Universe_Normal/${1%_part[0-9]of[0-9]}" ;;
-    SynthCut_*) echo "/work/Universe_SynthCut/$1" ;;
-    *) echo "/work/$1" ;;
-  esac
+box_path() {
+  echo "/work/$1"
 }
 REMOVE=""
 for n in "$@"; do REMOVE="$REMOVE $(box_path "$n")"; done
@@ -73,9 +68,7 @@ $B snapshot --no-update "$BOX" "$NEWSNAP" | tail -1
 
 echo "STEP checking a review box starts from $NEWSNAP"
 TEST=$(new_box "$NEWSNAP"); BOXES="$BOXES $TEST"; echo "$TEST" >> "$KEEP"
-CHECK="id runner >/dev/null && /usr/local/bin/claude --version >/dev/null && test -f /opt/simcheck/model/model.onnx && /opt/simcheck/bin/python -c 'import onnxruntime, tokenizers, numpy'"
-for u in Normal SynthCut; do for n in HarmonyGames_GitHub HarmonyGames_Gmail HarmonyGames_Other_Services; do
-  CHECK="$CHECK && test -d /work/Universe_$u/${u}_$n"; done; done
+CHECK="id runner >/dev/null && /usr/local/bin/claude --version >/dev/null && test -f /opt/simcheck/model/model.onnx && /opt/simcheck/bin/python -c 'import onnxruntime, tokenizers, numpy' && test -d /work/Universe_Sonorra"
 $B ssh --no-update "$TEST" -- "$CHECK && echo IMAGE_OK" | grep -q IMAGE_OK || { echo "the new image is missing parts"; exit 1; }
 echo "image check OK"
 echo "$NEWSNAP"

@@ -2,32 +2,25 @@
 # Install a new eval release built from the chosen zips. Runs as root. New runs pick it up
 # immediately; runs already in progress keep the version they started with.
 #   bash deploy/update_eval.sh                          # Evals.zip + claude.zip (default)
-#   bash deploy/update_eval.sh claude Normal_HarmonyGames_Gmail  # only these; everything else is reused
-#   bash deploy/update_eval.sh --universes              # everything, including all universe zips (~40 GB unzipped)
-# Universe zips are named <Normal|SynthCut>_HarmonyGames_X.zip and unpack to Universe_<Normal|SynthCut>/<same name>
-# (the two dated universes, since 2026-10-20). Normal's GitHub comes in three parts that unpack into one folder;
-# choosing any part re-installs all three. Unchosen parts are reused from the current release: Evals/claude copied,
-# universes hardlinked.
+#   bash deploy/update_eval.sh claude Universe_Sonorra  # only these; everything else is reused
+#   bash deploy/update_eval.sh --universes              # everything, including Universe_Sonorra.zip
+# Universe_Sonorra.zip unpacks to Universe_Sonorra/ (single fixed-clock Sonorra v17 universe).
+# Unchosen parts are reused from the current release: Evals/claude copied, universe hardlinked.
 # The new release must pass the eval's own integrity check before the portal switches to it.
 set -euo pipefail
 
-ZIP_URL=${ZIP_URL:-https://static.remotasks.com/uploads/6a5595596cf3031de47f0ea2}
+ZIP_URL=${ZIP_URL:-$(grep -E '^EVAL_ZIP_URL=' /opt/eval-portal/.env 2>/dev/null | cut -d= -f2- | awk '{print $1}' || true)}
+ZIP_URL=${ZIP_URL:-https://static.remotasks.com/uploads/6ae1792488162884415d5ee6}
 ROOT=/srv/eval-releases
 LINK=/srv/eval-base
-GH_PARTS="Normal_HarmonyGames_GitHub_part1of3 Normal_HarmonyGames_GitHub_part2of3 Normal_HarmonyGames_GitHub_part3of3"
-UNIVERSES="$GH_PARTS Normal_HarmonyGames_Gmail Normal_HarmonyGames_Other_Services"
-UNIVERSES="$UNIVERSES SynthCut_HarmonyGames_GitHub SynthCut_HarmonyGames_Gmail SynthCut_HarmonyGames_Other_Services"
+UNIVERSES="Universe_Sonorra"
 ALL="Evals claude $UNIVERSES"
-folder() {  # the folder a zip unpacks to: its own name, without a _partNofM suffix
-  echo "${1%_part[0-9]of[0-9]}"
-}
-dest() {  # where a zip's folder lives in the release
-  case "$1" in Normal_*) echo "Universe_Normal/$(folder "$1")";; SynthCut_*) echo "Universe_SynthCut/$(folder "$1")";; *) echo "$1";; esac
+dest() {
+  echo "$1"
 }
 
 if [ "${1:-}" = "--universes" ]; then CHOSEN="$ALL"; elif [ $# -gt 0 ]; then CHOSEN="$*"; else CHOSEN="Evals claude"; fi
 for name in $CHOSEN; do case " $ALL " in *" $name "*) ;; *) echo "unknown file: $name" >&2; exit 2;; esac; done
-case " $CHOSEN " in *_part[0-9]of[0-9]" "*) CHOSEN="$CHOSEN $GH_PARTS";; esac  # the parts go together
 # Evals pins the hashes of the original claude/skills files; a reused claude/ already has the portal's effort
 # rewrite, so the pins wouldn't match. Install the two together (claude.zip is tiny) so skill_effort re-pins.
 case " $CHOSEN " in *" Evals "*|*" claude "*) CHOSEN="$CHOSEN Evals claude";; esac
@@ -57,15 +50,10 @@ fetch() {  # resumable download; keeps the response headers for SOURCE.json
     mv "$ZIPS/$1.zip.part" "$ZIPS/$1.zip"
   fi
   echo "STEP unpacking $1.zip"
-  local parent="$NEW/$(dirname "$(dest "$1")")" short="${1#*_}"
+  local parent="$NEW"
   mkdir -p "$parent"
-  # -n: the parts of one folder are disjoint, so nothing is overwritten when they unpack into it
   unzip -q -n "$ZIPS/$1.zip" -d "$parent"
   rm -rf "$parent/__MACOSX"
-  # An older-style zip may hold the folder without the date prefix (HarmonyGames_X/): rename it into place.
-  if [ "$1" != "$short" ] && [ -d "$parent/${short%_part[0-9]of[0-9]}" ] && [ ! -d "$NEW/$(dest "$1")" ]; then
-    mv "$parent/${short%_part[0-9]of[0-9]}" "$NEW/$(dest "$1")"
-  fi
 }
 
 for name in Evals claude; do
@@ -126,16 +114,16 @@ for name in names:
 json.dump({"release": os.path.basename(new), "files": files}, open(os.path.join(new, "SOURCE.json"), "w"), indent=1)
 PY
 
-# Refuse to switch to a release the eval itself would reject (/prompt /oe /rubric check this first).
+# Refuse to switch to a release the eval itself would reject.
 echo "STEP checking the new release"
 python3 -I - "$NEW" <<'PY'
 import sys
 root = sys.argv[1]
 sys.path.insert(0, root + "/Evals/tools")
 import hg_eval_release
-for stage in ("prompt", "oe", "rubric"):
+for stage in ("injection", "prompt", "rubric", "stumping", "all-fail-validation", "reference-notes"):
     hg_eval_release.snapshot(stage, root)
-print("release check OK for prompt, oe, rubric")
+print("release check OK for all 6 stages")
 PY
 chown -R root:root "$NEW"; chmod -R a+rX,go-w "$NEW"
 

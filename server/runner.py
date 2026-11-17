@@ -1056,9 +1056,9 @@ class Runner:
 
             async def load_universe():
                 nonlocal universe_ready
-                which = {"normal": "Normal", "synthcut": "SynthCut"}.get(workspace.universe_date(attempt), "Normal SynthCut")
+                which = "Universe_Sonorra"
                 if not modalrun.active_snapshot()[1]:
-                    self._push_activity(run_id, attempt, f"📦 Loading the {which} universe (about 7 minutes)")
+                    self._push_activity(run_id, attempt, f"📦 Loading {which}")
                 await modalrun.ensure_universe(box, which, lambda m: log.info("run %s: %s", run_id, m))
                 universe_ready = True
 
@@ -1385,7 +1385,6 @@ class Runner:
 
         report_fields = {}
         passes = []
-        oe_nonfail = False
         for name, text in (outcome.get("reports") or {}).items():
             if text is None:
                 continue
@@ -1395,10 +1394,6 @@ class Runner:
             info["file"] = name
             # The input this report graded, in the taxonomy's fingerprint format (what reviewers match at L10).
             info["fingerprint"] = fingerprint.for_attempt(attempt, stage)
-            if stage == "hardness" and INJECTION_MISSING.search(text):
-                info["injection_missing"] = True  # the page opens the "inject in every sandbox" guide (2026-11-03)
-            elif stage == "hardness" and INJECTION_STALE.search(text):
-                info["injection_stale"] = True  # ...with "start a fresh sandbox with your current SQL" first
             msg = db.add_message(attempt, "report", text, {"run_id": run_id, **info})
             hub.publish(attempt, "message", msg)
             if stage == run["command"]:
@@ -1411,9 +1406,6 @@ class Runner:
                         and config.passing(stage, info.get("verdict")) and info.get("exec_status") == "COMPLETE")
             if eligible:
                 passes.append(info)
-            elif (run["kind"] == "review" and status == "done" and stage == "oe" and info.get("verdict") == "NON-FAIL"
-                  and info.get("exec_status") == "COMPLETE"):
-                oe_nonfail = True
         self._finish(run, status, error, **fields, **report_fields)
         if run["kind"] == "review" and status == "done" and report_fields:
             try:  # what it graded, so a re-run on the same inputs can be caught (rerun_guard)
@@ -1439,12 +1431,6 @@ class Runner:
             msg = db.add_message(attempt, "proof", f"{payload['stage']} {payload['verdict']}", payload)
             hub.publish(attempt, "message", msg)
             hub.publish(attempt, "proof", payload)
-        if oe_nonfail:
-            msg = db.add_message(attempt, "system",
-                                 "Your /oe is a **FAIL**: for the oracle events only a **PASS** counts (Outlier needs PASS "
-                                 "to submit), so there's no pass card yet. Fix the items in the report and run /oe again to get one.",
-                                 {"run_id": run_id})
-            hub.publish(attempt, "message", msg)
         try:  # /prompt fix helper (pilot): the fix-help offer after a 2nd+ FAIL, the next step after a pass
             fix_helper.after_review(chat, db.get_run(run_id), status, report_fields.get("verdict"))
         except Exception:  # noqa: BLE001 - a helper message must never break finishing the run

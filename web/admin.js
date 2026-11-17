@@ -1,7 +1,14 @@
 // Admin dashboard: every chat, live; reply as Admin, resolve /admin requests, inspect runs.
 
 const S = { chats: [], selected: null, detail: null, es: null, steps: null, funnelPick: null };
-const REPORT_FILE = { injection: "0_injection.md", prompt: "1_prompt.md", oe: "2_oe.md", rubric: "3_rubric.md", hardness: "1a_hardness.md" };
+const REPORT_FILE = {
+  injection: "0_injection.md",
+  prompt: "1_prompt.md",
+  rubric: "2_rubric.md",
+  stumping: "3_stumping.md",
+  "all-fail-validation": "4_all_fail.md",
+  "reference-notes": "5_refnotes.md",
+};
 
 const INVITE = location.pathname.startsWith("/admin/invite/") ? location.pathname.split("/").pop() : null;
 
@@ -508,7 +515,7 @@ async function openEvalFiles() {
   if (go) go.onclick = async () => {
     const files = [...w.querySelectorAll("[data-file]:checked")].map(c => c.dataset.file);
     if (!files.length) return uiAlert("Nothing selected", "Tick the files you replaced at their links.");
-    const slow = files.some(f => f.includes("HarmonyGames_"));
+    const slow = files.some(f => f.startsWith("Universe_"));
     const ok = await uiConfirm(`Update ${files.length} file${files.length > 1 ? "s" : ""}?`,
       `<p style="margin-top:0">${files.map(f => `<span class="mono">${esc(f)}.zip</span>`).join(", ")}</p>
        <p class="muted" style="margin-bottom:0">${slow ? "Includes a universe, so the review box image is rebuilt too: about 15–40 minutes."
@@ -621,10 +628,18 @@ function loadLite(res) {
 
 // "Where they are now": each person once, at their furthest review step.
 // Clicking a row (or one of its parts, like "2 running") lists only those chats; clicking it again shows all.
-const STEP_NAMES = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric", archived: "Archived" };
+const STEP_NAMES = {
+  injection: "Injection",
+  prompt: "Prompt",
+  rubric: "Rubric",
+  stumping: "Stumping",
+  "all-fail-validation": "All-Fail Validation",
+  "reference-notes": "Reference Notes",
+  archived: "Archived",
+};
 const stepKey = r => r.step || "none";
 // The Idle row's parts are the steps people stopped at.
-const partLabel = (step, state) => (step === "rubric" && state === "passed" ? "done, not submitted"
+const partLabel = (step, state) => (step === "reference-notes" && state === "passed" ? "done, not submitted"
   : step === "idle" ? (state === "none" ? "no review yet" : `at ${STEP_NAMES[state] || state}`) : state);
 const ARCHIVED_PARTS = ["submitted", "released", "with someone else"];
 const rowName = r => (r.step === "idle" ? `Idle ${S.steps && S.steps.idle_days || 2}d+` : r.step ? STEP_NAMES[r.step] || r.step : "No review yet");
@@ -640,7 +655,7 @@ function renderFunnel(f) {
     const parts = r.step === "archived" ? ARCHIVED_PARTS.filter(s => r[s]).map(s => part(s, r[s])).join(" · ")
       : r.step === "idle" ? ["none", ...Object.keys(STEP_NAMES)].filter(s => r[s]).map(s => part(s, r[s])).join(" · ")
       : [r["on it"] && part("on it", r["on it"]), r.running && part("running", r.running),
-         r.passed && part("passed", r.passed) + (r.step === "rubric" ? ` <button type="button" class="fwhy" data-why title="Why haven't they submitted?">why?</button>` : "")]
+         r.passed && part("passed", r.passed) + (r.step === "reference-notes" ? ` <button type="button" class="fwhy" data-why title="Why haven't they submitted?">why?</button>` : "")]
         .filter(Boolean).join(" · ");
     const set = r.step === "idle" || r.step === "archived";  // the sections below the steps
     return `<div class="funnel-row${r.total ? " pick" : " empty"}${set ? ` side-set ${r.step}` : ""}${on ? " on" : ""}" data-step="${key}" title="${esc(r.emails.join("\n") || "nobody")}"

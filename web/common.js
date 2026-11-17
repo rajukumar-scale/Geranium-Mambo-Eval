@@ -54,10 +54,7 @@ function fmtDur(sec) {
 }
 const short = (h, n = 12) => (h ? `${h.slice(0, n)}…` : "–");
 const pill = v => `<span class="pill ${esc(v || "none")}">${esc(v || "no verdict")}</span>`;
-// For /oe only a PASS counts (no pass card, can't submit), so an OE NON-FAIL is shown as FAIL everywhere a verdict
-// is displayed. The stored report, its score and the run's verdict stay as the eval graded them.
-const shownVerdict = (stage, v) => (stage === "oe" && v === "NON-FAIL" ? "FAIL" : v);
-const OE_NONFAIL_NOTE = "Shown as FAIL: for the oracle events only a PASS counts, so fix the items in this report and run /oe again. (The report itself says NON-FAIL.)";
+const shownVerdict = (stage, v) => v;
 
 // "5m ago" for lists (the full time goes in a tooltip).
 function fmtAgo(t) {
@@ -293,7 +290,7 @@ function laterBand(p) {
 
 function lockStepsHtml() {
   return `<div class="lock-steps" aria-hidden="true">
-    <div class="ls"><div class="ls-n">1</div><div class="ls-i">✏️</div><div class="ls-t">You changed an input<br><span>SQL, prompt, OE or rubric</span></div></div>
+    <div class="ls"><div class="ls-n">1</div><div class="ls-i">✏️</div><div class="ls-t">You changed an input<br><span>SQL, prompt, rubric or stumping</span></div></div>
     <div class="ls-arrow">→</div>
     <div class="ls"><div class="ls-n">2</div><div class="ls-i">🔁</div><div class="ls-t">Send the outdated stages<br><span>in the order shown</span></div></div>
     <div class="ls-arrow">→</div>
@@ -673,9 +670,16 @@ if (typeof document !== "undefined" && document.addEventListener) {
     if (b) { e.preventDefault(); showEnvGuide(); }
   });
 }
-const CHECKABLE = new Set(["injection", "prompt", "oe", "rubric"]);
+const CHECKABLE = new Set(["injection", "prompt", "rubric", "stumping", "all-fail-validation", "reference-notes"]);
 const PASS_IMAGE_SIZES = [44, 56, 68];  // code font sizes, px, tried in order
-const STAGE_NAMES = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" };
+const STAGE_NAMES = {
+  injection: "Injection",
+  prompt: "Prompt",
+  rubric: "Rubric",
+  stumping: "Stumping",
+  "all-fail-validation": "All-Fail Validation",
+  "reference-notes": "Reference Notes",
+};
 
 function wrapCanvasText(ctx, text, maxWidth) {
   // Break at spaces (a long head/tail without spaces is broken anywhere); prefer the code's own " | " and " - ".
@@ -953,20 +957,12 @@ function messageHtml(m, opts = {}) {
   if (m.role === "assistant") return `<div class="msg assistant"><div class="bubble"><div class="who">Eval assistant ${ts}</div>${md(m.content)}</div></div>`;
   if (m.role === "admin") return `<div class="msg admin"><div class="bubble"><div class="who">Admin${opts.admin && meta.admin ? ` · ${esc(meta.admin)}` : ""} ${ts}</div>${md(m.content)}</div></div>`;
   if (m.role === "report") {
-    const label = { injection: "Injection", prompt: "Prompt", oe: "Oracle Events", rubric: "Rubric", hardness: "Hardness" }[meta.stage] || meta.stage;
-    const oeNonfail = shownVerdict(meta.stage, meta.verdict) !== meta.verdict;
-    return `<div class="msg system"><div class="bubble"><div class="rcard"><div class="grow">📋 <b>${esc(label)} report</b> ${oeNonfail ? `<span class="pill FAIL" title="${esc(OE_NONFAIL_NOTE)}">FAIL</span>` : pill(meta.verdict)}
+    const label = STAGE_NAMES[meta.stage] || meta.stage;
+    return `<div class="msg system"><div class="bubble"><div class="rcard"><div class="grow">📋 <b>${esc(label)} report</b> ${pill(meta.verdict)}
       ${meta.score != null ? `<span class="muted">score ${esc(meta.score)}</span>` : ""}
       ${meta.exec_status && meta.exec_status !== "COMPLETE" ? `<span class="muted">· ${esc(meta.exec_status)}</span>` : ""}</div>
       ${ts}<button data-report="${m.id}">View</button><button data-download="${m.id}">Download</button></div>
-      ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}
-      ${!opts.admin && !meta.injection_missing && !meta.injection_stale
-        ? (hardnessToolCallFail(m) ? toolCallHint() : "") + (hardnessTooEasy(meta) ? tooEasyHint() : "")
-          + (hardnessPatternRisk(m) ? patternRiskHint() : "") : ""}
-      ${meta.stage === "hardness" && meta.injection_missing ? `<div class="stale-line">💉 Your Opus run was made without your injection.
-        <button class="small" data-injectguide="missing">How to inject</button></div>`
-      : meta.stage === "hardness" && meta.injection_stale ? `<div class="stale-line">💉 Your Opus run was made on an older version of your SQL.
-        <button class="small" data-injectguide="stale">How to re-inject</button></div>` : ""}</div></div>`;
+      ${meta.fingerprint ? `<div class="rfp" title="${esc(meta.fingerprint)}">🔏 ${esc(shortFp(meta.fingerprint))}</div>` : ""}</div></div>`;
   }
   if (m.role === "proof" && meta.locked) {
     return `<div class="msg system"><div class="bubble proofcard lockedcard"><div class="rcard"><div class="grow">🔒 <b>/${esc(meta.stage)} ${esc(meta.verdict)}</b>
@@ -997,8 +993,7 @@ function wireMessageClicks(container, getMessage, reportName) {
       const m = getMessage(+t.dataset.report);
       const shown = shownVerdict(m.meta.stage, m.meta.verdict);
       const label = `${m.meta.stage} report — ${shown || "no verdict"}`;
-      const banner = shown !== m.meta.verdict ? `<div class="bubble warnnote" style="margin-bottom:10px">${esc(OE_NONFAIL_NOTE)}</div>` : "";
-      const w = openModal(label, `${banner}<div class="bubble" style="border:0;padding:0">${md(m.content)}</div>`,
+      const w = openModal(label, `<div class="bubble" style="border:0;padding:0">${md(m.content)}</div>`,
         `<button data-dl>Download</button>`);
       w.querySelector("[data-dl]").onclick = () => download(reportName(m), m.content);
     } else if (t.dataset.download) {

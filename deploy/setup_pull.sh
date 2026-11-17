@@ -4,7 +4,7 @@
 # surprise anyone), records it as deployed, and starts the every-minute timer. Stop it again with:
 #   systemctl disable --now eval-portal-pull.timer
 set -euo pipefail
-REPO=${1:-git@github.com:evanedreo/eval-portal.git}
+REPO=${1:-git@github.com:rajukumar-scale/Geranium-Mambo-Eval.git}
 APP=/opt/eval-portal
 SRC=/opt/eval-portal-src
 DATA=$(grep -E '^PORTAL_DATA_DIR=' $APP/.env 2>/dev/null | cut -d= -f2 | awk '{print $1}' || true)

@@ -7,7 +7,7 @@
 # Reviews on their own boxes keep running and the restarted server re-attaches to them. Runs that haven't started stay
 # queued. A deploy waits (up to 5 min) for follow-ups and box setups in flight.
 set -euo pipefail
-BOX=${1:-bx_qnsgbtzk}
+BOX=${1:-bx_7r4qxme3}
 BOAT=${BOAT:-$HOME/.ascii/bin/boat}
 cd "$(dirname "$0")/.."
 
