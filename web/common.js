@@ -402,7 +402,7 @@ function proofHtml(p, opts = {}) {
     .map(([k, v]) => `<div class="wide"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("");
   const verifyUrl = `${location.origin}/verify/${encodeURIComponent(p.code)}`;
   const risky = !!p.fingerprint && screenshotRisky(shortFp(p.fingerprint));
-  const stage = { injection: "Injection", prompt: "Prompt", hardness: "Hardness", oe: "Oracle Events", rubric: "Rubric" }[p.stage] || p.stage;
+  const stage = STAGE_NAMES[p.stage] || p.stage;
   // Screenshot-safe (2026-10-27): the taxonomy reads the code off a screenshot with GPT-4o, and it misread small
   // text in tall cards. So the card is short (header, the code large, four IDs) and everything else is folded
   // under "More details", which a screenshot doesn't need.
@@ -501,13 +501,13 @@ function showProof(p) {
         ${p.outdated ? `<p class="taxo-warn">⚠ This pass is outdated. ${esc(p.outdated.message)}</p>` : ""}
         <p>This pass is for the exact <b class="mono">${cmd}</b> you sent in this review.</p>
         <p>If you fixed it here to pass, put that <b>latest fixed version into your Outlier task</b>. Don't forget to update it.</p>
-        ${p.prompt_fingerprint && (p.stage === "oe" || p.stage === "rubric") ? `<div class="taxo-warn prompt-bound"><b>This pass is only for this prompt:</b>
+        ${p.prompt_fingerprint && ["rubric", "stumping", "all-fail-validation", "reference-notes", "oe", "hardness"].includes(p.stage) ? `<div class="taxo-warn prompt-bound"><b>This pass is only for this prompt:</b>
           <div class="mono" style="margin:4px 0">${esc(p.prompt_fingerprint)}</div>
-          Your Outlier task's prompt must be <b>exactly this version</b>, together with the SQL and OE this review read. If you
+          Your Outlier task's prompt must be <b>exactly this version</b>, together with the inputs this review read. If you
           submit a different prompt (an older one with its old /prompt pass, for example), the task gets sent back.</div>` : ""}
         <p class="taxo-warn">If your Outlier task doesn't match the version that passed here, we will know, and your task will be flagged.</p>
         <p class="taxo-note">If you change it again, run <b class="mono">${cmd}</b> again.</p>
-        <label class="taxo-check"><input type="checkbox"> ${p.prompt_fingerprint && (p.stage === "oe" || p.stage === "rubric")
+        <label class="taxo-check"><input type="checkbox"> ${p.prompt_fingerprint && ["rubric", "stumping", "all-fail-validation", "reference-notes", "oe", "hardness"].includes(p.stage)
           ? "I've updated my Outlier task, and its prompt is this exact version" : "I've updated my Outlier task"}</label>
       </div>
       <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
@@ -542,7 +542,7 @@ function showProof(p) {
 // reader looks for (verdict badge, "/stage · Stage review · COMPLETE"), then the 🔏 verification code large and in
 // plain characters with its first and last characters spelled out (spelledCode), then the details. Before the download it's read with the taxonomy's own reader and prompt
 // (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
-const COPYABLE = new Set(["injection", "prompt", "oe"]);
+const COPYABLE = new Set(["injection", "prompt", "reference-notes", "all-fail-validation", "stumping", "oe"]);
 // /oe and /rubric too (Evan, 2026-11-06): contributors who redo a task after passing /rubric go back into sandboxes.
 // Those two show it only when the task has injection SQL saved.
 const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness", "oe", "rubric"]);

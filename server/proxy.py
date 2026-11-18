@@ -64,14 +64,22 @@ def _token(request):
 _TAGS = {}  # run_id -> x-litellm-tags value
 
 
+def _redact_secrets(data):
+    """Never let upstream error bodies/logs leak any sk-... API key fragment."""
+    if not data:
+        return data
+    return re.sub(rb"sk-[A-Za-z0-9_-]{8,}", b"sk-[REDACTED]", data)
+
+
 def _tags(run_id):
     """Spend-attribution tags for this run's calls. LiteLLM, and SMIG behind it, keep them on each usage row
-    (SMIG reads x-litellm-tags only). The contributor is whoever started the run, as in the portal's own spend."""
+    (SMIG reads x-litellm-tags only). Falls back to ALLOWED_PROJECT_IDS[0] for admin-bypass chats."""
     if run_id not in _TAGS:
         run = db.one("select r.task_id, r.actor_user_id, r.kind, r.command, c.project_id from runs r "
                      "left join chats c on c.attempt_id = r.attempt_id where r.id=?", (run_id,)) or {}
         stage = "followup" if run.get("kind") == "followup" else (run.get("command") or run.get("kind") or "")
-        tags = {"projectId": run.get("project_id"), "taskId": run.get("task_id"), "contributorId": run.get("actor_user_id"),
+        proj = run.get("project_id") or (config.ALLOWED_PROJECT_IDS[0] if config.ALLOWED_PROJECT_IDS else "")
+        tags = {"projectId": proj, "taskId": run.get("task_id"), "contributorId": run.get("actor_user_id"),
                 "useCase": "eval-portal", "stage": stage.strip("/"), "runId": run_id}
         if len(_TAGS) > 5000:
             _TAGS.clear()
@@ -216,7 +224,7 @@ async def forward(path: str, request: Request):
             data = await upstream.aread()
             await upstream.aclose()
             if over_budget(upstream.status_code, data):
-                _primary_out(data.decode(errors="replace"))
+                _primary_out(_redact_secrets(data).decode(errors="replace"))
                 data = None
                 continue  # the same call again with the backup key
         break
@@ -241,6 +249,8 @@ async def forward(path: str, request: Request):
     if data is None:  # not already read while checking for "budget exceeded"
         data = await upstream.aread()
         await upstream.aclose()
+    if upstream.status_code >= 400 and data:
+        data = _redact_secrets(data)
     if is_message:
         usage = {}
         try:

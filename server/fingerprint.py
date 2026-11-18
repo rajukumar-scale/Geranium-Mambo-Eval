@@ -24,8 +24,19 @@ import re
 _JS_WS = "\t\n\v\f\r    -     　﻿"
 _RUN_WS = re.compile(f"[{_JS_WS}]+")
 _TRAILING = re.compile(f"[.,;:{_JS_WS}]+\\Z")
-EMPTY = {"injection": "(empty — no injection)", "prompt": "(empty)", "oe": "(empty — no oracle events)",
-         "rubric": "(empty — no rubrics)"}
+EMPTY = {
+    "injection": "(empty — no injection)",
+    "prompt": "(empty)",
+    "oe": "(empty — no oracle events)",
+    "rubric": "(empty — no rubrics)",
+    "stumping": "(empty — no stumping check)",
+    "all-fail-validation": "(empty — no all-fail justification)",
+    "reference-notes": "(empty — no reference notes)",
+}
+_STAGE_SLOTS = {
+    "stumping": ("stumping-check", "grading-base"),
+    "all-fail-validation": ("all-fail-justify", "grading-solv"),
+}
 
 
 def _jsonata_trim(text):
@@ -125,7 +136,10 @@ def rubric(criteria):
     for criterion in criteria:
         number = _jsonata_number(criterion.get("weight") if isinstance(criterion, dict) else None)
         weights.append(number if number else 1)  # missing, 0 or not a number counts as 1, as in the taxonomy
-    titles = " | ".join(_jsonata_string(c["title"]) for c in criteria if isinstance(c, dict) and "title" in c)
+    titles = " | ".join(
+        _jsonata_string(c["title"] if "title" in c else c.get("criterion", ""))
+        for c in criteria if isinstance(c, dict) and ("title" in c or "criterion" in c)
+    )
     letters = _NOT_ALNUM.sub("", _LINK_TARGET.sub("", _as_builder_saves(titles)))
     shown = f"{letters[:40]} … {letters[-40:]}" if len(letters) > 40 else letters
     return (f"{len(criteria)} criteria, Σweight {_js_number(sum(weights))}, weights [{','.join(_js_number(w) for w in weights)}]"
@@ -134,14 +148,18 @@ def rubric(criteria):
 
 def for_attempt(attempt_id, stage):
     """The fingerprint of an attempt's saved input for this stage, as it is now (call it when the review ends,
-    so it's the version that was graded). None for stages the taxonomy has no fingerprint for (hardness)."""
+    so it's the version that was graded). Returns None for stages with no matching input (proofs falls back to EVP code)."""
     if stage not in EMPTY:
         return None
     from . import workspace  # here, not at the top: workspace is a heavier module
 
-    entry = workspace.read_input(attempt_id, stage, limit=200_000_000)
-    files = [f for f in (entry or {}).get("files", []) if f.get("text") is not None]
-    return of_input(stage, "\n".join(f["text"] for f in files))
+    keys = _STAGE_SLOTS.get(stage, (stage,))
+    for key in keys:
+        entry = workspace.read_input(attempt_id, key, limit=200_000_000)
+        files = [f for f in (entry or {}).get("files", []) if f.get("text") is not None]
+        if files:
+            return of_input(stage, "\n".join(f["text"] for f in files))
+    return None if stage in _STAGE_SLOTS else of_input(stage, "")
 
 
 def of_input(stage, content):
@@ -151,6 +169,6 @@ def of_input(stage, content):
             return rubric(json.loads(content)) if content else EMPTY["rubric"]
         except (TypeError, ValueError):
             return None  # not JSON: the taxonomy's criteria list can't be matched
-    if stage in ("injection", "prompt", "oe"):
+    if stage in ("injection", "prompt", "oe", "stumping", "all-fail-validation", "reference-notes"):
         return text(stage, content)
     return None

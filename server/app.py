@@ -1318,14 +1318,18 @@ def proof_input(code: str, request: Request):
     """The exact text this pass graded, to paste into the taxonomy, while the saved input is still that version."""
     payload = proof_for_viewer(code, request)
     stage = payload["stage"]
-    if stage not in ("injection", "prompt", "oe"):
-        raise HTTPException(404, "Only the injection, prompt and oracle events can be copied.")
-    if fingerprint.for_attempt(payload["attempt_id"], stage) != payload.get("fingerprint"):
-        raise HTTPException(409, f"Your saved {stage} has changed since this pass, so this pass no longer matches it. "
-                                 f"Run /{stage} again on the version you want to submit.")
-    entry = workspace.read_input(payload["attempt_id"], stage, limit=200_000_000)
-    text = "\n".join(f["text"] for f in (entry or {}).get("files", []) if f.get("text") is not None)
-    return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
+    if stage not in ("injection", "prompt", "reference-notes", "all-fail-validation", "stumping", "oe"):
+        raise HTTPException(404, "This pass stage does not support copying raw input.")
+    from .fingerprint import _STAGE_SLOTS
+    for key in _STAGE_SLOTS.get(stage, (stage,)):
+        if fingerprint.for_attempt(payload["attempt_id"], stage) != payload.get("fingerprint"):
+            raise HTTPException(409, f"Your saved {stage} has changed since this pass, so this pass no longer matches it. "
+                                     f"Run /{stage} again on the version you want to submit.")
+        entry = workspace.read_input(payload["attempt_id"], key, limit=200_000_000)
+        if entry and entry.get("files"):
+            text = "\n".join(f["text"] for f in entry["files"] if f.get("text") is not None)
+            return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
+    raise HTTPException(404, "No saved text input for this stage.")
 
 
 # ---- admin -------------------------------------------------------------------

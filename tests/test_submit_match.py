@@ -104,7 +104,7 @@ class PassScreenPromptTest(unittest.TestCase):
     def test_oe_and_rubric_passes_carry_and_show_their_prompt(self):
         root = Path(__file__).resolve().parent.parent
         src = (root / "server" / "proofs.py").read_text()
-        self.assertIn('if report["stage"] in ("oe", "rubric", "hardness"):', src)
+        self.assertIn('if report["stage"] in ("rubric", "stumping", "all-fail-validation", "reference-notes", "oe", "hardness"):', src)
         self.assertIn('payload["prompt_fingerprint"] = fingerprint.for_attempt(run["attempt_id"], "prompt")', src)
         js = (root / "web" / "common.js").read_text()
         self.assertIn("This pass is only for this prompt:", js)

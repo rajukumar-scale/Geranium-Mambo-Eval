@@ -90,12 +90,19 @@ async def read(stage, png):
     urls = list(dict.fromkeys([config.READER_URL, f"{config.LITELLM_BASE_URL}/v1/chat/completions"]))
     # The backup key only after the main one answers "budget exceeded" (proxy.over_budget, 2026-11-01).
     keys = [config.READER_API_KEY] + ([config.LITELLM_FALLBACK_API_KEY] if config.LITELLM_FALLBACK_API_KEY else [])
+    proj = config.ALLOWED_PROJECT_IDS[0] if config.ALLOWED_PROJECT_IDS else ""
+    tag_parts = [f"projectId:{proj}" if proj else "", "useCase:eval-portal", f"stage:reader-{stage}"]
+    tags_header = ",".join(p for p in tag_parts if p)
     error = None
     async with httpx.AsyncClient(timeout=60) as client:
         for url in urls:
             for key in keys:
                 try:
-                    resp = await client.post(url, json=body, headers={"Authorization": f"Bearer {key}", "User-Agent": "eval-portal"})
+                    resp = await client.post(url, json=body, headers={
+                        "Authorization": f"Bearer {key}",
+                        "User-Agent": "eval-portal",
+                        "x-litellm-tags": tags_header,
+                    })
                     if key != keys[-1] and proxy.over_budget(resp.status_code, resp.content):
                         continue
                     resp.raise_for_status()

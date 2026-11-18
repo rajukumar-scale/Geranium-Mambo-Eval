@@ -12,7 +12,7 @@ import re
 
 from . import fingerprint, taxo_reader
 
-TEXT_STAGES = ("injection", "prompt", "oe")
+TEXT_STAGES = ("injection", "prompt", "stumping", "all-fail-validation", "reference-notes", "oe")
 STAGES = TEXT_STAGES + ("rubric",)
 
 
@@ -78,7 +78,7 @@ def _rows(criteria):
     out = []
     for c in criteria:
         c = c if isinstance(c, dict) else {}
-        title = fingerprint._jsonata_string(c.get("title", ""))
+        title = fingerprint._jsonata_string(c.get("title") if "title" in c else c.get("criterion", ""))
         bare = _URL.sub("", fingerprint._LINK_TARGET.sub("", title))
         key = fingerprint._NOT_ALNUM.sub("", fingerprint._as_builder_saves(bare))
         weight = fingerprint._jsonata_number(c.get("weight")) or 1
