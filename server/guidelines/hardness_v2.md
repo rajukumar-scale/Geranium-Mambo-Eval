@@ -20,7 +20,7 @@ Your task **Qualifies (`YES`)** only when **all three** hold:
 
 **Case A / B / C:**
 - **Case C (`qualifies = NO`):** Harden the task and rerun the base runs.
-- **Case A (`qualifies = YES` & Opus usable):** At least 1 Opus run passes **every** weight-5 criterion and misses `<= max(3, floor(0.20 * N_w3))` capped at `floor(0.50 * N_w3)` weight-3 criteria. Proceed to `/all-fail-validation` & `/reference-notes`.
+- **Case A (`qualifies = YES` & Opus usable):** At least 1 Opus run passes **every** weight-5 criterion and misses `<= max(3, floor(0.20 * N_w3))` weight-3 criteria (no 50% cap under QC Spec v3), and `Achieved Difficulty >= Assigned Difficulty`. Proceed to `/all-fail-validation` & `/reference-notes`.
 - **Case B (`qualifies = YES` & Opus NOT usable):** Run **3 Opus-only solvability re-runs** focused on the w5/w3 criteria that failed all 3 base Opus runs. Only criteria that STILL fail all 3 solvability re-runs require justification.
 
 ## Part 2. Traps That Beat Carbon While Staying Solvable for Opus

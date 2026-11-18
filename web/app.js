@@ -973,7 +973,7 @@ function guideStepsHtml() {
       whole task for you in one go (a full prompt, rubric, OE set or all the SQL); build it together piece by piece instead.
       Type <b class="mono">/admin</b> and a message to reach a person.</p>
     <h4>4 · What to screenshot</h4>
-    <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run; note that <b>S1 Action Decision Ambiguity</b> at Score 3 is a <b>FAIL</b>), a <b>pass screen</b> pops up with a verification
+    <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run), a <b>pass screen</b> pops up with a verification
       code. Screenshot that card and upload it in your Outlier task: one for each passing review. Keep the whole card in the shot and
       don't zoom far out. You can also click <b>⬇ Download image</b>: that image is checked with Outlier's reader before you get it.</p>
     <p>For the injection, prompt, rubric and reference notes, <b>Copy what passed</b> copies the exact text that review graded, so what you

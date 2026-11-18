@@ -18,7 +18,8 @@ Do not add extra keys (`category`, `justification`, `evidence` belong in Notes/J
 - Split distinct findings into atomic criteria so a run that gets part A right and misses part B is graded accurately.
 - Never weight a formatting nit as `5`, and never hide a core decision/deliverable at `1`.
 
-## 3. All-Fail Validation (S22) & Case B Solvability
+## 3. All-Fail Validation (S22) & Case B Solvability (QC Spec v3)
 
-- Every criterion (any weight `1`, `3`, or `5`) that **fails all completed non-errored runs** (all 6 base runs + any Case B solvability re-runs) must be checked against the prompt and `Universe_Sonorra` (+ optional `01_Injection.sql`) and have an accurate justification in `11_All-Fail-Rubrics-Justification.md` (or `12_Reference_Notes.md` in Case A when Step 61 is hidden).
-- In **Case B**, run **3 Opus-only solvability re-runs** on the w5/w3 criteria that failed all 3 base Opus runs; only criteria that still fail all 3 re-runs require justification.
+- In **Case B**, run **3 Opus-only solvability re-runs** on the w5/w3 criteria that failed all 3 base Opus runs; targets passed in `>= 1` re-run need NO justification.
+- Targets that still fail every re-run are rated `Passable - yes` or `Passable - no` with a factual reason (`Passable - no` fails S18; S22 rates `Passable - yes` targets and reasons).
+- If `Justify Solvability Targets` does not appear (Case A, Case C, or Case B with all targets passing in a re-run), S22 is automatically `5`.
