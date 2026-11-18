@@ -17,7 +17,7 @@ from . import db
 # fraction of the run at which each step starts. Replaced by the recorded step times once enough
 # runs have them.
 DEFAULTS = {
-    "injection": {"minutes": 6.0, "marks": {"inputs": 0.04, "gate": 0.70}},
+    "injection": {"minutes": 10.0, "marks": {"inputs": 0.04, "recheck": 0.55, "final": 0.90}},
     "prompt": {"minutes": 25.0, "marks": {"inputs": 0.01, "gate": 0.02, "recheck": 0.48, "final": 0.94}},
     "rubric": {"minutes": 20.0, "marks": {"inputs": 0.01, "recheck": 0.16, "fixcheck": 0.56, "final": 0.89}},
     "stumping": {"minutes": 22.0, "marks": {"inputs": 0.02, "recheck": 0.55, "final": 0.90}},
