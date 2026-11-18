@@ -426,11 +426,15 @@ def task_setup_personas():
     return out
 
 
-def render_task_setup(persona, family, constraint_count, assigned_difficulty="", attachment_required=""):
+def render_task_setup(persona, family, constraint_count, assigned_difficulty="", attachment_required="", task_id=""):
     title = f" ({persona['title']})" if persona.get("title") else ""
     cc_text = TASK_SETUP_CONSTRAINTS[constraint_count]
     lines = [
         "# Task Assigned Inputs (Geranium Mambo · Sonorra v17)",
+    ]
+    if task_id and re.fullmatch(r"[0-9a-f]{24}", task_id):
+        lines.append(f"- **Task ID:** {task_id}")
+    lines += [
         f"- **Persona:** {persona['name']}{title}",
         f"- **Persona Email:** {persona['email']}",
         "- **Universe Data:** Universe_Sonorra (Sonorra v17, Clock: 2026-08-24T16:41:00-05:00 America/Chicago / 2026-08-24 21:41 UTC)",
@@ -510,7 +514,9 @@ async def save_task_setup(attempt_id, persona_email, family, constraint_count, a
     att_norm = (attachment_required or "").strip().upper()
     if att_norm and att_norm not in TASK_SETUP_ATTACHMENTS:
         raise ValueError("Select Attachment Required: YES or NO.")
-    text = render_task_setup(persona, family, constraint_count, diff_norm, att_norm)
+    from . import db
+    chat = db.get_chat(attempt_id) or {}
+    text = render_task_setup(persona, family, constraint_count, diff_norm, att_norm, (chat.get("task_id") or "").strip().lower())
     await asyncio.to_thread(thaw, attempt_id)
     if config.RUNNER_MODE == "docker":
         up = uploads_dir(attempt_id) / "_task_setup.md"
