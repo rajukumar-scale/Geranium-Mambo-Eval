@@ -21,7 +21,7 @@ class LHFingerprintAndProofTests(unittest.TestCase):
         self.tmp = Path(tmp.name)
         patches = [
             mock.patch.object(config, "DATA_DIR", self.tmp),
-            mock.patch.object(config, "EVAL_BASE_DIR", Path("/Users/raju.kumar/Desktop/Scale/EAC/Geranium_Mambo/New-Evals-Bundle")),
+            mock.patch.object(config, "EVAL_BASE_DIR", self.tmp / "eval-base"),
             mock.patch.object(config, "PROOF_SECRET", "test-proof-secret"),
             mock.patch.object(db, "_conn", None),
         ]
@@ -114,7 +114,7 @@ class TaxoReaderTagsAndTaxonomySyncTests(unittest.TestCase):
         self.assertEqual(seen_headers.get("x-litellm-tags"), "projectId:6ae1792488162884415d5ee6,useCase:eval-portal,stage:reader-stumping")
 
     def test_taxonomy_json_matches_reader_prompts(self):
-        tx_path = Path("/Users/raju.kumar/Desktop/Scale/EAC/Geranium_Mambo/Taxonomy/Taxonomy.json")
+        tx_path = Path(__file__).resolve().parents[2] / "Taxonomy/Taxonomy.json"
         if not tx_path.is_file():
             self.skipTest("Taxonomy.json not present")
         tx = json.loads(tx_path.read_text())

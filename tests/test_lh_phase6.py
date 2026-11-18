@@ -26,7 +26,9 @@ class LHRedashConfigTests(unittest.TestCase):
         self.assertEqual(config.ASSIGNMENT_AUTOFILL, 0)
 
     def test_bundle_similarity_query_id(self):
-        tools = Path("/Users/raju.kumar/Desktop/Scale/EAC/Geranium_Mambo/New-Evals-Bundle/Evals/tools")
+        tools = Path(__file__).resolve().parents[2] / "New-Evals-Bundle/Evals/tools"
+        if not tools.is_dir():
+            self.skipTest("New-Evals-Bundle not present beside portal")
         sys.path.insert(0, str(tools))
         import hg_similarity
         self.assertEqual(hg_similarity.QUERY_ID, 404917)

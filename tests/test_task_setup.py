@@ -1,5 +1,7 @@
 """Tests for Geranium Mambo 3-dropdown Task Setup, GUARD, prompts, and guidelines (Phase 3)."""
 
+import json
+import re
 import tempfile
 import time
 import unittest
@@ -10,16 +12,53 @@ from fastapi.testclient import TestClient
 
 from server import app as portal, auth, config, db, plan, runner, workspace
 
+REAL_BUNDLE = Path(__file__).resolve().parents[2] / "New-Evals-Bundle"
+
+
+def _ensure_bundle(base: Path):
+    if REAL_BUNDLE.is_dir():
+        return REAL_BUNDLE
+    roster = {"personas": [
+        {"name": f"Persona {i}", "email": ("yusuf@sonorra.com" if i == 1 else f"p{i}@sonorra.com"),
+         "canonical_job_title": "VP of Engineering" if i == 1 else "Engineer"}
+        for i in range(1, 16)
+    ]}
+    rpath = base / "Evals/references/persona/roster.json"
+    rpath.parent.mkdir(parents=True, exist_ok=True)
+    rpath.write_text(json.dumps(roster))
+    tpath = base / "Evals/tools/hg_store_input.py"
+    tpath.parent.mkdir(parents=True, exist_ok=True)
+    tpath.write_text('''import hashlib, json
+from pathlib import Path
+REPOSITORY = Path(".")
+def save_input(key, sources=None, content=None, origin=None):
+    dst = REPOSITORY / "Evals/task_inputs/00_Task_Assigned_Inputs.md"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(content)
+    idx = dst.parent / "inputs.json"
+    data = json.loads(idx.read_text()) if idx.is_file() else {"format_version": 1, "revision": 0, "inputs": {}}
+    data["revision"] += 1
+    data["inputs"][key] = {"state": "saved", "revision": data["revision"], "files": [{
+        "filename": dst.name, "path": "Evals/task_inputs/" + dst.name,
+        "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest(),
+    }]}
+    idx.write_text(json.dumps(data))
+    return data["inputs"][key]
+''')
+    return base
+
 
 class TaskSetupTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
+        bundle = _ensure_bundle(self.tmp / "bundle")
         patches = [
-            mock.patch.object(config, "DATA_DIR", self.tmp),
-            mock.patch.object(config, "EVAL_BASE_DIR", Path("/Users/raju.kumar/Desktop/Scale/EAC/Geranium_Mambo/New-Evals-Bundle")),
+            mock.patch.object(config, "DATA_DIR", self.tmp / "data"),
+            mock.patch.object(config, "EVAL_BASE_DIR", bundle),
             mock.patch.object(config, "RUNNER_MODE", "local"),
+            mock.patch.object(workspace, "_ROSTER_CACHE", None),
             mock.patch.object(db, "_conn", None),
         ]
         for p in patches:
@@ -82,7 +121,6 @@ class TaskSetupTests(unittest.TestCase):
 class PromptAndGuardTests(unittest.TestCase):
     def test_no_placeholders_and_no_hg_refs(self):
         self.assertEqual(plan.placeholders(), [])
-        import re
         for bad in ("HarmonyGames", "Snowflake", "Confluence"):
             self.assertNotIn(bad, runner.GUARD)
             self.assertNotIn(bad, portal.HELP)
