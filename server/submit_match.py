@@ -27,8 +27,9 @@ import time
 from . import auth, config, db, fingerprint, hub, notify, submissions
 
 log = logging.getLogger("portal.submit_match")
-STAGES = ("prompt", "injection", "oe", "rubric")
-LABELS = {"prompt": "prompt", "injection": "injection SQL", "oe": "oracle events", "rubric": "rubric"}
+STAGES = ("prompt", "injection", "reference-notes", "rubric", "oe")
+LABELS = {"prompt": "prompt", "injection": "injection SQL", "reference-notes": "reference notes",
+          "oe": "oracle events", "rubric": "rubric"}
 BASELINE = "submitmatch:baseline"
 GIVE_UP = 6 * 3600  # still not in the CDS view after this: stop asking
 TASK_ID = re.compile(r"^[0-9a-f]{24}$")
@@ -46,6 +47,7 @@ def submitted_fingerprints(row):
     """{stage: fingerprint} of what the platform row says was submitted."""
     out = {"prompt": fingerprint.text("prompt", _decode(row.get("PROMPT_B64"))),
            "injection": fingerprint.text("injection", _decode(row.get("INJECTION_B64"))),
+           "reference-notes": fingerprint.text("reference-notes", _decode(row.get("REFNOTES_B64"))),
            "oe": fingerprint.text("oe", _decode(row.get("OE_B64")))}
     try:
         criteria = json.loads(_decode(row.get("RUBRIC_B64")) or "null")
@@ -88,21 +90,21 @@ def chat_note(found):
     for m in found:
         lines.append(f"- **{LABELS[m['stage']].capitalize()}:** you submitted {short(m['submitted'])}; "
                      f"your passes were for {short(m['reviewed'])}.")
-    lines += ["", "Your /oe and /rubric passes only cover the prompt, SQL and OE they were reviewed with, so the task "
+    lines += ["", "Your /rubric and /reference-notes passes only cover the prompt, SQL and inputs they were reviewed with, so the task "
                   "will likely be sent back. Put the versions that passed into Outlier, or run the reviews again on "
                   "the version you submitted. Type /admin if this looks wrong."]
     return "\n".join(lines)
 
 
 def alert_text(hits):
-    lines = [f"🚨 {len(hits)} submitted task{'s' if len(hits) != 1 else ''} don't match {'their' if len(hits) != 1 else 'its'} portal passes (Atlas Commercial):"]
+    lines = [f"🚨 {len(hits)} submitted task{'s' if len(hits) != 1 else ''} don't match {'their' if len(hits) != 1 else 'its'} portal passes (Geranium Mambo):"]
     for h in hits:
         when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(h["at"]))
         lines.append(f"• {h['email']} · task {h['task_id']} · portal chat {h['attempt_id']} · submitted {when}")
         lines.append(f"    {notify.admin_link(h['attempt_id'])}")
         for m in h["mismatches"]:
             lines.append(f"    – {LABELS[m['stage']]}: submitted {m['submitted'][:70]} · passes were for {m['reviewed'][:70]}")
-    lines.append("The OE and rubric passes don't cover what was submitted: send the task back to L-1, or have them "
+    lines.append("The passes don't cover what was submitted: send the task back to L-1, or have them "
                  "re-run the reviews on the submitted version.")
     return "\n".join(lines)
 
