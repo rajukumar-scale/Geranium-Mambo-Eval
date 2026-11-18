@@ -128,7 +128,7 @@ class TaxoReaderTagsAndTaxonomySyncTests(unittest.TestCase):
             ("transformer-jsonata-eval-refnotes-prompt", "reference-notes"),
         ):
             self.assertIn(json.dumps(taxo_reader.PROMPTS[stage], ensure_ascii=False)[1:-1], by_id[nid], nid)
-        self.assertIn("Titles 3120 letters", taxo_reader.PROMPTS["rubric"])
+        self.assertIn("Titles 10552 letters", taxo_reader.PROMPTS["rubric"])
 
 
 class ProxyFallbackAndRedactionTests(unittest.TestCase):
