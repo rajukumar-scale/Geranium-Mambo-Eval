@@ -63,6 +63,11 @@ for name in Evals claude; do
     cp -a "$CURRENT/$name" "$NEW/$name"   # a real copy: the skill-effort step below edits these files
   fi
 done
+# Carry forward live similarity library from CURRENT (Evals.zip ships an empty seed) before refreshing below.
+if [ -n "$CURRENT" ] && [ -f "$CURRENT/Evals/references/similarity/library.json" ] && [ -d "$NEW/Evals/references/similarity" ]; then
+  cp -f "$CURRENT/Evals/references/similarity/library.json" "$NEW/Evals/references/similarity/library.json" || true
+  [ -f "$CURRENT/Evals/references/similarity/prompts.npy" ] && cp -f "$CURRENT/Evals/references/similarity/prompts.npy" "$NEW/Evals/references/similarity/prompts.npy" || true
+fi
 for name in $UNIVERSES; do
   if chosen "$name" || [ -z "$CURRENT" ] || [ ! -d "$CURRENT/$(dest "$name")" ]; then
     fetch "$name"  # the GitHub parts: all three are chosen together (above), so they unpack into one folder
@@ -130,6 +135,7 @@ chown -R root:root "$NEW"; chmod -R a+rX,go-w "$NEW"
 echo "STEP switching to the new release"
 ln -sfn "$NEW" "$LINK.tmp" && mv -T "$LINK.tmp" "$LINK"
 echo "eval base now -> $NEW"
+systemctl start --no-block eval-similarity-refresh.service 2>/dev/null || true
 # Keep the two newest releases (older ones may still back a running container until it ends).
 ls -1d "$ROOT"/2* | sort | head -n -2 | while read -r old; do
   [ "$old" = "$NEW" ] || rm -rf "$old"
