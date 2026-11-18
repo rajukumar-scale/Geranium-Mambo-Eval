@@ -362,6 +362,8 @@ def chat_state(attempt_id):
             "constraint_counts": [
                 {"id": k, "label": v} for k, v in workspace.TASK_SETUP_CONSTRAINTS.items()
             ],
+            "difficulties": list(workspace.TASK_SETUP_DIFFICULTIES),
+            "attachments": list(workspace.TASK_SETUP_ATTACHMENTS),
         },
         "stages": [{"id": s, "file": f, "label": config.STAGE_LABELS[s], "optional": s in config.OPTIONAL_STAGES}
                    for s, f, *_ in config.STAGES],
@@ -679,18 +681,23 @@ class TaskSetupBody(BaseModel):
     persona_email: str
     family: str
     constraint_count: str
+    assigned_difficulty: str = ""
+    attachment_required: str = ""
 
 
 @app.post("/api/task-setup")
 async def set_task_setup(body: TaskSetupBody, request: Request):
-    """Save the 3-dropdown Task Setup (Persona, Family, Constraint Count) into 00_Task_Assigned_Inputs.md."""
+    """Save the Your Assignment Task Setup into 00_Task_Assigned_Inputs.md."""
     session = current_user(request)
     attempt_id = session["attempt_id"]
     chat_writable(session, db.get_chat(attempt_id))
     if db.active_run(attempt_id):
         raise HTTPException(409, "Wait for the running review to finish, then save Task Setup.")
     try:
-        saved = await workspace.save_task_setup(attempt_id, body.persona_email, body.family, body.constraint_count)
+        saved = await workspace.save_task_setup(
+            attempt_id, body.persona_email, body.family, body.constraint_count,
+            body.assigned_difficulty, body.attachment_required,
+        )
     except ValueError as err:
         raise HTTPException(400, str(err)) from err
     except Exception as err:  # noqa: BLE001

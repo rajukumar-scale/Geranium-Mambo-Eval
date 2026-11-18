@@ -388,18 +388,23 @@ def docker_mounts(attempt_id):
     return args
 
 
-# ---- Geranium Mambo Task Setup (3 dropdowns -> 00_Task_Assigned_Inputs.md) -------
+# ---- Geranium Mambo Task Setup (Your Assignment -> 00_Task_Assigned_Inputs.md) -------
 
 TASK_SETUP_FAMILIES = (
     "Enterprise ops & connectors",
     "Data analysis & extraction",
     "Document authoring & editing",
+    "Research & verification",
     "Software & interactive builds",
+    "Presentations",
+    "Visual & media generation",
 )
 TASK_SETUP_CONSTRAINTS = {
     "Low": "Low (10+ constraints & 10+ rubric criteria; no upper limit)",
     "High": "High (20+ constraints & 20+ rubric criteria; no upper limit)",
 }
+TASK_SETUP_DIFFICULTIES = ("Easy", "Medium", "Hard")
+TASK_SETUP_ATTACHMENTS = ("NO", "YES")
 _ROSTER_CACHE = None
 
 
@@ -421,17 +426,22 @@ def task_setup_personas():
     return out
 
 
-def render_task_setup(persona, family, constraint_count):
+def render_task_setup(persona, family, constraint_count, assigned_difficulty="", attachment_required=""):
     title = f" ({persona['title']})" if persona.get("title") else ""
     cc_text = TASK_SETUP_CONSTRAINTS[constraint_count]
-    return (
-        "# Task Assigned Inputs (Geranium Mambo · Sonorra v17)\n"
-        f"- **Persona:** {persona['name']}{title}\n"
-        f"- **Persona Email:** {persona['email']}\n"
-        "- **Universe Data:** Universe_Sonorra (Sonorra v17, Clock: 2026-08-24T16:41:00-05:00 America/Chicago / 2026-08-24 21:41 UTC)\n"
-        f"- **Family:** {family}\n"
-        f"- **Constraint Count:** {cc_text}\n"
-    )
+    lines = [
+        "# Task Assigned Inputs (Geranium Mambo · Sonorra v17)",
+        f"- **Persona:** {persona['name']}{title}",
+        f"- **Persona Email:** {persona['email']}",
+        "- **Universe Data:** Universe_Sonorra (Sonorra v17, Clock: 2026-08-24T16:41:00-05:00 America/Chicago / 2026-08-24 21:41 UTC)",
+        f"- **Family:** {family}",
+        f"- **Constraint Count:** {cc_text}",
+    ]
+    if assigned_difficulty:
+        lines.append(f"- **Assigned Difficulty:** {assigned_difficulty}")
+    if attachment_required:
+        lines.append(f"- **Attachment Required:** {attachment_required}")
+    return "\n".join(lines) + "\n"
 
 
 def read_task_setup(attempt_id):
@@ -446,6 +456,8 @@ def read_task_setup(attempt_id):
     persona_m = re.search(r"(?im)^\s*(?:-\s*)?\**Persona\**\s*:\s*\**\s*([^\n]+)", text)
     family_m = re.search(r"(?im)^\s*(?:-\s*)?\**Family\**\s*:\s*\**\s*([^\n]+)", text)
     cc_m = re.search(r"(?im)^\s*(?:-\s*)?\**Constraint Count\**\s*:\s*\**\s*(Low|High)\b", text)
+    diff_m = re.search(r"(?im)^\s*(?:-\s*)?\**Assigned Difficulty\**\s*:\s*\**\s*(Easy|Medium|Hard)\b", text)
+    att_m = re.search(r"(?im)^\s*(?:-\s*)?\**Attachment Required\**\s*:\s*\**\s*(YES|NO)\b", text)
     if not email_m and not family_m and not cc_m:
         return None
     return {
@@ -453,6 +465,8 @@ def read_task_setup(attempt_id):
         "persona": persona_m.group(1).strip() if persona_m else "",
         "family": family_m.group(1).strip() if family_m else "",
         "constraint_count": cc_m.group(1).strip() if cc_m else "",
+        "assigned_difficulty": diff_m.group(1).capitalize() if diff_m else "",
+        "attachment_required": att_m.group(1).upper() if att_m else "",
     }
 
 
@@ -479,7 +493,7 @@ def _store_task_setup_local(attempt_id, content_bytes):
                 shutil.copy2(src_f, dst_inputs / fname)
 
 
-async def save_task_setup(attempt_id, persona_email, family, constraint_count):
+async def save_task_setup(attempt_id, persona_email, family, constraint_count, assigned_difficulty="", attachment_required=""):
     personas = {p["email"].lower(): p for p in task_setup_personas()}
     persona = personas.get((persona_email or "").strip().lower())
     if not persona:
@@ -488,7 +502,15 @@ async def save_task_setup(attempt_id, persona_email, family, constraint_count):
         raise ValueError("Select a valid Task Family.")
     if constraint_count not in TASK_SETUP_CONSTRAINTS:
         raise ValueError("Select Constraint Count: Low or High.")
-    text = render_task_setup(persona, family, constraint_count)
+    diff_norm = (assigned_difficulty or "").strip()
+    if diff_norm:
+        diff_norm = diff_norm.capitalize()
+        if diff_norm not in TASK_SETUP_DIFFICULTIES:
+            raise ValueError("Select Assigned Difficulty: Easy, Medium, or Hard.")
+    att_norm = (attachment_required or "").strip().upper()
+    if att_norm and att_norm not in TASK_SETUP_ATTACHMENTS:
+        raise ValueError("Select Attachment Required: YES or NO.")
+    text = render_task_setup(persona, family, constraint_count, diff_norm, att_norm)
     await asyncio.to_thread(thaw, attempt_id)
     if config.RUNNER_MODE == "docker":
         up = uploads_dir(attempt_id) / "_task_setup.md"

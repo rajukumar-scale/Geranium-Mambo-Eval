@@ -121,13 +121,15 @@ process.stdout.write(JSON.stringify({
 }));
 """
     METAS = [
+        ({"stage": "stumping", "verdict": "FAIL", "score": 2}, True),
+        ({"stage": "stumping", "verdict": "FAIL", "score": 2}, True),
         ({"stage": "hardness", "verdict": "FAIL", "score": 1}, True),
         ({"stage": "hardness", "verdict": "FAIL", "score": 2}, True),
-        ({"stage": "hardness", "verdict": "FAIL", "score": None}, True),
-        ({"stage": "hardness", "verdict": None, "score": 2}, True),  # the report says Easy even if no verdict parsed
-        ({"stage": "hardness", "verdict": "NON-FAIL", "score": 3}, False),
-        ({"stage": "hardness", "verdict": "PASS", "score": 5}, False),
-        ({"stage": "hardness", "verdict": "NON-FAIL", "score": None}, False),  # unscored provisional
+        ({"stage": "stumping", "verdict": "FAIL", "score": None}, True),
+        ({"stage": "stumping", "verdict": None, "score": 2}, True),
+        ({"stage": "stumping", "verdict": "NON-FAIL", "score": 3}, False),
+        ({"stage": "stumping", "verdict": "PASS", "score": 5}, False),
+        ({"stage": "stumping", "verdict": "NON-FAIL", "score": None}, False),
         ({"stage": "prompt", "verdict": "FAIL", "score": 2}, False),
         ({"stage": "rubric", "verdict": "FAIL", "score": 1}, False),
     ]
@@ -174,7 +176,7 @@ process.stdout.write(JSON.stringify({
             with self.subTest(meta=meta):
                 self.assertEqual("Too easy? See the" in html, want)
         self.assertIn(f'href="{self.out["link"]}"', self.out["html"][0])
-        self.assertIn("hardness guide, Part 8. If the run comes back too easy</a>", self.out["html"][0])
+        self.assertIn("stumping guide, Part 2. Traps That Beat Carbon While Staying Solvable for Opus</a>", self.out["html"][0])
         self.assertNotIn("Too easy?", self.out["adminHtml"])  # the /admin page has no Guide panel to open
 
     def test_tool_call_and_failure_pattern_hints(self):
@@ -191,8 +193,8 @@ process.stdout.write(JSON.stringify({
 
     def test_the_tool_call_and_pattern_links_hit_real_headings(self):
         slugs = dict(zip(self.out["slugs"], self.headings + [h for n in ("toolcalls", "patterns") for h in self.guide_headings[n]]))
-        for link, tab, heading in ((self.out["toolcallsLink"], "toolcalls", "Part 4. What adds real calls (do these)"),
-                                   (self.out["patternsLink"], "patterns", "4. Build at least three traps that split the rollouts")):
+        for link, tab, heading in ((self.out["toolcallsLink"], "toolcalls", "3. Multi-Service Depth Without Fluff"),
+                                   (self.out["patternsLink"], "patterns", "2. Rubric Quality Checks (S17 & S21)")):
             with self.subTest(link=link):
                 self.assertTrue(link.startswith(f"/?guide={tab}#"))
                 self.assertIn(tab, portal.GUIDES)
@@ -203,12 +205,12 @@ process.stdout.write(JSON.stringify({
         slugs = dict(zip(self.out["slugs"], self.headings))
         anchor = self.out["link"].split("#", 1)[1]
         self.assertTrue(self.out["link"].startswith("/?guide=hardness#"))
-        self.assertEqual(slugs.get(anchor), "Part 8. If the run comes back too easy")
+        self.assertEqual(slugs.get(anchor), "Part 2. Traps That Beat Carbon While Staying Solvable for Opus")
 
     def test_slugs_are_github_style(self):
         slugs = dict(zip(self.headings, self.out["slugs"]))
-        self.assertEqual(slugs["Appendix. One-page checklist"], "appendix-one-page-checklist")
-        self.assertEqual(slugs['1. Proving "done" across services'], "1-proving-done-across-services")
+        self.assertEqual(slugs["Part 1. How Stumping (S18) Qualifies"], "part-1-how-stumping-s18-qualifies")
+        self.assertEqual(slugs["3. What Does NOT Work"], "3-what-does-not-work")
 
 
 class WebGuidePanelTest(unittest.TestCase):

@@ -912,31 +912,31 @@ function msgTime(t) {
 function guideSlug(text) {
   return String(text ?? "").toLowerCase().trim().replace(/[^\p{L}\p{N}\s-]/gu, "").replace(/\s+/g, "-");
 }
-const TOO_EASY_LINK = "/?guide=hardness#part-8-if-the-run-comes-back-too-easy";
-// A /hardness report that came back too easy: a FAIL, or score 1 (Too easy) or 2 (Easy).
+const TOO_EASY_LINK = "/?guide=hardness#part-2-traps-that-beat-carbon-while-staying-solvable-for-opus";
+// A /stumping (or legacy /hardness) report that came back too easy: a FAIL, or score 1 or 2.
 function hardnessTooEasy(meta) {
-  return !!meta && meta.stage === "hardness" && (meta.verdict === "FAIL" || meta.score === 1 || meta.score === 2);
+  return !!meta && (meta.stage === "stumping" || meta.stage === "hardness") && (meta.verdict === "FAIL" || meta.score === 1 || meta.score === 2);
 }
 function tooEasyHint() {
-  return `<div class="guide-hint">Too easy? See the <a href="${TOO_EASY_LINK}">hardness guide, Part 8. If the run comes back too easy</a></div>`;
+  return `<div class="guide-hint">Too easy? See the <a href="${TOO_EASY_LINK}">stumping guide, Part 2. Traps That Beat Carbon While Staying Solvable for Opus</a></div>`;
 }
-// The two /hardness checks with their own guide (2026-11-04), read from the report text so older reports get them too.
-// Tool calls: the FAIL's "Why Easy (tool calls)" paragraph. Failure pattern: the ⚠ warning or a "Failure-pattern risk: YES"
-// line, however the report bolds it ("Failure-pattern risk: **YES**", "**Failure-pattern risk: YES (advice only).**").
-const TOOLCALLS_LINK = "/?guide=toolcalls#part-4-what-adds-real-calls-do-these";
-const PATTERNS_LINK = "/?guide=patterns#4-build-at-least-three-traps-that-split-the-rollouts";
+// Guide hints on /stumping (and legacy /hardness) reports.
+const TOOLCALLS_LINK = "/?guide=toolcalls#3-multi-service-depth-without-fluff";
+const PATTERNS_LINK = "/?guide=patterns#2-rubric-quality-checks-s17-s21";
 function hardnessToolCallFail(m) {
-  return !!m && (m.meta || {}).stage === "hardness" && /Why Easy \(tool calls\)/.test(m.content || "");
+  const stg = (m.meta || {}).stage;
+  return !!m && (stg === "stumping" || stg === "hardness") && /Why Easy \(tool calls\)/.test(m.content || "");
 }
 function hardnessPatternRisk(m) {
-  return !!m && (m.meta || {}).stage === "hardness"
-    && /⚠\s*\**\s*Failure-pattern risk|Failure-pattern risk[\s*:]*YES\b/.test(m.content || "");
+  const stg = (m.meta || {}).stage;
+  return !!m && (stg === "stumping" || stg === "hardness")
+    && /\u26a0\s*\**\s*Failure-pattern risk|Failure-pattern risk[\s*:]*YES\b/.test(m.content || "");
 }
 function toolCallHint() {
-  return `<div class="guide-hint">Too few tool calls? See the <a href="${TOOLCALLS_LINK}">tool calls guide, Part 4. What adds real calls</a></div>`;
+  return `<div class="guide-hint">Too few tool calls? See the <a href="${TOOLCALLS_LINK}">horizon guide, 3. Multi-Service Depth Without Fluff</a></div>`;
 }
 function patternRiskHint() {
-  return `<div class="guide-hint">Failure-pattern risk? See the <a href="${PATTERNS_LINK}">failure patterns guide, 4. Build at least three traps that split the rollouts</a></div>`;
+  return `<div class="guide-hint">Failure-pattern risk? See the <a href="${PATTERNS_LINK}">rubric &amp; all-fail guide, 2. Rubric Quality Checks (S17 &amp; S21)</a></div>`;
 }
 // ---- end guide links ----
 

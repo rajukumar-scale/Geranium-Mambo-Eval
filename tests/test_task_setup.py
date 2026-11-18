@@ -85,8 +85,13 @@ class TaskSetupTests(unittest.TestCase):
         self.assertIsNone(data["task_setup"])
         opts = data["task_setup_options"]
         self.assertEqual(len(opts["personas"]), 15)
-        self.assertEqual(len(opts["families"]), 4)
+        self.assertEqual(len(opts["families"]), 7)
+        self.assertIn("Research & verification", opts["families"])
+        self.assertIn("Presentations", opts["families"])
+        self.assertIn("Visual & media generation", opts["families"])
         self.assertEqual([c["id"] for c in opts["constraint_counts"]], ["Low", "High"])
+        self.assertEqual(opts["difficulties"], ["Easy", "Medium", "Hard"])
+        self.assertEqual(opts["attachments"], ["NO", "YES"])
 
     def test_save_and_read_task_setup(self):
         with mock.patch.object(portal.blocks, "disabled", lambda *a: None), \
@@ -101,21 +106,27 @@ class TaskSetupTests(unittest.TestCase):
 
             res = c.post("/api/task-setup", json={
                 "persona_email": "yusuf@sonorra.com",
-                "family": "Enterprise ops & connectors",
+                "family": "Research & verification",
                 "constraint_count": "High",
+                "assigned_difficulty": "Hard",
+                "attachment_required": "YES",
             })
             self.assertEqual(res.status_code, 200, res.text)
             body = res.json()
             self.assertTrue(body["ok"])
             self.assertEqual(body["task_setup"]["persona_email"], "yusuf@sonorra.com")
-            self.assertEqual(body["task_setup"]["family"], "Enterprise ops & connectors")
+            self.assertEqual(body["task_setup"]["family"], "Research & verification")
             self.assertEqual(body["task_setup"]["constraint_count"], "High")
+            self.assertEqual(body["task_setup"]["assigned_difficulty"], "Hard")
+            self.assertEqual(body["task_setup"]["attachment_required"], "YES")
 
             me = c.get("/api/me").json()
             self.assertEqual(me["task_setup"]["persona_email"], "yusuf@sonorra.com")
             saved_md = (workspace.task_inputs("att1") / "00_Task_Assigned_Inputs.md").read_text()
             self.assertIn("yusuf@sonorra.com", saved_md)
             self.assertIn("20+ constraints & 20+ rubric criteria; no upper limit", saved_md)
+            self.assertIn("- **Assigned Difficulty:** Hard", saved_md)
+            self.assertIn("- **Attachment Required:** YES", saved_md)
 
 
 class PromptAndGuardTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 The contributor's answer to "what should the agent end up doing, and what should a careless agent miss?" is quoted at the end of this note. Help them fix only the failed items in the latest `/prompt` report:
 - Focus strictly on failed dimensions (`S1`–`S14`, Persona ACL, Attachment checks, `hg_similarity`) and major issues; leave passing items untouched.
-- Settle ambiguities (especially `S1 Action Decision Ambiguity`, score 3 FAIL) via a specific dated record or a targeted prompt phrasing fix — never add generic prompt checklists or hint at traps.
+- Settle ambiguities (especially `S1 Action Decision Ambiguity`, score 2 FAIL) via a specific dated record or a targeted prompt phrasing fix — never add generic prompt checklists or hint at traps.
 - Check `guidelines/known_data_issues.md` first: if a failed item relies on a listed Sonorra conflict (`K-01..K-29`, `V12-C1..C2`), move the ask onto an unconflicted system of record or resolve it cleanly in `01_Injection.sql`.
 - Neighbor check: verify every new or changed SQL row against `Evals/references/schema/live_postgres.json` and `schema_diffs.md` (`quickbooks.quickbooks_entities` polymorphic table, `crm.crm_companies` omits `payout_terms`/`account`, no generated `tsvector` columns, timestamps <= `2026-08-24T16:41:00-05:00` unless scheduled), cross-check related records across services, and confirm Persona ACL visibility.
 - Keep it hard (`guidelines/hardness_v2.md`): settle only the deciding fact for the failed item — never state derived answers in a record or leak trap hints into the prompt.

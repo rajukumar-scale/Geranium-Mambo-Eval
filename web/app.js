@@ -490,12 +490,14 @@ async function refreshSide() {
   try { state.me = await api("/api/me"); renderSide(); } catch (e) { /* ignore */ }
 }
 
-// Task Setup (3 dropdowns: Persona, Task Family, Constraint Count) — replaces the base date picker.
+// Task Setup (Your Assignment -> 00_Task_Assigned_Inputs.md) — replaces the base date picker.
 function taskSetupFormHtml(cur, idPrefix = "ts") {
-  const opts = state.me.task_setup_options || { personas: [], families: [], constraint_counts: [] };
+  const opts = state.me.task_setup_options || { personas: [], families: [], constraint_counts: [], difficulties: ["Easy", "Medium", "Hard"], attachments: ["NO", "YES"] };
   const pOpts = opts.personas.map(p => `<option value="${esc(p.email)}"${cur && cur.persona_email === p.email ? " selected" : ""}>${esc(p.name)}${p.title ? ` (${esc(p.title)})` : ""} — ${esc(p.email)}</option>`).join("");
   const fOpts = opts.families.map(f => `<option value="${esc(f)}"${cur && cur.family === f ? " selected" : ""}>${esc(f)}</option>`).join("");
   const cOpts = opts.constraint_counts.map(c => `<option value="${esc(c.id)}"${cur && cur.constraint_count === c.id ? " selected" : ""}>${esc(c.label)}</option>`).join("");
+  const dOpts = (opts.difficulties || ["Easy", "Medium", "Hard"]).map(d => `<option value="${esc(d)}"${cur && cur.assigned_difficulty === d ? " selected" : ""}>${esc(d)}</option>`).join("");
+  const aOpts = (opts.attachments || ["NO", "YES"]).map(a => `<option value="${esc(a)}"${cur && cur.attachment_required === a ? " selected" : ""}>${esc(a)}</option>`).join("");
   return `<div class="setup-grid">
       <div class="setup-field"><label for="${idPrefix}-persona">Persona</label>
         <select id="${idPrefix}-persona"><option value="">Select persona…</option>${pOpts}</select></div>
@@ -503,11 +505,15 @@ function taskSetupFormHtml(cur, idPrefix = "ts") {
         <select id="${idPrefix}-family"><option value="">Select family…</option>${fOpts}</select></div>
       <div class="setup-field"><label for="${idPrefix}-cc">Constraint Count</label>
         <select id="${idPrefix}-cc"><option value="">Select constraint count…</option>${cOpts}</select></div>
+      <div class="setup-field"><label for="${idPrefix}-diff">Assigned Difficulty</label>
+        <select id="${idPrefix}-diff"><option value="">Any / Not specified</option>${dOpts}</select></div>
+      <div class="setup-field"><label for="${idPrefix}-att">Attachment Required</label>
+        <select id="${idPrefix}-att"><option value="">Any / Not specified</option>${aOpts}</select></div>
     </div>`;
 }
 
-async function submitTaskSetup(persona_email, family, constraint_count) {
-  const res = await api("/api/task-setup", { json: { persona_email, family, constraint_count } });
+async function submitTaskSetup(persona_email, family, constraint_count, assigned_difficulty = "", attachment_required = "") {
+  const res = await api("/api/task-setup", { json: { persona_email, family, constraint_count, assigned_difficulty, attachment_required } });
   state.me.task_setup = res.task_setup;
   state.me.inputs = res.inputs;
   renderSide();
@@ -524,8 +530,9 @@ function renderTaskSetup() {
   if (s) {
     const shortFam = (s.family || "").split("&")[0].trim();
     const who = (s.persona || s.persona_email || "").split("(")[0].trim();
-    chip.textContent = `⚙ ${who} · ${shortFam} · ${s.constraint_count}`;
-    chip.title = `Persona: ${s.persona_email} | Family: ${s.family} | Constraint Count: ${s.constraint_count} (click to edit)`;
+    const diffPart = s.assigned_difficulty ? ` · ${s.assigned_difficulty}` : "";
+    chip.textContent = `⚙ ${who} · ${shortFam} · ${s.constraint_count}${diffPart}`;
+    chip.title = `Persona: ${s.persona_email} | Family: ${s.family} | Constraint Count: ${s.constraint_count}${s.assigned_difficulty ? ` | Difficulty: ${s.assigned_difficulty}` : ""}${s.attachment_required ? ` | Attachment: ${s.attachment_required}` : ""} (click to edit)`;
   } else {
     chip.textContent = "⚙ Task Setup (required)";
     chip.title = "Pick Persona, Task Family, and Constraint Count";
@@ -542,14 +549,18 @@ function renderSetupCard() {
   card.id = "setup-card";
   card.className = "setup-card";
   if (s) {
+    const extras = [
+      s.assigned_difficulty ? `Difficulty: <b>${esc(s.assigned_difficulty)}</b>` : "",
+      s.attachment_required ? `Attachment: <b>${esc(s.attachment_required)}</b>` : "",
+    ].filter(Boolean).join(" · ");
     card.innerHTML = `<div class="setup-summary">
-        <span>✅ <b>Task Setup:</b> ${esc(s.persona || s.persona_email)} · ${esc(s.family)} · <b>${esc(s.constraint_count)}</b> (${s.constraint_count === "Low" ? "10+" : "20+"} constraints & criteria, no upper limit)</span>
+        <span>✅ <b>Task Setup:</b> ${esc(s.persona || s.persona_email)} · ${esc(s.family)} · <b>${esc(s.constraint_count)}</b> (${s.constraint_count === "Low" ? "10+" : "20+"} constraints & criteria)${extras ? ` · ${extras}` : ""}</span>
         <span class="muted">· Sonorra v17 (2026-08-24 16:41 CT)</span>
         <button type="button" class="small" data-edit-setup>Edit</button>
       </div>`;
   } else {
     card.innerHTML = `<div class="setup-head"><span>⚙ Task Setup (Geranium Mambo · Sonorra v17)</span>
-        <span class="muted" style="font-weight:400;font-size:12px">Pick your Persona, Task Family, and Constraint Count before running /prompt</span></div>
+        <span class="muted" style="font-weight:400;font-size:12px">Match Your Assignment in Outlier before running /prompt</span></div>
       ${taskSetupFormHtml(null, "welcome-ts")}
       <div class="setup-actions"><button type="button" class="primary" id="welcome-ts-save">Save Task Setup</button>
         <span class="muted" style="font-size:12px">Saves to 00_Task_Assigned_Inputs.md</span></div>`;
@@ -561,9 +572,11 @@ function renderSetupCard() {
     const persona_email = $("#welcome-ts-persona").value;
     const family = $("#welcome-ts-family").value;
     const constraint_count = $("#welcome-ts-cc").value;
-    if (!persona_email || !family || !constraint_count) return uiAlert("Select all 3 fields", "Pick a Persona, Task Family, and Constraint Count.");
+    const assigned_difficulty = $("#welcome-ts-diff").value;
+    const attachment_required = $("#welcome-ts-att").value;
+    if (!persona_email || !family || !constraint_count) return uiAlert("Select required fields", "Pick a Persona, Task Family, and Constraint Count.");
     saveBtn.disabled = true; saveBtn.textContent = "Saving…";
-    try { await submitTaskSetup(persona_email, family, constraint_count); }
+    try { await submitTaskSetup(persona_email, family, constraint_count, assigned_difficulty, attachment_required); }
     catch (err) { saveBtn.disabled = false; saveBtn.textContent = "Save Task Setup"; uiAlert("Couldn't save Task Setup", err.message); }
   };
   const editBtn = card.querySelector("[data-edit-setup]");
@@ -584,10 +597,12 @@ function openTaskSetupModal(why = "") {
       const persona_email = w.querySelector("#modal-ts-persona").value;
       const family = w.querySelector("#modal-ts-family").value;
       const constraint_count = w.querySelector("#modal-ts-cc").value;
-      if (!persona_email || !family || !constraint_count) return uiAlert("Select all 3 fields", "Pick a Persona, Task Family, and Constraint Count.");
+      const assigned_difficulty = w.querySelector("#modal-ts-diff").value;
+      const attachment_required = w.querySelector("#modal-ts-att").value;
+      if (!persona_email || !family || !constraint_count) return uiAlert("Select required fields", "Pick a Persona, Task Family, and Constraint Count.");
       btn.disabled = true; btn.textContent = "Saving…";
       try {
-        const saved = await submitTaskSetup(persona_email, family, constraint_count);
+        const saved = await submitTaskSetup(persona_email, family, constraint_count, assigned_difficulty, attachment_required);
         w.remove();
         finish(saved);
       } catch (err) {
