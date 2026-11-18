@@ -39,7 +39,7 @@ def step_of(block):
     args = block.get("input") or {}
     if block.get("name") == "Bash":
         command = args.get("command") or ""
-        if "hg_report_contract" in command:
+        if "hg_report_contract" in command or "hg_write_output" in command:
             return "final"
         if "hg_injection_gate" in command:
             return "gate"

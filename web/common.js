@@ -513,7 +513,7 @@ function showProof(p) {
       <div class="taxo-foot"><button data-close>Close</button><button class="primary" data-show disabled>Show my pass →</button></div></div>`;
     const tick = wrap.querySelector(".taxo-check input"), show = wrap.querySelector("[data-show]");
     tick.onchange = () => { show.disabled = !tick.checked; };
-    show.onclick = INJECT_REMINDER_STAGES.has(p.stage) && (p.stage === "prompt" || p.stage === "hardness" || hasSavedSql()) ? injectStep : card;
+    show.onclick = INJECT_REMINDER_STAGES.has(p.stage) && hasSavedSql() ? injectStep : card;
   };
   // After a /prompt or /hardness pass the next step happens in sandboxes (Universe Explorer, Agent Runner), and CBs kept
   // forgetting to run their injection SQL there first (Evan, 2026-11-03). One more step, every such pass.
@@ -542,10 +542,10 @@ function showProof(p) {
 // reader looks for (verdict badge, "/stage · Stage review · COMPLETE"), then the 🔏 verification code large and in
 // plain characters with its first and last characters spelled out (spelledCode), then the details. Before the download it's read with the taxonomy's own reader and prompt
 // (server/taxo_reader.py); if that misreads, it's drawn again with a bigger code, up to 3 times.
-const COPYABLE = new Set(["injection", "prompt", "reference-notes", "all-fail-validation", "stumping", "oe"]);
+const COPYABLE = new Set(["injection", "prompt", "rubric", "reference-notes", "all-fail-validation", "stumping"]);
 // /oe and /rubric too (Evan, 2026-11-06): contributors who redo a task after passing /rubric go back into sandboxes.
 // Those two show it only when the task has injection SQL saved.
-const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness", "oe", "rubric"]);
+const INJECT_REMINDER_STAGES = new Set(["prompt", "rubric", "stumping"]);
 function hasSavedSql() {
   return typeof state !== "undefined" && !!state.me && (state.me.inputs || []).some(i => i.key === "injection" && i.state === "saved");
 }
@@ -560,10 +560,10 @@ const OUTLIER_SQL_LEAD = `<p class="taxo-warn"><b>On Outlier, use this exact SQL
 // Redeploy from the base universe, never a snapshot (Evan, 2026-11-06): a snapshot can be gone ("Artifact
 // snapshot-hg4-with-gsuite-bundle-1174-e51786a0 version=16 not found") and it brings back old rows (QC 6aecc5e4).
 const REDEPLOY_BASE = `<p class="taxo-warn"><b>Always redeploy from the base universe, never from a snapshot.</b> Under <b>Redeploy from</b>,
-  look at the name under <b>Universe this environment was deployed with</b>. If it's <b class="mono">hg4-synth-sep30cut</b> (task date
-  Oct 1, 2025) or <b class="mono">hg4-2026-08-31</b> (Feb 14, 2026), keep it. If it starts with <b class="mono">snapshot-</b>, pick
-  <b>A specific universe or snapshot id</b> instead and paste the base universe for your task date. A snapshot can be deleted
-  (the "Artifact snapshot-… not found" error) and it still has the old rows in it.</p>`;
+  look at the name under <b>Universe this environment was deployed with</b>. Keep <b class="mono">long_horizon_tech_35k_scoped</b>
+  (Sonorra v17, clock 2026-08-24 16:41 CT). If it starts with <b class="mono">snapshot-</b>, pick
+  <b>A specific universe or snapshot id</b> instead and paste <b class="mono">long_horizon_tech_35k_scoped</b>. A snapshot can be deleted
+  (the "Artifact snapshot-… not found" error) and it still has old rows in it.</p>`;
 function injectGuideHtml({ lead = "", check, ok, cancel = "Close" }) {
   const shot = (file, text) => `<li><p>${text}</p><img src="/static/img/${file}" alt="${esc(text.replace(/<[^>]+>/g, ""))}" loading="lazy"></li>`;
   return `<div class="taxo-step inject-step" role="alertdialog" aria-labelledby="inject-title">
@@ -609,11 +609,11 @@ function showInjectGuide(opts) {
   });
 }
 const INJECT_AFTER_LEAD = {
-  missing: `<p class="taxo-warn">This /hardness review found that your Opus run was made <b>without your injection</b>,
-    so it can't score it. Make a new run in a sandbox where you ran your SQL first, upload it, and send /hardness again.</p>`,
-  stale: `<p class="taxo-warn">This /hardness review found that your Opus run was made on an <b>older version of your SQL</b>
-    than the one saved now, so it doesn't match your task. <b>Redeploy</b> the sandbox (Settings → Redeploy Environment, see the
-    blue box below), run your current SQL there, make a new Opus run, upload it, and send /hardness again.</p>`,
+  missing: `<p class="taxo-warn">This /stumping review found that your agent runs were made <b>without your injection</b>,
+    so it can't score them. Make fresh runs in a sandbox where you ran your SQL first, upload them, and send /stumping again.</p>`,
+  stale: `<p class="taxo-warn">This /stumping review found that your agent runs were made on an <b>older version of your SQL</b>
+    than the one saved now, so they don't match your task. <b>Redeploy</b> the sandbox (Settings → Redeploy Environment, see the
+    blue box below), run your current SQL there, make fresh runs, upload them, and send /stumping again.</p>`,
 };
 function showInjectGuideAfterHardness(kind = "missing") {
   if (kind === "steps") return showInjectGuide({ ok: "Got it", cancel: "Close" });
@@ -670,7 +670,7 @@ if (typeof document !== "undefined" && document.addEventListener) {
     if (b) { e.preventDefault(); showEnvGuide(); }
   });
 }
-const CHECKABLE = new Set(["injection", "prompt", "rubric", "stumping", "all-fail-validation", "reference-notes"]);
+const CHECKABLE = new Set(["injection", "prompt", "rubric", "reference-notes"]);
 const PASS_IMAGE_SIZES = [44, 56, 68];  // code font sizes, px, tried in order
 const STAGE_NAMES = {
   injection: "Injection",
@@ -730,7 +730,7 @@ async function passImage(p, codeSize) {
   // green header
   ctx.fillStyle = "#193A29"; ctx.fillRect(0, 0, W, headH);
   ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.font = `22px ${mono}`;
-  ctx.fillText("ORIGINAL CONFERENCE EVAL PORTAL", pad, 70);
+  ctx.fillText("GERANIUM MAMBO EVAL PORTAL", pad, 70);
   ctx.font = `500 46px ${sans}`;
   const badgeW = ctx.measureText(p.verdict).width + 56;
   ctx.fillStyle = p.verdict === "NON-FAIL" ? "#EDE272" : "#79C96E";

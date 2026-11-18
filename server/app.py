@@ -348,6 +348,7 @@ def chat_state(attempt_id):
         "task_id": chat["task_id"],
         "email": chat["email"],
         "admin_open": bool(chat["admin_open"]),
+        "archived_from": chat.get("archived_from"),
         "pending_review": (db.get_run(chat["pending_review_run"]) or {}).get("command") if chat.get("pending_review_run") else None,
         "paused_review": _paused_view(attempt_id, chat),
         "active_run": run_view(db.active_run(attempt_id)),
@@ -1312,8 +1313,12 @@ def proof_check_input(code: str, body: CheckInputBody, request: Request):
         raise HTTPException(413, "That's too long to check here.")
     saved = None
     if fingerprint.for_attempt(payload["attempt_id"], stage) == payload["fingerprint"]:
-        entry = workspace.read_input(payload["attempt_id"], stage, limit=200_000_000)
-        saved = "\n".join(f["text"] for f in (entry or {}).get("files", []) if f.get("text") is not None)
+        for k_slot in fingerprint._STAGE_SLOTS.get(stage, (stage,)):
+            entry = workspace.read_input(payload["attempt_id"], k_slot, limit=200_000_000)
+            files_txt = [f["text"] for f in (entry or {}).get("files", []) if f.get("text") is not None]
+            if files_txt:
+                saved = "\n".join(files_txt)
+                break
     try:
         return taxo_check.compare(stage, body.text, payload["fingerprint"], saved)
     except ValueError as error:
@@ -1325,7 +1330,7 @@ def proof_input(code: str, request: Request):
     """The exact text this pass graded, to paste into the taxonomy, while the saved input is still that version."""
     payload = proof_for_viewer(code, request)
     stage = payload["stage"]
-    if stage not in ("injection", "prompt", "reference-notes", "all-fail-validation", "stumping", "oe"):
+    if stage not in ("injection", "prompt", "rubric", "reference-notes", "all-fail-validation", "stumping", "oe"):
         raise HTTPException(404, "This pass stage does not support copying raw input.")
     from .fingerprint import _STAGE_SLOTS
     for key in _STAGE_SLOTS.get(stage, (stage,)):

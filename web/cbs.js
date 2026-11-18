@@ -56,7 +56,7 @@ function render() {
   $("#foot").innerHTML = `A row is one task × contributor at L-1, counted from the first time they opened it (claim, incomplete
     attempt, submit or portal chat). Only claims they worked on count: at least one review, or a submit (the analysis also counted
     30+ active minutes, which the portal can't see); untouched claims are shown per contributor. <b>Hours</b> = from their first
-    portal activity on the task until /injection, /prompt, /oe and /rubric had all passed. <b>$</b> = their own portal runs
+    portal activity on the task until /prompt, /rubric, /stumping and /reference-notes had all passed. <b>$</b> = their own portal runs
     (list-price estimate, as in the analysis). <b>Groups</b> on the day the task was opened: QMA (qm_auditor), trusted
     (mcp_ac_trusted that day), non-trusted; internal accounts are left out. The bars are fixed at the P1.1 analysis
     (p50 / p75 / p90 of QMA + trusted submitted tasks, Oct 13–29). A claim <b>went badly</b> = no submit, or submitted over the

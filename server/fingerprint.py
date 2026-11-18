@@ -134,7 +134,10 @@ def rubric(criteria):
         return EMPTY["rubric"]
     weights = []
     for criterion in criteria:
-        number = _jsonata_number(criterion.get("weight") if isinstance(criterion, dict) else None)
+        raw_w = criterion.get("weight") if isinstance(criterion, dict) else None
+        if raw_w is None and isinstance(criterion, dict):
+            raw_w = (criterion.get("annotations") or {}).get("weight_tier")
+        number = _jsonata_number(raw_w)
         weights.append(number if number else 1)  # missing, 0 or not a number counts as 1, as in the taxonomy
     titles = " | ".join(
         _jsonata_string(c["title"] if "title" in c else c.get("criterion", ""))

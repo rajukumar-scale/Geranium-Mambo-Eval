@@ -81,7 +81,8 @@ def _rows(criteria):
         title = fingerprint._jsonata_string(c.get("title") if "title" in c else c.get("criterion", ""))
         bare = _URL.sub("", fingerprint._LINK_TARGET.sub("", title))
         key = fingerprint._NOT_ALNUM.sub("", fingerprint._as_builder_saves(bare))
-        weight = fingerprint._jsonata_number(c.get("weight")) or 1
+        raw_w = c.get("weight") if c.get("weight") is not None else (c.get("annotations") or {}).get("weight_tier")
+        weight = fingerprint._jsonata_number(raw_w) or 1
         out.append({"title": " ".join(title.split()), "key": key, "weight": weight})
     return out
 

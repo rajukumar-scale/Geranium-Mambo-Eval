@@ -149,7 +149,8 @@ async def check_once(send):
     hits, done = [], []
     for chat, at in todo:
         r = by_pair.get((chat["task_id"], chat["user_id"]))
-        if not r or not r.get("LANDED") or abs(float(r.get("SUBMITTED_AT") or 0) - at) > 120:
+        has_cds = any(r.get(k) for k in ("PROMPT_B64", "INJECTION_B64", "RUBRIC_B64", "REFNOTES_B64", "OE_B64"))
+        if not r or not r.get("LANDED") or not has_cds or abs(float(r.get("SUBMITTED_AT") or 0) - at) > 120:
             continue  # not in the CDS view yet (or a newer submit than this check knows): next time
         # reads the saved inputs (SQL can be ~400 KB): off the event loop
         found = await asyncio.to_thread(mismatches, chat["attempt_id"], submitted_fingerprints(r))

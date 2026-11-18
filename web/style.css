@@ -170,7 +170,7 @@ button.date-chip { font-family: var(--sans); color: var(--ink); cursor: pointer;
 .slash { position: absolute; left: 0; right: 0; bottom: calc(100% - 4px); margin-bottom: 8px; background: var(--panel); border: 1px solid var(--grey-80);
   border-radius: 14px; box-shadow: 0 8px 28px var(--shadow); padding: 6px; z-index: 20; }
 .slash-item { display: flex; gap: 12px; align-items: baseline; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
-.slash-item b { min-width: 92px; font-weight: 400; }
+.slash-item b { min-width: 156px; font-weight: 400; white-space: nowrap; }
 .slash-item span { color: var(--muted); font-size: 14px; }
 .slash-item.on, .slash-item:hover { background: var(--grey-95); }
 .slash-item.on { box-shadow: inset 3px 0 0 var(--focus); }
@@ -690,7 +690,7 @@ kbd { font-family: var(--mono); font-size: 13px; padding: 1px 6px; border: 1px s
 .cbs-app .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
 .cbs-callout { font-size: 15px; margin: 4px 0 12px; }
 .funnel { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px; }
-.funnel-row { display: grid; grid-template-columns: 140px 1fr 260px; gap: 12px; align-items: center; font-size: 13px; }
+.cbs-wrap .funnel-row { display: grid; grid-template-columns: 140px 1fr 260px; gap: 12px; align-items: center; font-size: 13px; }
 .funnel-track { background: var(--grey-95); border-radius: 4px; height: 18px; }
 .funnel-bar { background: var(--g-trusted); height: 100%; border-radius: 4px; }
 .cbs-people td { vertical-align: top; }

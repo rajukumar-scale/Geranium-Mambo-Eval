@@ -691,7 +691,7 @@ function pickFunnel(step, state) {
 // "done, not submitted" debugger: what happened since each of them passed /rubric.
 const DD_ICON = { gone: "⇄", rework: "✎", blocked: "⛔", quiet: "⏸", fresh: "✓" };
 async function openDoneDebug(refresh = false) {
-  const w = openModal("Done, not submitted: why?", `<p class="muted" style="margin-top:0">Loading what happened since each of them passed /rubric…</p>`);
+  const w = openModal("Done, not submitted: why?", `<p class="muted" style="margin-top:0">Loading what happened since each of them passed /reference-notes…</p>`);
   let d;
   try { d = await api(`/api/admin/rubric-done${refresh ? "?refresh=1" : ""}`); } catch (err) { w.querySelector(".content").innerHTML = `<div class="error">${esc(err.message)}</div>`; return; }
   const h = x => (x == null ? "?" : x < 1 ? `${Math.round(x * 60)} min` : x < 48 ? `${Math.round(x)} h` : `${(x / 24).toFixed(1)} days`);
@@ -702,7 +702,7 @@ async function openDoneDebug(refresh = false) {
       : `/${esc(r.command)} ${pill(r.verdict)}${r.score != null ? ` ${esc(r.score)}` : ""}`).join(" · ") : "none";
   const body = (d.claims_error ? `<div class="error">${esc(d.claims_error)}</div>` : "") + (d.people.length ? d.people.map(p => `
     <div class="dd-card">
-      <div class="dd-head"><b>${esc(p.email || "unknown")}</b><span class="muted">passed /rubric ${h(p.hours_since_pass)} ago</span>
+      <div class="dd-head"><b>${esc(p.email || "unknown")}</b><span class="muted">passed /reference-notes ${h(p.hours_since_pass)} ago</span>
         <span class="spacer"></span><button data-open-chat="${esc(p.attempt_id)}">Open chat</button></div>
       <div class="dd-signals">${p.signals.map(s => `<span class="dd-sig ${esc(s.kind)}">${DD_ICON[s.kind] || "•"} ${esc(s.text)}</span>`).join("") || `<span class="dd-sig">No clear signal</span>`}</div>
       <div class="rc-row"><div class="k">Platform</div><div>${claim(p.claim)}</div></div>
@@ -958,7 +958,7 @@ $("#detail-head").addEventListener("click", async e => {
       Spent <b>$${Number(sp.usd || 0).toFixed(2)}</b> of a <b>$${sp.limit}</b> budget. The contributor sees your approval in the chat.</p>
       <label class="muted small" for="bud-add">Approve this much more ($)</label><input id="bud-add" type="number" min="1" max="5000" step="1" value="100">
       <label class="muted small" for="bud-note" style="display:block;margin-top:8px">Note (optional, kept with the approval)</label>
-      <input id="bud-note" type="text" maxlength="300" placeholder="e.g. last /rubric round after the OE fix">` });
+      <input id="bud-note" type="text" maxlength="300" placeholder="e.g. last /reference-notes round after the rubric fix">` });
     let add = "100", note = "";
     document.querySelector("#bud-add").addEventListener("input", ev => { add = ev.target.value; });
     document.querySelector("#bud-note").addEventListener("input", ev => { note = ev.target.value; });

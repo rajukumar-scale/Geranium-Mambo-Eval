@@ -32,7 +32,7 @@ def _chats():
 
 def message(hits):
     many = len(hits) != 1
-    lines = [f"🚨 {len(hits)} task{'s' if many else ''} submitted with outdated passes (Atlas Commercial):"]
+    lines = [f"🚨 {len(hits)} task{'s' if many else ''} submitted with outdated passes (Geranium Mambo):"]
     for h in hits:
         when = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(h["at"]))
         lines.append(f"• {h['email']} · task {h['task_id']} · portal chat {h['attempt_id']} · submitted {when}")

@@ -28,7 +28,7 @@ INJECTION_KEYS = {"injection"}
 PROMPT_KEYS = {"task-details", "prompt", "injection"}
 RUBRIC_KEYS = {"task-details", "prompt", "injection", "rubric"}
 STUMPING_KEYS = {"task-details", "prompt", "injection", "rubric", "runs-base", "grading-base", "stumping-check"}
-ALL_FAIL_KEYS = {"task-details", "prompt", "injection", "rubric", "grading-base", "runs-solv", "grading-solv",
+ALL_FAIL_KEYS = {"task-details", "prompt", "injection", "rubric", "runs-base", "grading-base", "runs-solv", "grading-solv",
                  "all-fail", "all-fail-justify"}
 NOTES_KEYS = {"task-details", "prompt", "injection", "rubric", "grading-base", "all-fail", "all-fail-justify",
               "reference-notes"}
@@ -142,6 +142,17 @@ def check(payload, now=None):
 # A card issued while a later stage is outdated carries a warning to send those again (warn_later), and
 # submit_watch.py DMs Evan when a task is submitted while any pass is still outdated.
 
+def _case_b_requires_all_fail(attempt_id):
+    """True when the latest stumping report is Case B (requiring /all-fail-validation before /reference-notes)."""
+    try:
+        for r in workspace.list_reports(attempt_id):
+            if r.get("stage") == "stumping":
+                return (r.get("fields") or {}).get("case") == "B"
+    except Exception:
+        pass
+    return False
+
+
 def gate(attempt_id, now=None):
     """{"todo": [outdated stages, in order], "stages": [{stage, status, verdict, why, changed, locked}]}.
     status: "current", "outdated" (its newest pass no longer covers the saved inputs) or "none" (no pass yet;
@@ -159,11 +170,13 @@ def gate(attempt_id, now=None):
         if stage == "injection" and (now.get("injection") is None or now.get("injection") in _NO_INJECTION_DIGESTS):
             p = None
         result = check(p, now) if p else None
-        status = "none" if not p else "outdated" if result else "current"
+        missing_case_b = (stage == "all-fail-validation" and not p and _case_b_requires_all_fail(attempt_id))
+        status = ("outdated" if missing_case_b else "none") if not p else "outdated" if result else "current"
+        why_msg = ("Case B requires /all-fail-validation (3 Opus solvability re-runs & target justifications) before submission." if missing_case_b else (result["message"] if result else None))
         stages.append({"stage": stage, "status": status, "verdict": (p or {}).get("verdict"),
-                       "why": result["message"] if result else None, "changed": result["labels"] if result else [],
+                       "why": why_msg, "changed": result["labels"] if result else (["Case B solvability"] if missing_case_b else []),
                        "locked": bool(p) and (bool(result) or bool(earlier))})
-        if result:
+        if result or missing_case_b:
             todo.append(stage)
             earlier.append(stage)
     return {"todo": todo, "stages": stages, "locked": any(s["locked"] for s in stages)}

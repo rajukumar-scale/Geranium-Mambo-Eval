@@ -514,10 +514,11 @@ function taskSetupFormHtml(cur, idPrefix = "ts") {
 
 async function submitTaskSetup(persona_email, family, constraint_count, assigned_difficulty = "", attachment_required = "") {
   const res = await api("/api/task-setup", { json: { persona_email, family, constraint_count, assigned_difficulty, attachment_required } });
-  state.me.task_setup = res.task_setup;
-  state.me.inputs = res.inputs;
+  state.me = await api("/api/me");
   renderSide();
   renderSetupCard();
+  syncProofCards();
+  if ((state.me.pass_gate?.todo || []).length) showOutdatedPopup();
   return res.task_setup;
 }
 
@@ -567,8 +568,11 @@ function renderSetupCard() {
   }
   const first = box.querySelector(".msg.system");
   if (first) first.after(card); else box.prepend(card);
+  const ro = !!(state.me.archived_from || (state.me.blocked && !state.me.admin));
   const saveBtn = card.querySelector("#welcome-ts-save");
-  if (saveBtn) saveBtn.onclick = async () => {
+  if (saveBtn && ro) saveBtn.disabled = true;
+  if (saveBtn && !ro) saveBtn.onclick = async () => {
+    if (state.run) return uiAlert("Review running", "Wait for the running review to finish before changing Task Setup.");
     const persona_email = $("#welcome-ts-persona").value;
     const family = $("#welcome-ts-family").value;
     const constraint_count = $("#welcome-ts-cc").value;
@@ -580,7 +584,8 @@ function renderSetupCard() {
     catch (err) { saveBtn.disabled = false; saveBtn.textContent = "Save Task Setup"; uiAlert("Couldn't save Task Setup", err.message); }
   };
   const editBtn = card.querySelector("[data-edit-setup]");
-  if (editBtn) editBtn.onclick = () => openTaskSetupModal();
+  if (editBtn && ro) editBtn.remove();
+  else if (editBtn) editBtn.onclick = () => state.run ? uiAlert("Review running", "Wait for the running review to finish before changing Task Setup.") : openTaskSetupModal();
 }
 
 function openTaskSetupModal(why = "") {
@@ -985,7 +990,7 @@ function guideStepsHtml() {
     <p>Anything you type without a command is answered as a follow-up, for example “why did criterion 4 fail?”.
       Ask for help with any piece of your task: the SQL to inject a message, a rubric row, better wording for one part, feedback on a
       draft, how to fix what a report raised, or ideas for scenarios, traps and edge cases. The one thing it won't do is write the
-      whole task for you in one go (a full prompt, rubric, OE set or all the SQL); build it together piece by piece instead.
+      whole task for you in one go (a full prompt, rubric, reference notes or all the SQL); build it together piece by piece instead.
       Type <b class="mono">/admin</b> and a message to reach a person.</p>
     <h4>4 · What to screenshot</h4>
     <p>When a review passes (<b>PASS</b>, or <b>NON-FAIL</b> with a complete run), a <b>pass screen</b> pops up with a verification
@@ -1153,8 +1158,8 @@ function slashMatches() {
   const m = input.value.match(/^\/([a-z-]*)$/i);  // only while typing the command word itself (supports hyphens)
   if (!m) return [];
   const q = m[1].toLowerCase();
-  const resolved = CMD_ALIASES[q] || q;
-  return SLASH.filter(([cmd]) => cmd.slice(1).startsWith(q) || (resolved !== q && cmd.slice(1).startsWith(resolved)));
+  const aliasTargets = Object.entries(CMD_ALIASES).filter(([a]) => a.startsWith(q)).map(([, t]) => t);
+  return SLASH.filter(([cmd]) => cmd.slice(1).startsWith(q) || aliasTargets.some(t => cmd.slice(1).startsWith(t)));
 }
 function renderSlash() {
   slash.items = slashMatches();
@@ -1232,7 +1237,7 @@ async function send() {
   }
   // "Normal /prompt": the command isn't at the start, so it would go as a question. Ask which they meant.
   const cmdPat = "(injection|prompt|rubric|stumping|all-fail-validation|all-fail|allfail|af|reference-notes|refnotes)";
-  const inner = !/^\//.test(text) && text.length <= 400 && text.match(new RegExp(`(?:^|\\s)\\/${cmdPat}\\b`, "i"));
+  const inner = !/^\//.test(text) && text.length <= 400 && text.match(new RegExp(`(?:^|\\s)\\/${cmdPat}(?=\\s|$)`, "i"));
   if (inner) {
     const cmd = canonicalCmd(inner[1].toLowerCase());
     const rest = (text.slice(0, inner.index) + text.slice(inner.index + inner[0].length)).replace(/\s+/g, " ").trim();
@@ -1243,7 +1248,7 @@ async function send() {
     if (!choice) return;
     if (choice === true) { text = `/${cmd}${rest ? " " + rest : ""}`; input.value = text; }
   }
-  const review = text.match(new RegExp(`^\\/${cmdPat}\\b`, "i"));
+  const review = text.match(new RegExp(`^\\/${cmdPat}(?=\\s|$)`, "i"));
   if (review) {
     const cmd = canonicalCmd(review[1].toLowerCase());
     if (cmd !== "injection" && !state.me.task_setup) {

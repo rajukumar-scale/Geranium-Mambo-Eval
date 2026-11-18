@@ -190,7 +190,7 @@ function render() {
   wireCharts();
   const q = c.queries || {};
   $("#foot").innerHTML = `<b>How it's counted.</b> UTC days from Aug 1, 2026; weekly and monthly charts add up the range's days, with the current week or month so far. <b>Task runs</b> are the platform's Agent Runner, pre-check and verifier runs on
-    the HG4 env, from LiteLLM's request log and SMIG's usage records (most calls go through SMIG since Oct 16) on every key tagged with the Atlas Commercial project (mostly <span class="mono">pub-mcp-commercial</span>);
+    the Sonorra env, from LiteLLM's request log and SMIG's usage records (most calls go through SMIG since Oct 16) on every key tagged with the Geranium Mambo project (mostly <span class="mono">pub-mcp-commercial</span>);
     a run counts for a task and contributor when its run ID is in one of their submitted attempts, or when it was launched from the task itself
     (run named after the task's pipeline node); earlier sandbox-viewer runs can't be tied to a task and only show in the daily totals. <b>In-task sandbox</b> is the old in-task chat
     (<span class="mono">${esc(b.key_alias || "")}</span>), <b>hint pipeline</b> the autohint runs. Other teams' work that carries the project tag

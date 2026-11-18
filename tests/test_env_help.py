@@ -119,5 +119,5 @@ class RedeployFromSnapshotTest(unittest.TestCase):
         js = (Path(__file__).resolve().parent.parent / "web" / "common.js").read_text()
         self.assertEqual(js.count("${REDEPLOY_BASE}"), 2)
         self.assertNotIn("keep <b>Universe this environment was deployed with</b> selected", js)
-        for base in ("hg4-synth-sep30cut", "hg4-2026-08-31"):
+        for base in ("long_horizon_tech_35k_scoped", "Sonorra v17"):
             self.assertIn(base, js)

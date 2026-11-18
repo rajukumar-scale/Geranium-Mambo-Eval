@@ -13,9 +13,8 @@ class InjectReminderTest(unittest.TestCase):
         js = (WEB / "common.js").read_text()
         stages = re.search(r'const INJECT_REMINDER_STAGES = new Set\(\[([^\]]*)\]\)', js).group(1)
         # /oe and /rubric too since 2026-11-06 (redoing a task after the rubric pass), when the task has SQL saved
-        self.assertEqual(sorted(re.findall(r'"(\w+)"', stages)), ["hardness", "oe", "prompt", "rubric"])
-        self.assertIn('show.onclick = INJECT_REMINDER_STAGES.has(p.stage) && (p.stage === "prompt" || p.stage === "hardness" '
-                      '|| hasSavedSql()) ? injectStep : card', js)
+        self.assertEqual(sorted(re.findall(r'"([\w-]+)"', stages)), ["prompt", "rubric", "stumping"])
+        self.assertIn('show.onclick = INJECT_REMINDER_STAGES.has(p.stage) && hasSavedSql() ? injectStep : card', js)
         for words in ("Universe Explorer", "Agent Runner", "Not needed in the Rubric Verifier", "_changelog", "No records found"):
             self.assertIn(words, js)
 

@@ -172,7 +172,7 @@ class CheckTest(unittest.TestCase):
         self.assertIn("showEnvAlert();", app_js)
         self.assertIn('"/api/env-check/ack"', app_js)
         self.assertIn('p.stage === "hardness" && typeof showEnvAlert === "function"', common)
-        self.assertIn('const INJECT_REMINDER_STAGES = new Set(["prompt", "hardness", "oe", "rubric"])', common)
+        self.assertIn('const INJECT_REMINDER_STAGES = new Set(["prompt", "rubric", "stumping"])', common)
         self.assertIn("answer <b>Yes</b> to “did you inject”", common)
 
     def test_only_contributors_finished_hardness(self):
