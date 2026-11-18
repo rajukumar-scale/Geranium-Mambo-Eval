@@ -37,3 +37,13 @@ Every change in `New-Eval-Portal` is recorded here by phase so future `git merge
 
 - `server/config.py`, `server/submit_match.py`, `deploy/similarity_refresh.sh`, `.env.example`: Wired verified LH Redash query IDs (`387117` login, `397698` budget, `397699` daily budget, `397700` portal SMIG cost, `397701` LH cost facts, `388752` submissions, `388856` claims, `404917` similarity refresh, `404918` submit-match with `REFNOTES_B64`).
 - `tests/test_lh_phase6.py`: Added Redash & submit-match unit tests; ensured all tests run portably on clean Ubuntu CI without external local paths.
+
+## Phase 8: Go/No-Go Remediation & 4-Task Calibration Sync
+
+- `267a429`: Fixed PNG pass-screen header rendering, Task Setup staleness sync, non-SQL `/injection` gate handling, `COPYABLE` rubric support, `annotations.weight_tier` fingerprint normalization, Case B all-fail lock, and CDS race guard.
+- `bb152e6`: Synced `server/taxo_reader_prompts.json` with latest `Taxonomy.json` vision prompts.
+- `d1bf2a9`: Wired Geranium Mambo `CB_FACTS_QUERY_ID` (`405006`) and `COST_TASK_STATES_QUERY_ID` (`405007`).
+- `d5b421c`: Added I1–I2 Deep Recheck progress marks on `/injection`.
+- `99c0539`: Wrote `- **Task ID:** <task_id>` into `00_Task_Assigned_Inputs.md` in `save_task_setup()` so `hg_similarity.py` skips self-matches on L0/retry runs.
+- `12f731e`: Updated `deploy/update_eval.sh` to carry forward and refresh `Evals/references/similarity/library.json` across `/admin` Eval File updates.
+
