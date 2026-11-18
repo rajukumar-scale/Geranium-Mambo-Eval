@@ -19,6 +19,8 @@ class LHRedashConfigTests(unittest.TestCase):
         self.assertEqual(config.BUDGET_DAILY_QUERY_ID, 397699)
         self.assertEqual(config.COST_PORTAL_SMIG_QUERY_ID, 397700)
         self.assertEqual(config.COST_FACTS_QUERY_ID, 397701)
+        self.assertEqual(config.COST_TASK_STATES_QUERY_ID, 405007)
+        self.assertEqual(config.CB_FACTS_QUERY_ID, 405006)
         self.assertEqual(config.SUBMISSIONS_QUERY_ID, 388752)
         self.assertEqual(config.CLAIMS_QUERY_ID, 388856)
         self.assertEqual(config.SUBMIT_MATCH_QUERY_ID, 404918)
