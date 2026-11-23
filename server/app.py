@@ -1018,6 +1018,58 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
     return {"files": saved}
 
 
+TRAILING_COMMAND = re.compile(r"/([A-Za-z-]+)")
+STDGRADE_ID = re.compile(r"lh-agentenv-\S+-stdgrade-\S+")
+# What a bare review command needs saved before a run is worth starting. Checked for free before RUNNER.submit.
+REQUIRED_INPUTS = {
+    "prompt": ("task-details", "prompt"),
+    "rubric": ("prompt", "rubric"),
+    "stumping": ("prompt", "rubric", "runs-base", "grading-base"),
+    "reference-notes": ("prompt", "rubric", "reference-notes"),
+}
+INPUT_HINTS = {
+    "task-details": "the task setup (Welcome page dropdowns)",
+    "prompt": "your prompt (paste it)",
+    "rubric": "your rubric JSON (paste it)",
+    "runs-base": "the 6 base-run trajectory JSONs (attach them)",
+    "grading-base": "the Rubrics grading results text from the Task Runner page (paste it)",
+    "reference-notes": "your reference notes (paste them)",
+}
+STDGRADE_HINT = ("Outlier's `lh-agentenv-...-stdgrade-...` ID goes in Outlier's Grading Reference field. The portal can't "
+                 "fetch it: here, copy and paste the full Rubrics grading results text from the Task Runner page.")
+
+
+def parse_command(text, waiting):
+    """(command, rest) for a message. A command alone on the last line of a pasted body also starts the review,
+    unless a review is waiting for an answer (then the message is that answer)."""
+    if text.startswith("/"):
+        first, _, rest = text.partition(" ")
+        if "\n" in first:
+            first, _, tail = first.partition("\n")
+            rest = tail + (" " + rest if rest else "")
+        return config.canonical_command(first[1:].lower()), rest
+    if waiting:
+        return None, text
+    body, _, last = text.rpartition("\n")
+    match = TRAILING_COMMAND.fullmatch(last.strip())
+    command = config.canonical_command(match.group(1).lower()) if match else None
+    if command in config.REVIEW_COMMANDS and body.strip():
+        return command, body.rstrip()
+    return None, text
+
+
+def missing_inputs(attempt_id, command):
+    saved = {i["key"] for i in workspace.saved_inputs(attempt_id) if i.get("state") == "saved" and i.get("files")}
+    return [key for key in REQUIRED_INPUTS.get(command, ()) if key not in saved]
+
+
+def preflight_note(command, missing):
+    lines = "\n".join(f"- {INPUT_HINTS.get(key, key)}" for key in missing)
+    note = (f"/{command} didn't start (no cost): it needs these saved first:\n{lines}\n\nSend them, then send "
+            f"/{command} again. You can also paste them in the same message as /{command}.")
+    return note + ("\n\n" + STDGRADE_HINT if "grading-base" in missing else "")
+
+
 class SendBody(BaseModel):
     text: str = ""
     files: list[str] = []
@@ -1047,13 +1099,7 @@ async def send(body: SendBody, request: Request):
     if len(text) > 400_000:
         raise HTTPException(413, "That message is too long; attach it as a file instead.")
 
-    command, rest = None, text
-    if text.startswith("/"):
-        first, _, rest = text.partition(" ")
-        if "\n" in first:
-            first, _, tail = first.partition("\n")
-            rest = tail + (" " + rest if rest else "")
-        command = config.canonical_command(first[1:].lower())
+    command, rest = parse_command(text, chat.get("pending_review_run"))
 
     if command == "help":
         user_msg = db.add_message(attempt_id, "user", text)
@@ -1109,6 +1155,14 @@ async def send(body: SendBody, request: Request):
     if limit and db.runs_today(attempt_id, kind) >= limit:  # an answer to a review's question counts as a follow-up
         raise HTTPException(429, f"You've reached today's limit of {limit} {'reviews' if kind == 'review' else 'messages'} "
                                  "for this attempt. Type /admin if you need more.")
+
+    missing = missing_inputs(attempt_id, command) if command and not rest.strip() and not files else []
+    if missing or (kind == "followup" and not files and len(text) < 200 and STDGRADE_ID.match(text)):
+        user_msg = db.add_message(attempt_id, "user", text, {"command": command} if command else None)
+        hub.publish(attempt_id, "message", user_msg)
+        msg = db.add_message(attempt_id, "system", preflight_note(command, missing) if missing else STDGRADE_HINT)
+        hub.publish(attempt_id, "message", msg)
+        return {"ok": True}
 
     # The same review on exactly the inputs its last finished review graded: not started; the page says so and can
     # send it again with force, once per identical inputs (rerun_guard). Admins' runs always start.

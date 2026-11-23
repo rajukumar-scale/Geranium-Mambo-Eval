@@ -31,6 +31,7 @@ class LhStageRegistryTest(unittest.TestCase):
             mock.patch.object(portal.plan, "maybe_kickoff", lambda *a: None),
             mock.patch.object(portal.spend, "maybe_notice", lambda *a: None),
             mock.patch.object(portal.RUNNER, "submit", lambda *a: None),
+            mock.patch.object(portal, "missing_inputs", lambda *a: []),
         ):
             p.start()
             self.addCleanup(p.stop)

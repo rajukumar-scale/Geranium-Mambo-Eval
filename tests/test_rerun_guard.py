@@ -22,7 +22,8 @@ class RerunGuardTest(unittest.TestCase):
         patches = [mock.patch.object(config, "DATA_DIR", self.tmp), mock.patch.object(db, "_conn", None),
                    mock.patch.object(rerun_guard.staleness, "snapshot", lambda a: dict(self.saved)),
                    mock.patch.object(portal.blocks, "disabled", lambda *a: None),
-                   mock.patch.object(portal.blocks, "chat_blocked", lambda *a: None)]
+                   mock.patch.object(portal.blocks, "chat_blocked", lambda *a: None),
+                   mock.patch.object(portal, "missing_inputs", lambda *a: [])]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)

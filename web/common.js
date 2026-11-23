@@ -742,7 +742,7 @@ async function passImage(p, codeSize) {
   ctx.fillText(`/${p.stage} · ${stage} review · ${p.execution_status}`, pad, y);
   ctx.font = `22px ${sans}`;
   if (p.checked_during) { y += 34; ctx.fillText(`Checked inside the /${p.checked_during} run`, pad, y); }
-  if (p.admin_override) { y += 34; ctx.fillText(`Admin override by ${p.admin_override.by}`, pad, y); }
+  if (p.admin_override) { y += 34; ctx.fillText(`Admin override by ${p.admin_override.by} (original verdict: ${p.admin_override.original_verdict || "–"})`, pad, y); }
   y = headH;
   if (staleLines.length) {
     ctx.fillStyle = "#FDECEC"; ctx.fillRect(0, y, W, staleH);
@@ -979,7 +979,7 @@ function messageHtml(m, opts = {}) {
   if (m.role === "proof") {
     const stale = (meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "") +
       ((meta.warn_later || []).length ? `<div class="later-line">⚠ Also send ${meta.warn_later.map(s => `<b class="mono">/${esc(s)}</b>`).join(", ")} again before you submit: ${meta.warn_later.length > 1 ? "those passes are" : "that pass is"} outdated.</div>` : "");
-    return `<div class="msg system"><div class="bubble proofcard${meta.outdated ? " stale" : ""}"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? " (admin override)" : ""}</b>${meta.outdated ? ` <span class="pill OUTDATED">OUTDATED</span>` : ""}
+    return `<div class="msg system"><div class="bubble proofcard${meta.outdated ? " stale" : ""}"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? ` (admin override; original verdict: ${esc(meta.admin_override.original_verdict || "–")})` : ""}</b>${meta.outdated ? ` <span class="pill OUTDATED">OUTDATED</span>` : ""}
       <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}${CHECKABLE.has(meta.stage) && meta.fingerprint ? `<button data-taxocheck="${m.id}">Check my task in Outlier</button>` : ""}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
   }
   const kickoff = meta.kickoff ? " kickoff" : "";  // the plan-your-task card (server/plan.py): solid, not a dashed note
