@@ -1004,10 +1004,10 @@ function guideStepsHtml() {
       <div class="verdict"><span class="vbadge PASS">PASS</span><span>Score 5</span></div><div class="sub">/prompt · Prompt review · COMPLETE</div></div>
       </div>
       <div class="fpband"><div class="k">🔏 Verification code · the Prompt fingerprint, as your Outlier task shows it</div>
-      <div class="fp">712 chars - hey  ... anks</div></div></div>
+      <div class="fp">712 chars - hey  ... anks check 40213</div></div></div>
     <p>The <b>🔏 verification code</b> on a pass is the character count and the first and last 4 characters of the exact input
-      that review graded, taken from the same fingerprint your Outlier task shows reviewers for that step. If what's in your Outlier task
-      is different, they won't match.</p>
+      that review graded, taken from the same fingerprint your Outlier task shows reviewers for that step, then a 5-digit check
+      worked out from the whole input. If what's in your Outlier task is different, they won't match.</p>
     <p>Closed it by accident? Reopen it from <b>Passes</b> in the sidebar, or with <b>Show pass screen</b> in the chat.
       Report cards, chat messages and FAIL results don't count as proof, only the pass screen does.</p>
     ${state.spend && state.spend.limit ? `<h4>5 · Spend limit</h4>

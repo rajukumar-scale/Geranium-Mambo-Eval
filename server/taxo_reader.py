@@ -55,10 +55,17 @@ def taxonomy_line(payload):
     return fp
 
 
+# The linters' $requireCheck: while it's false there, a read that drops the code's "check NNNNN" still passes in
+# Outlier, so it passes here too. A read with the wrong check digits never does (the linters block it).
+REQUIRE_CHECK = False
+
+
 def _norm(code):
-    """What the fingerprint linters ignore: runs of whitespace, the kind of dash, ellipsis vs three dots."""
+    """What the fingerprint linters ignore: runs of whitespace, the kind of dash, ellipsis vs three dots,
+    and the case and spacing of the trailing "check NNNNN"."""
     code = re.sub(r"[–—−]", "-", (code or "").replace("…", "..."))
     code = re.sub(r",\s*weights\s*\[[^\]]*\]", "", code)  # a reader that kept the rubric weights list
+    code = re.sub(r"\s*check\s*([0-9]{5})\s*$", r" check \1", code, flags=re.I)
     return re.sub(r"\s+", " ", code).strip()
 
 
@@ -115,11 +122,13 @@ async def read(stage, png):
 
 async def check(payload, png):
     """Read the portal's own pass image like the taxonomy would. ok = the code and the verdict read back exactly."""
-    expected = taxonomy_line(payload)
+    base = taxonomy_line(payload)
+    expected = f"{base} check {payload['fingerprint_check']}" if payload.get("fingerprint_check") else base
     reply = await read(payload["stage"], png)
     code = str(reply.get("verification_code") or "")
     verdict = str(reply.get("verdict") or "")
     # An empty input's "(empty - ...)" line is often read as "no code"; the linters skip an empty injection anyway.
-    code_ok = matches(code, expected) or (expected.startswith("(empty") and not code.strip())
+    code_ok = (matches(code, expected) or (not REQUIRE_CHECK and matches(code, base))
+               or (base.startswith("(empty") and not code.strip()))
     return {"ok": code_ok and verdict == payload.get("verdict"),
             "read": code, "expected": expected, "verdict_read": verdict, "reason": str(reply.get("reason") or "")[:300]}

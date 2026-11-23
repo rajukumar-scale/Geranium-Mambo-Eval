@@ -70,6 +70,14 @@ def create(run, chat, report, override=None, inputs=None):
     }
     if inputs is not None:
         payload["inputs"] = inputs
+    if payload["fingerprint"]:
+        # The code's "check NNNNN", only when the saved input is still the one the fingerprint was taken from.
+        from . import fingerprint
+        try:
+            same = fingerprint.for_attempt(run["attempt_id"], report["stage"]) == payload["fingerprint"]
+            payload["fingerprint_check"] = fingerprint.check_for_attempt(run["attempt_id"], report["stage"]) if same else None
+        except Exception:  # noqa: BLE001 - a pass is never refused over this note
+            payload["fingerprint_check"] = None
     if report["stage"] in ("rubric", "stumping", "all-fail-validation", "reference-notes", "oe", "hardness"):
         # The prompt this review was graded with, shown on its pass screen (2026-11-11: two tasks submitted an older
         # prompt than the one their /oe and /rubric passed with; each field's own pass still matched its own field).

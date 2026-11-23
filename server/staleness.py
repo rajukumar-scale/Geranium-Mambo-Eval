@@ -203,7 +203,7 @@ def later_outdated(payload, the_gate):
     return [s for s in the_gate["todo"] if _rank(s) > _rank(stage)]
 
 
-SECRET_FIELDS = ("code", "fingerprint", "report_sha256", "signature")
+SECRET_FIELDS = ("code", "fingerprint", "fingerprint_check", "report_sha256", "signature")
 
 
 def redact(value):

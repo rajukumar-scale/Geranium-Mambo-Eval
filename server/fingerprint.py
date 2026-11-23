@@ -149,6 +149,70 @@ def rubric(criteria):
             f" · Titles {len(letters)} letters — {shown}")
 
 
+# The code's checksum (BKL-15, 2026-11-23): the first/last 4 characters can be typed in without a run, so the pass
+# also shows "check NNNNN" over the whole compared text. JSONata has no hash and no char codes, so the linters fold
+# each UTF-16 code unit ($split(s, "") splits an emoji into two) as its place in printable ASCII, anything else 96:
+#   h = (h * 97 + v) % 99991, shown as 5 digits. Digits only: the taxonomy's screenshot reader misreads O and 0.
+CHECK_MOD = 99991
+
+
+def checksum(norm):
+    h = 0
+    raw = norm.encode("utf-16-le")
+    for i in range(0, len(raw), 2):
+        unit = raw[i] | raw[i + 1] << 8
+        h = (h * 97 + (unit - 31 if 32 <= unit <= 126 else 96)) % CHECK_MOD
+    return f"{h:05d}"
+
+
+def _rubric_check_text(criteria):
+    if isinstance(criteria, dict) and isinstance(criteria.get("criteria"), list):
+        criteria = criteria["criteria"]
+    if not isinstance(criteria, list) or not criteria:
+        return ""
+    weights = []
+    for criterion in criteria:
+        raw_w = criterion.get("weight") if isinstance(criterion, dict) else None
+        if raw_w is None and isinstance(criterion, dict):
+            raw_w = (criterion.get("annotations") or {}).get("weight_tier")
+        number = _jsonata_number(raw_w)
+        weights.append(number if number else 1)
+    titles = " | ".join(
+        _jsonata_string(c["title"] if "title" in c else c.get("criterion", ""))
+        for c in criteria if isinstance(c, dict) and ("title" in c or "criterion" in c)
+    )
+    letters = _NOT_ALNUM.sub("", _LINK_TARGET.sub("", _as_builder_saves(titles)))
+    return ",".join(_js_number(w) for w in weights) + "|" + letters
+
+
+def check_of_input(stage, content):
+    """The 5-digit checksum shown after a pass's code, or None (empty input, or a stage with no fingerprint)."""
+    if stage == "rubric":
+        try:
+            text_ = _rubric_check_text(json.loads(content)) if content else ""
+        except (TypeError, ValueError):
+            return None
+    elif stage in ("injection", "prompt", "oe", "stumping", "all-fail-validation", "reference-notes"):
+        text_ = normalize(as_taxonomy_stores(stage, content))
+    else:
+        return None
+    return checksum(text_) if text_ else None
+
+
+def check_for_attempt(attempt_id, stage):
+    """check_of_input() of the attempt's saved input for this stage, read the same way as for_attempt()."""
+    if stage not in EMPTY:
+        return None
+    from . import workspace
+
+    for key in _STAGE_SLOTS.get(stage, (stage,)):
+        entry = workspace.read_input(attempt_id, key, limit=200_000_000)
+        files = [f for f in (entry or {}).get("files", []) if f.get("text") is not None]
+        if files:
+            return check_of_input(stage, "\n".join(f["text"] for f in files))
+    return None
+
+
 def for_attempt(attempt_id, stage):
     """The fingerprint of an attempt's saved input for this stage, as it is now (call it when the review ends,
     so it's the version that was graded). Returns None for stages with no matching input (proofs falls back to EVP code)."""

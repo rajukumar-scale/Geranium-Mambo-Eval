@@ -222,6 +222,12 @@ function shortFp(fp) {
   const text = fp.match(/^(\d+) chars — (.*)$/s);
   return text ? `${text[1]} chars - ${cut(+text[1], text[2])}` : fp;
 }
+// The code the contributor copies: the fingerprint line plus "check NNNNN" over the whole text (BKL-15, 2026-11-23).
+// Passes issued before then have no fingerprint_check and keep the plain line, which the linters still accept.
+function passCode(p) {
+  const fp = shortFp(p.fingerprint);
+  return p.fingerprint_check ? `${fp} check ${p.fingerprint_check}` : fp;
+}
 // The taxonomy's reader (GPT-4o) drops the hyphens a code starts with ("5446 chars - -- 1 ..." read as
 // "5446 chars - 1 ...": its own rule folds "- --" into one separator), drops the space in "}' )" and reads O as 0.
 // Spelling the first and last characters out under the code, by name and symbol, fixed most of it: on the 21
@@ -420,8 +426,8 @@ function proofHtml(p, opts = {}) {
     </div>
     ${staleBand(p)}
     ${p.fingerprint ? `<div class="fpband"><div class="k">🔏 Verification code · the ${esc(stage)} fingerprint, as your Outlier task shows it</div>
-      <div class="fp" title="${esc(p.fingerprint)}">${esc(shortFp(p.fingerprint))}</div>
-      ${spelledCode(shortFp(p.fingerprint)).map(l => `<div class="spell">${esc(l)}</div>`).join("")}</div>` : ""}
+      <div class="fp" title="${esc(p.fingerprint)}">${esc(passCode(p))}</div>
+      ${spelledCode(shortFp(p.fingerprint)).concat(p.fingerprint_check ? [`Check digits: ${p.fingerprint_check.split("").join(" ")}`] : []).map(l => `<div class="spell">${esc(l)}</div>`).join("")}</div>` : ""}
     <div class="grid ids">
       <div><div class="k">Attempt ID</div><div class="v">${esc(p.attempt_id)}</div></div>
       <div><div class="k">Outlier ID</div><div class="v">${esc(p.user_id)}</div></div>
@@ -705,13 +711,14 @@ async function passImage(p, codeSize) {
   try { await Promise.all([document.fonts.load(codeFont), document.fonts.load('22px "Aeonik Mono"'), document.fonts.load('500 40px Aeonik')]); } catch (e) {}
   const W = 1400, pad = 56, inner = W - 2 * pad;
   const stage = STAGE_NAMES[p.stage] || p.stage;
-  const code = p.fingerprint ? shortFp(p.fingerprint) : p.code;
+  const code = p.fingerprint ? passCode(p) : p.code;
   const measure = document.createElement("canvas").getContext("2d");
   measure.font = codeFont;
   const codeLines = wrapCanvasText(measure, code, inner);
   measure.font = `24px ${sans}`;
   const staleLines = p.outdated ? wrapCanvasText(measure, p.outdated.message || "", inner) : [];
-  const spellLines = spelledCode(code).flatMap(l => wrapCanvasText(measure, l, inner));
+  const spellLines = (p.fingerprint ? spelledCode(shortFp(p.fingerprint)) : spelledCode(code))
+    .concat(p.fingerprint_check ? [`Check digits: ${p.fingerprint_check.split("").join(" ")}`] : []).flatMap(l => wrapCanvasText(measure, l, inner));
   const details = [["Attempt ID", p.attempt_id], ["Outlier ID", p.user_id], ["User", p.user_email],
     ["Completed", fmtUTC(p.finished_at)], ["Report SHA-256", p.report_sha256]].filter(d => d[1]);
   const headH = 250 + (p.checked_during ? 34 : 0) + (p.admin_override ? 34 : 0);
@@ -980,7 +987,7 @@ function messageHtml(m, opts = {}) {
     const stale = (meta.outdated ? `<div class="stale-line">⚠ Outdated: ${esc(meta.outdated.message)}</div>` : "") +
       ((meta.warn_later || []).length ? `<div class="later-line">⚠ Also send ${meta.warn_later.map(s => `<b class="mono">/${esc(s)}</b>`).join(", ")} again before you submit: ${meta.warn_later.length > 1 ? "those passes are" : "that pass is"} outdated.</div>` : "");
     return `<div class="msg system"><div class="bubble proofcard${meta.outdated ? " stale" : ""}"><div class="rcard"><div class="grow">🏆 <b>/${esc(meta.stage)} ${esc(meta.verdict)}${meta.admin_override ? ` (admin override; original verdict: ${esc(meta.admin_override.original_verdict || "–")})` : ""}</b>${meta.outdated ? ` <span class="pill OUTDATED">OUTDATED</span>` : ""}
-      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(shortFp(meta.fingerprint)) : esc(meta.code)}</span></div>${ts}${CHECKABLE.has(meta.stage) && meta.fingerprint ? `<button data-taxocheck="${m.id}">Check my task in Outlier</button>` : ""}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
+      <span class="mono fp-inline" title="${esc(meta.fingerprint || meta.code)}">${meta.fingerprint ? "🔏 " + esc(passCode(meta)) : esc(meta.code)}</span></div>${ts}${CHECKABLE.has(meta.stage) && meta.fingerprint ? `<button data-taxocheck="${m.id}">Check my task in Outlier</button>` : ""}<button class="primary" data-proof="${m.id}">Show pass screen</button></div>${stale}</div></div>`;
   }
   const kickoff = meta.kickoff ? " kickoff" : "";  // the plan-your-task card (server/plan.py): solid, not a dashed note
   const warn = m.meta && (m.meta.spend_flag || m.meta.warn) ? " warnnote" : "";
