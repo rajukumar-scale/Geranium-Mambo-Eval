@@ -179,7 +179,7 @@ CHAT_PROMPT_CACHE_TTL = _get("CHAT_PROMPT_CACHE_TTL", "1h").strip()
 MAX_CALLS_PER_RUN = _int("MAX_CALLS_PER_RUN", 0)
 # Spend limit per contributor (USD, all their attempts, all time). Shown in their top bar; reaching it flags them,
 # warns them in the chat and alerts the admins. Runs are not blocked. 0 = no limit shown.
-CB_SPEND_LIMIT_USD = float(_get("CB_SPEND_LIMIT_USD", 400))  # per attempt; past it, runs need an admin's approval (2026-11-03)
+CB_SPEND_LIMIT_USD = float(_get("CB_SPEND_LIMIT_USD", 200))  # per attempt; past it, runs need an admin's approval (2026-11-03; $200 since 2026-11-23)
 # boat.dev start limit per minute ($20 plan 12, $100 plan 30): new review boxes are requested no faster than this.
 BOAT_STARTS_PER_MIN = _int("BOAT_STARTS_PER_MIN", 12)
 # Reused review boxes (boxpool.py): a box that ended a review cleanly is wiped and reused, up to BOX_REUSE_MAX reviews

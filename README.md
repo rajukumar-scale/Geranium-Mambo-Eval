@@ -70,9 +70,10 @@ the admin page.
      chat header; disable is also in Spend → By user and in the **Blocked** list (by Outlier ID or
      email). Both can optionally stop the contributor's running reviews, and both are undone from
      the same places. Blocks never apply to admins.
-   - **Spend limit:** `CB_SPEND_LIMIT_USD` (default 500) per attempt; every new attempt starts
+   - **Spend limit:** `CB_SPEND_LIMIT_USD` (default 200) per attempt; every new attempt starts
      at $0. Admin runs don't count. It's shown under the user's top bar. Reaching it flags that
-     attempt once, posts a warning in its chat and sends a Slack alert. Runs are not blocked.
+     attempt once, posts a warning in its chat and sends a Slack alert. After that, new reviews and
+     replies need an admin to approve more budget (`/admin` still works).
 8. **Spend attribution.** When a run is created, it records who started it (Outlier ID and
    email, or the admin's email with `actor_admin=1`) and the attempt's task ID. A run an admin
    starts on someone's attempt counts under the admin, not the contributor. A task's spend adds

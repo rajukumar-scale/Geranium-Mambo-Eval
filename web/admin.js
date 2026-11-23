@@ -278,7 +278,7 @@ async function askBlock(kind, target) {
         ? "The owner can still read this chat, but can't send messages, upload files or start reviews in it. They can type /admin to reach you. Their other chats aren't affected."
         : "They're signed out of every chat and can't sign in again, with any attempt, until you re-enable them. Their chats, reports and pass codes are kept."}</p>
       <div class="field"><label for="blk-reason">Reason (they see it)</label>
-        <input id="blk-reason" maxlength="500" placeholder="${chatOnly ? "e.g. wrong task in this chat" : "e.g. over the $500 spend limit"}"></div>
+        <input id="blk-reason" maxlength="500" placeholder="${chatOnly ? "e.g. wrong task in this chat" : "e.g. over the $200 spend limit"}"></div>
       <label style="display:flex;gap:8px;align-items:center;font-size:14px"><input type="checkbox" id="blk-stop" checked style="width:auto">
         Also stop ${chatOnly ? "the review running in this chat" : "their running reviews"}</label>
       <p class="muted" style="margin-bottom:0;font-size:13px">You can undo this any time${chatOnly ? " with Unblock chat" : " from Blocked in the top bar"}.</p>`,
