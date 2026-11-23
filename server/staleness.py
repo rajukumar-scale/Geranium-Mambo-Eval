@@ -142,15 +142,16 @@ def check(payload, now=None):
 # A card issued while a later stage is outdated carries a warning to send those again (warn_later), and
 # submit_watch.py DMs Evan when a task is submitted while any pass is still outdated.
 
-def _case_b_requires_all_fail(attempt_id):
-    """True when the latest stumping report is Case B (requiring /all-fail-validation before /reference-notes)."""
+def _all_fail_required(attempt_id):
+    """True when the latest stumping report is Case B or counts rows that failed every run: /all-fail-validation
+    must pass before submission."""
     try:
-        for r in workspace.list_reports(attempt_id):
-            if r.get("stage") == "stumping":
-                return (r.get("fields") or {}).get("case") == "B"
-    except Exception:
-        pass
-    return False
+        text = workspace.read_report(attempt_id, config.REPORT_FILES["stumping"])
+        parsed = workspace._report_parser().parse_result("stumping", text) if text else {}
+    except Exception:  # noqa: BLE001 - report text is untrusted input
+        return False
+    count = str(parsed.get("all_failing_count") or "0")
+    return parsed.get("case") == "B" or (count.isdigit() and int(count) > 0)
 
 
 def gate(attempt_id, now=None):
@@ -170,11 +171,12 @@ def gate(attempt_id, now=None):
         if stage == "injection" and (now.get("injection") is None or now.get("injection") in _NO_INJECTION_DIGESTS):
             p = None
         result = check(p, now) if p else None
-        missing_case_b = (stage == "all-fail-validation" and not p and _case_b_requires_all_fail(attempt_id))
+        missing_case_b = (stage == "all-fail-validation" and not p and _all_fail_required(attempt_id))
         status = ("outdated" if missing_case_b else "none") if not p else "outdated" if result else "current"
-        why_msg = ("Case B requires /all-fail-validation (3 Opus solvability re-runs & target justifications) before submission." if missing_case_b else (result["message"] if result else None))
+        why_msg = ("Your /stumping result is Case B or has rubric rows that failed every run, so /all-fail-validation "
+                   "must pass before submission." if missing_case_b else (result["message"] if result else None))
         stages.append({"stage": stage, "status": status, "verdict": (p or {}).get("verdict"),
-                       "why": why_msg, "changed": result["labels"] if result else (["Case B solvability"] if missing_case_b else []),
+                       "why": why_msg, "changed": result["labels"] if result else (["all-failing rows"] if missing_case_b else []),
                        "locked": bool(p) and (bool(result) or bool(earlier))})
         if result or missing_case_b:
             todo.append(stage)

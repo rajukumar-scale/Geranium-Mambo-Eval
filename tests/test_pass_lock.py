@@ -76,6 +76,19 @@ class PassLockTest(unittest.TestCase):
             self.assertTrue(all(p["code"] and p["fingerprint"] for p in me["proofs"]))
         self.assertEqual([s["status"] for s in me["pass_gate"]["stages"]], ["current"] * 6)
 
+    def test_all_failing_rows_require_all_fail_validation(self):
+        for stage in ("injection", "prompt", "rubric", "stumping"):
+            self.passed(stage)
+        for fields, required in (({"case": "A", "all_failing_count": "0"}, False),
+                                 ({"case": "A", "all_failing_count": "2"}, True),
+                                 ({"case": "B"}, True)):
+            parser = mock.Mock(parse_result=lambda stage, text, f=fields: dict(f))
+            with mock.patch.object(staleness.workspace, "read_report", lambda a, name: "report"), \
+                    mock.patch.object(staleness.workspace, "_report_parser", lambda: parser):
+                gate = staleness.gate("a1")
+            status = {s["stage"]: s["status"] for s in gate["stages"]}["all-fail-validation"]
+            self.assertEqual(("all-fail-validation" in gate["todo"], status), (required, "outdated" if required else "none"))
+
     def test_a_stage_not_passed_yet_never_locks(self):
         self.passed("injection")
         self.saved["prompt"] = "p2"  # prompt edited before /prompt ever passed: nothing outdated
