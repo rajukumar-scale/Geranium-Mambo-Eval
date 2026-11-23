@@ -230,7 +230,7 @@ SMALL_MODEL = _get("SMALL_MODEL", "claude-haiku-5-5")
 
 # Central stage registry: (id, report_file, label, timeout_min, optional).
 STAGES = (
-    ("injection", "0_injection.md", "Injection", 20, True),
+    ("injection", "0_injection.md", "Injection", 30, True),
     ("prompt", "1_prompt.md", "Prompt", 150, False),
     ("rubric", "2_rubric.md", "Rubric", 150, False),
     ("stumping", "3_stumping.md", "Stumping", 180, False),
